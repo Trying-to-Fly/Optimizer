@@ -79,7 +79,7 @@ def run(
     # evaluate dCm/dCL at the trim alpha — LiftingLine's derivative is
     # alpha-dependent, so a fixed reference alpha disagrees with the NLP
     sm = aero.static_margin(
-        airplane, best["V_ms"], x_cg, airplane.c_ref, alpha0=best["alpha_deg"]
+        airplane, best["V_ms"], x_cg, airplane.c_ref, alpha0=best["alpha_deg"], bodies=bodies
     )
 
     result = RunResult(
@@ -205,16 +205,28 @@ def _solve_nlp(
     opti.subject_to(pr["thrust_n"] == drag)
     opti.subject_to(pr["J"] < 0.95 * pr["j_max"])  # stay on the fitted table
 
-    # static margin about the produced CG: dCm/dCL from two undeflected solves
+    # static margin about the produced CG: regression slope over a +/-2 deg
+    # window (LL's local Cm derivative is noisy — FINDINGS.md), plus the Munk
+    # fuselage destabilizing term converted to CL-space via the lift slope
+    offs = (-2.0, 0.0, 2.0)
     sm_runs = [
         asb.LiftingLine(
             airplane=airplane,
-            op_point=asb.OperatingPoint(velocity=V, alpha=a),
+            op_point=asb.OperatingPoint(velocity=V, alpha=alpha + o),
             xyz_ref=[x_cg, 0, 0],
         ).run()
-        for a in (alpha - 1.0, alpha + 1.0)
+        for o in offs
     ]
-    sm = -(sm_runs[1]["Cm"] - sm_runs[0]["Cm"]) / (sm_runs[1]["CL"] - sm_runs[0]["CL"])
+    cls = [r["CL"] for r in sm_runs]
+    cms = [r["Cm"] for r in sm_runs]
+    cl_mean = sum(cls) / 3
+    cm_mean = sum(cms) / 3
+    var_cl = sum((c - cl_mean) ** 2 for c in cls)
+    cov = sum((cls[i] - cl_mean) * (cms[i] - cm_mean) for i in range(3))
+    sm_surf = -cov / var_cl
+    a_deg = sum((offs[i] - 0.0) * (cls[i] - cl_mean) for i in range(3)) / sum(o**2 for o in offs)
+    cl_alpha_rad = a_deg * 180 / np.pi
+    sm = sm_surf - aero.fuselage_cm_alpha(bodies, s_ref, airplane.c_ref) / cl_alpha_rad
     opti.subject_to(sm >= mission.static_margin_range[0])
     opti.subject_to(sm <= mission.static_margin_range[1])
 
@@ -294,7 +306,7 @@ def optimize(
     # flatness: re-optimize everything else at fixed spans
     flat = []
     if flatness:
-        for s_fix in np.arange(1.5, 2.21, 0.1):
+        for s_fix in np.arange(1.5, 3.01, 0.25):
             try:
                 r = _solve_nlp(aircraft, mission, fixed={"span": float(s_fix)})
                 flat.append({"span": float(s_fix), "objective_value": r["objective_value"]})

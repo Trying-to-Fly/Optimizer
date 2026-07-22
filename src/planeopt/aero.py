@@ -94,7 +94,21 @@ def stall_speed(airplane, weight_n: float, rho=1.225, knockdown=0.90) -> dict:
     return {"v_stall_ms": v, "cl_max_2d": cl_max_2d, "cl_max_3d": cl_max_3d, "re": re}
 
 
-def static_margin(airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0) -> dict:
+def fuselage_cm_alpha(bodies: list[dict], s_ref, c_ref) -> float:
+    """Munk slender-body destabilizing moment: dCm/dalpha (per rad, about any
+    point — it is a pure moment) = 2*k*Volume / (S_ref*c_ref). Bodies without a
+    volume_m3 entry contribute nothing. k ~0.85-0.95 for high fineness."""
+    total = 0.0
+    for b in bodies:
+        vol = b.get("volume_m3")
+        if vol:
+            total += 2 * b.get("munk_factor", 0.9) * vol
+    return total / (s_ref * c_ref)
+
+
+def static_margin(
+    airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0, bodies: list[dict] | None = None
+) -> dict:
     """SM = -dCm/dCL about the CG; x_np = x_cg + SM * c_ref.
 
     Least-squares slope over an alpha window centered on alpha0 rather than a
@@ -102,13 +116,20 @@ def static_margin(airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0) -> 
     the local derivative varies strongly with alpha (see FINDINGS.md — the SM
     model's dominant fidelity issue, along with the missing fuselage moment).
     The per-alpha local slopes are returned so the nonlinearity is visible."""
-    alphas = [alpha0 + d for d in (-2.0, -1.0, 0.0, 1.0, 2.0)]
+    alphas = np.array([alpha0 + d for d in (-2.0, -1.0, 0.0, 1.0, 2.0)])
     runs = [_run_ll(airplane, V, a, 0.0, x_cg) for a in alphas]
     cls = np.array([float(r["CL"]) for r in runs])
     cms = np.array([float(r["Cm"]) for r in runs])
     A = np.vstack([cls, np.ones_like(cls)]).T
     slope, _ = np.linalg.lstsq(A, cms, rcond=None)[0]
     sm = -float(slope)
+    if bodies:
+        # fuselage destabilization, converted to CL-space via the lift slope
+        a_deg = np.linalg.lstsq(
+            np.vstack([alphas, np.ones_like(alphas)]).T, cls, rcond=None
+        )[0][0]
+        cl_alpha_rad = float(a_deg) * 180 / np.pi
+        sm -= fuselage_cm_alpha(bodies, float(airplane.s_ref), c_ref) / cl_alpha_rad
     local = [
         {"alpha": alphas[i], "sm_local": -float((cms[i + 1] - cms[i]) / (cls[i + 1] - cls[i]))}
         for i in range(len(alphas) - 1)

@@ -54,7 +54,7 @@ class VTailSample:
         and battery station. Cruise-state vars live in solve, not here."""
         i = self.DV_DEFAULTS | (inits or {})
         bounds = {
-            "span": (1.5, 2.2), "c_root": (0.16, 0.245), "taper": (0.40, 1.0),
+            "span": (1.5, 3.0), "c_root": (0.16, 0.245), "taper": (0.40, 1.0),  # span cap raised: find the interior optimum
             "tail_arm": (0.55, 0.85), "tail_scale": (0.70, 1.40),
             "spar_od_center": (0.006, 0.014), "spar_wall_center": (0.0006, 0.002),
             "spar_od_outer": (0.005, 0.012), "spar_wall_outer": (0.0005, 0.0018),
@@ -208,8 +208,10 @@ class VTailSample:
     def parasite_bodies(self) -> list[dict]:
         # pod: ~68x88 mm rounded rect x 585 mm; boom: 12 mm x ~650 mm exposed
         return [
-            {"name": "pod", "wetted_area_m2": 0.183, "length_m": 0.585, "form_factor": 1.25},
-            {"name": "boom", "wetted_area_m2": 0.0245, "length_m": 0.650, "form_factor": 1.10},
+            {"name": "pod", "wetted_area_m2": 0.183, "length_m": 0.585, "form_factor": 1.25,
+             "volume_m3": 0.00263, "munk_factor": 0.9},  # 68x88x585 mm, ~0.75 shape fill
+            {"name": "boom", "wetted_area_m2": 0.0245, "length_m": 0.650, "form_factor": 1.10,
+             "volume_m3": 7.3e-5, "munk_factor": 0.95},
         ]
 
     def powertrain(self) -> PowertrainConfig:
