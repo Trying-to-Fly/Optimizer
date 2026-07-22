@@ -23,6 +23,21 @@ report.html + inputs snapshot).
 
 ## Status
 
-**M0 (scaffold)** — configs, objective registry, run/report pipeline, CLI.
-No aero/propulsion evaluation yet; next is **M1**, the fixed-design Phase 1
-validation gate (see `docs/EXECUTION_PLAN.md` section 6).
+**M3 (full-vehicle optimization)** — milestones M0-M3 complete:
+
+- M1: fixed-design evaluation (LiftingLine trim, APC-proxy propulsion, printed-mass
+  model); validated against real-aircraft bands in `docs/VALIDATION_ANCHORS.md`
+- M2: wing NLP (span/chord/taper/cruise state) with multi-start, shadow prices,
+  span-flatness sweep
+- M3: full vehicle — pitch trim (explicit ruddervator), static-margin window,
+  gust margin, continuous spar sizing, ballast/battery-position balance,
+  tail arm + tail scale
+
+```sh
+uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
+```
+
+Next: **M4** decision engine (airfoil outer loop, re-solve battery, epsilon-constraint
+Pareto sweeps) — see `docs/EXECUTION_PLAN.md` section 6. Construction-profile and
+propulsion constants remain uncalibrated: rankings are trustworthy, absolute
+minutes are optimistic (see `docs/VALIDATION_ANCHORS.md`).

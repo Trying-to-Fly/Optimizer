@@ -111,3 +111,32 @@ def clmax_3d(airfoil, re: float, knockdown: float = 0.90) -> float:
         alpha=np.arange(0, 16.0, 0.25), Re=re, model_size="large"
     )
     return knockdown * float(np.max(aero["CL"]))
+
+
+def tripped_cd_delta(airplane, V: float, CL: float, rho=1.225, mu=1.81e-5) -> dict:
+    """Profile-drag increment if all laminar runs are lost (layer lines): NeuralFoil
+    with forced transition at 5% chord vs. natural transition, per surface at its
+    approximate operating cl and mean-chord Re, referenced to s_ref.
+    (MODEL_DETAILS section 3.2 — numeric dual evaluation, not in the NLP.)"""
+    delta = 0.0
+    detail = {}
+    for i, wing in enumerate(airplane.wings):
+        c_mean = wing.area() / wing.span()
+        re = rho * V * c_mean / mu
+        cl_local = CL if i == 0 else 0.0  # tail near zero lift at cruise
+        af = wing.xsecs[0].airfoil
+        # find alpha matching cl_local on the smooth polar, then compare cd
+        alphas = np.arange(-2, 10, 0.25)
+        smooth = af.get_aero_from_neuralfoil(alpha=alphas, Re=re, model_size="large")
+        idx = int(np.argmin(np.abs(np.array(smooth["CL"]) - cl_local)))
+        a = float(alphas[idx])
+        s_pt = af.get_aero_from_neuralfoil(alpha=a, Re=re, model_size="large")
+        t_pt = af.get_aero_from_neuralfoil(
+            alpha=a, Re=re, model_size="large", xtr_upper=0.05, xtr_lower=0.05
+        )
+        d = (float(np.ravel(t_pt["CD"])[0]) - float(np.ravel(s_pt["CD"])[0])) * (
+            wing.area() / airplane.s_ref
+        )
+        delta += d
+        detail[wing.name] = {"re": re, "alpha_used": a, "dcd": d}
+    return {"dcd_total": delta, "per_surface": detail}

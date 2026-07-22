@@ -37,7 +37,7 @@ def run(
     bodies = aircraft.parasite_bodies()
 
     airplane = aircraft.geometry(dv)
-    components, printed_breakdown = massmodel.build(aircraft, airplane)
+    components, printed_breakdown = massmodel.build(aircraft, airplane, dv)
     mass_totals = massmodel.totals(components)
     auw, x_cg = mass_totals["auw_kg"], mass_totals["x_cg_m"]
     weight_n = auw * G
@@ -56,14 +56,19 @@ def run(
             point["objective_value"] = objective.evaluator(float(V), p["P_elec_w"], mission, pt)
         sweep.append(point)
 
+    # --- stall (also provides CL_max for the gust-margin filter below) ---
+    stall = aero.stall_speed(airplane, weight_n)
+
     feasible = [s for s in sweep if "infeasible" not in s]
-    legal = [s for s in feasible if s["V_ms"] >= mission.v_min_ms - 1e-9]
+    legal = [
+        s
+        for s in feasible
+        if s["V_ms"] >= mission.v_min_ms - 1e-9
+        and s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6  # same gust margin as the NLP
+    ]
     candidates = legal if legal else feasible
     sign = 1 if objective.direction == "maximize" else -1
     best = max(candidates, key=lambda s: sign * s.get("objective_value", -np.inf))
-
-    # --- stall & stability ---
-    stall = aero.stall_speed(airplane, weight_n)
     sm = aero.static_margin(airplane, best["V_ms"], x_cg, airplane.c_ref)
 
     result = RunResult(
@@ -130,7 +135,7 @@ def run(
 
 # --------------------------------------------------------------------------- M2
 
-M2_STATUS = "M2: wing optimization (span/chord/taper/V free) + numeric re-evaluation"
+M2_STATUS = "M3: full-vehicle optimization (wing + tail + balance + spars + trim) + numeric re-evaluation"
 
 
 def _solve_nlp(
@@ -139,6 +144,8 @@ def _solve_nlp(
     inits: dict | None = None,
     fixed: dict | None = None,
     extra_mass_kg: float = 0.0,
+    printed_scale: float = 1.0,
+    eta_scale: float = 1.0,
 ) -> dict:
     """One NLP solve. Returns the champion design + state, all numeric.
 
@@ -156,20 +163,25 @@ def _solve_nlp(
     dv = aircraft.design_variables(opti, inits)
     V = opti.variable(init_guess=(inits or {}).get("V", 11.0), lower_bound=6.0, upper_bound=25.0)
     alpha = opti.variable(init_guess=4.0, lower_bound=-2.0, upper_bound=10.0)
+    defl = opti.variable(init_guess=0.0, lower_bound=-15.0, upper_bound=15.0)
     n = opti.variable(init_guess=65.0, lower_bound=20.0, upper_bound=200.0)
 
     for k, val in (fixed or {}).items():
         opti.subject_to(dv[k] == val)
 
     airplane = aircraft.geometry(dv)
-    components, _ = massmodel.build(aircraft, airplane)
-    auw = massmodel.totals(components)["auw_kg"] + extra_mass_kg
+    components, _ = massmodel.build(aircraft, airplane, dv, printed_scale=printed_scale)
+    totals = massmodel.totals(components)
+    auw = totals["auw_kg"] + extra_mass_kg
+    x_cg = totals["x_cg_m"]
     weight_n = auw * G
 
-    aero_run = __import__("aerosandbox").LiftingLine(
-        airplane=airplane,
+    # cruise point: trimmed (explicit ruddervator deflection, Cm about produced CG)
+    plane_defl = airplane.with_control_deflections({"ruddervator": defl})
+    aero_run = asb.LiftingLine(
+        airplane=plane_defl,
         op_point=asb.OperatingPoint(velocity=V, alpha=alpha),
-        xyz_ref=[0.45, 0, 0],
+        xyz_ref=[x_cg, 0, 0],
     ).run()
     q = 0.5 * 1.225 * V**2
     s_ref = airplane.s_ref
@@ -177,29 +189,53 @@ def _solve_nlp(
 
     pr = propulsion.chain(V, n, pt)
     opti.subject_to(aero_run["L"] == weight_n)
+    opti.subject_to(aero_run["Cm"] == 0)  # pitch trim
     opti.subject_to(pr["thrust_n"] == drag)
     opti.subject_to(pr["J"] < 0.95 * pr["j_max"])  # stay on the fitted table
+
+    # static margin about the produced CG: dCm/dCL from two undeflected solves
+    sm_runs = [
+        asb.LiftingLine(
+            airplane=airplane,
+            op_point=asb.OperatingPoint(velocity=V, alpha=a),
+            xyz_ref=[x_cg, 0, 0],
+        ).run()
+        for a in (alpha - 1.0, alpha + 1.0)
+    ]
+    sm = -(sm_runs[1]["Cm"] - sm_runs[0]["Cm"]) / (sm_runs[1]["CL"] - sm_runs[0]["CL"])
+    opti.subject_to(sm >= mission.static_margin_range[0])
+    opti.subject_to(sm <= mission.static_margin_range[1])
 
     # stall: wing-level CLmax constant (numeric precompute at ~stall Re)
     clmax = aero.clmax_3d(airplane.wings[0].xsecs[0].airfoil, re=1.1e5)
     if mission.v_stall_max_ms is not None:
         opti.subject_to(2 * weight_n / (1.225 * s_ref * clmax) <= mission.v_stall_max_ms**2)
+    # gust margin (MODEL_DETAILS section 4)
+    opti.subject_to(aero_run["CL"] <= 0.7 * clmax)
     if objective.wind_mode == "constraint":
         opti.subject_to(V >= mission.v_min_ms)
-    aircraft.geometry_constraints(opti, dv, V)
+    if mission.ballast_max_kg is not None and "ballast_kg" in dv:
+        opti.subject_to(dv["ballast_kg"] <= mission.ballast_max_kg)
+    aircraft.geometry_constraints(opti, dv, V, deflection_deg=defl)
+    aircraft.structure_constraints(opti, dv, weight_n)
 
-    obj_expr = objective.evaluator(V, pr["p_bus_w"], mission, pt)
+    p_bus_eff = pr["p_bus_w"] / eta_scale  # eta_scale: chain-efficiency re-solves
+    obj_expr = objective.evaluator(V, p_bus_eff, mission, pt)
     opti.minimize(-obj_expr if objective.direction == "maximize" else obj_expr)
 
-    sol = opti.solve(verbose=False, max_iter=600)
+    sol = opti.solve(verbose=False, max_iter=1000)
     return {
         "dv": {k: float(sol(v)) for k, v in dv.items()},
         "V_ms": float(sol(V)),
         "alpha_deg": float(sol(alpha)),
+        "deflection_deg": float(sol(defl)),
         "rpm": float(sol(n)) * 60,
         "objective_value": float(sol(obj_expr)),
         "auw_kg": float(sol(auw)),
-        "P_elec_w": float(sol(pr["p_bus_w"])),
+        "x_cg_m": float(sol(x_cg)),
+        "static_margin": float(sol(sm)),
+        "P_elec_w": float(sol(p_bus_eff)),
+        "drag_n": float(sol(drag)),
         "J": float(sol(pr["J"])),
         "clmax_3d_used": clmax,
     }
@@ -253,13 +289,54 @@ def optimize(
             except RuntimeError:
                 flat.append({"span": float(s_fix), "objective_value": None})
 
+    # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization
+    battery = {}
+    for label, kw in [
+        ("printed_mass_x1.10", {"printed_scale": 1.10}),
+        ("printed_mass_x0.90", {"printed_scale": 0.90}),
+        ("chain_eta_x0.90", {"eta_scale": 0.90}),
+        ("chain_eta_x1.10", {"eta_scale": 1.10}),
+    ]:
+        try:
+            r = _solve_nlp(aircraft, mission, **kw)
+            battery[label] = {
+                "objective_value": r["objective_value"],
+                "delta": r["objective_value"] - champion["objective_value"],
+                "span": r["dv"]["span"],
+                "static_margin": r["static_margin"],
+                "ballast_kg": r["dv"]["ballast_kg"],
+            }
+        except RuntimeError as e:
+            battery[label] = {"failed": str(e)[:120]}
+
     # numeric re-evaluation of the champion through the full M1 pipeline
     result, run_dir = run(
         aircraft, mission, runs_root, input_files, dv=champion["dv"]
     )
     result.status = M2_STATUS
+    # tripped-polar dual evaluation at the champion point (MODEL_DETAILS 3.2)
+    best = result.performance["best"]
+    champ_plane = aircraft.geometry(champion["dv"])
+    trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
+    q = 0.5 * 1.225 * best["V_ms"] ** 2
+    drag_tripped = best["drag_n"] + q * champ_plane.s_ref * trip["dcd_total"]
+    try:
+        pr_trip = propulsion.solve(best["V_ms"], drag_tripped, aircraft.powertrain())
+        obj_trip = OBJECTIVES[mission.objective].evaluator(
+            best["V_ms"], pr_trip["P_elec_w"], mission, aircraft.powertrain()
+        )
+    except ValueError:
+        obj_trip = None
+    tripped = {
+        "dcd_total": trip["dcd_total"],
+        "objective_tripped": obj_trip,
+        "delta": (obj_trip - best.get("objective_value")) if obj_trip else None,
+    }
+
     result.performance["optimization"] = {
         "champion": champion,
+        "resolve_battery": battery,
+        "tripped_polars": tripped,
         "multistart": [
             {"start": s, **({k: v for k, v in r.items() if k != "clmax_3d_used"})}
             for s, r in zip(starts, results)
@@ -271,8 +348,8 @@ def optimize(
         - result.performance["best"].get("objective_value", float("nan")),
     }
     result.notes.append(
-        "M2 NLP enforces L=W and thrust=drag; pitch trim and static margin "
-        "constraints join at M3 — the numeric re-evaluation above includes full trim."
+        "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar "
+        "stress/deflection sizing, ballast cap, battery-position balance."
     )
     figures.flatness_plot(flat, champion, run_dir / "figures")
     (run_dir / "run.json").write_text(
@@ -280,3 +357,64 @@ def optimize(
     )
     (run_dir / "report.html").write_text(report_html.render(result, run_dir))
     return result, run_dir
+
+
+# --------------------------------------------------------------------------- M4
+
+def pareto(aircraft, mission, values: list[float], runs_root: Path = Path("runs")) -> dict:
+    """Epsilon-constraint sweep (MODEL_DETAILS 5.3): re-optimize with a swept floor
+    on cruise speed — the natural endurance-vs-penetration trade for this class.
+    Warm-starts each solve from the previous champion."""
+    points, inits = [], None
+    for v_floor in values:
+        m2 = __import__("dataclasses").replace(
+            mission, v_wind_ms=0.0, penetration_margin_ms=float(v_floor)
+        )
+        try:
+            r = _solve_nlp(aircraft, m2, inits=inits)
+            inits = {**r["dv"], "V": r["V_ms"]}
+            points.append({"v_floor": float(v_floor), **{k: r[k] for k in
+                           ("objective_value", "V_ms", "P_elec_w", "auw_kg")},
+                           "span": r["dv"]["span"]})
+        except RuntimeError as e:
+            points.append({"v_floor": float(v_floor), "failed": str(e)[:100]})
+    return {"axis": "min cruise speed (m/s)", "points": points}
+
+
+def airfoil_study(aircraft, mission, candidates: list[str]) -> dict:
+    """Discrete outer loop (MODEL_DETAILS 6.3): full continuous solve per airfoil,
+    champions compared under smooth AND tripped polars (rejection rule 3.2):
+    a candidate whose tripped objective ranking flips is laminar-fragile."""
+    objective = OBJECTIVES[mission.objective]
+    pt = aircraft.powertrain()
+    results = {}
+    original = aircraft.wing_airfoil
+    try:
+        for name in candidates:
+            aircraft.wing_airfoil = name
+            try:
+                r = _solve_nlp(aircraft, mission)
+                plane = aircraft.geometry(r["dv"])
+                q = 0.5 * 1.225 * r["V_ms"] ** 2
+                s_ref = float(plane.s_ref)
+                cl = r["auw_kg"] * G / (q * s_ref)
+                trip = aero.tripped_cd_delta(plane, r["V_ms"], cl)
+                obj_tripped = None
+                try:
+                    pr = propulsion.solve(
+                        r["V_ms"], r["drag_n"] + q * s_ref * trip["dcd_total"], pt
+                    )
+                    obj_tripped = objective.evaluator(r["V_ms"], pr["P_elec_w"], mission, pt)
+                except ValueError:
+                    pass
+                results[name] = {
+                    "objective_smooth": r["objective_value"],
+                    "objective_tripped": obj_tripped,
+                    "dv": r["dv"], "V_ms": r["V_ms"], "auw_kg": r["auw_kg"],
+                    "tripped_dcd": trip["dcd_total"],
+                }
+            except RuntimeError as e:
+                results[name] = {"failed": str(e)[:120]}
+    finally:
+        aircraft.wing_airfoil = original
+    return results

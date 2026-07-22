@@ -82,6 +82,37 @@ def optimize(
 
 
 @app.command()
+def pareto(
+    mission: Path = typer.Argument(...),
+    aircraft: Path = typer.Option(..., "--aircraft", "-a"),
+    values: str = typer.Option("10,11,12,13,14,15", help="Comma-separated cruise-speed floors (m/s)"),
+):
+    """Epsilon-constraint sweep: objective vs. minimum cruise speed."""
+    import json
+
+    ac, _ = load_aircraft(aircraft)
+    ms, _ = load_mission(mission)
+    out = solve.pareto(ac, ms, [float(x) for x in values.split(",")])
+    typer.echo(json.dumps(out, indent=2))
+
+
+@app.command()
+def airfoils(
+    mission: Path = typer.Argument(...),
+    aircraft: Path = typer.Option(..., "--aircraft", "-a"),
+    candidates: str = typer.Option("sd7037,ag35,e205,mh32", help="Comma-separated UIUC airfoil names"),
+):
+    """Discrete outer loop: one full optimization per candidate airfoil,
+    compared under smooth and tripped polars."""
+    import json
+
+    ac, _ = load_aircraft(aircraft)
+    ms, _ = load_mission(mission)
+    out = solve.airfoil_study(ac, ms, candidates.split(","))
+    typer.echo(json.dumps(out, indent=2, default=str))
+
+
+@app.command()
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
     result = assemble.load(run_dir)

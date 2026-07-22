@@ -43,16 +43,22 @@ def printed_surface(wing, profile: ConstructionProfile) -> tuple[PointMass, dict
     return PointMass(f"printed_{wing.name}", mass, x_cg), breakdown
 
 
-def build(aircraft, airplane) -> tuple[list[PointMass], dict]:
-    """Full component list + printed-term breakdowns for the report."""
-    components = list(aircraft.fixed_equipment())
-    components += aircraft.structure_extras()
+def build(
+    aircraft, airplane, dv=None, printed_scale: float = 1.0
+) -> tuple[list[PointMass], dict]:
+    """Full component list + printed-term breakdowns for the report.
+
+    printed_scale multiplies printed-surface masses only — the knob for the
+    +/-10% structure-mass re-solves (MODEL_DETAILS 1.5)."""
+    components = list(aircraft.fixed_equipment(dv))
+    components += aircraft.structure_extras(dv)
 
     breakdowns = {}
     profiles = aircraft.construction()
     for wing in airplane.wings:
         if wing.name in profiles:
             pm, bd = printed_surface(wing, profiles[wing.name])
+            pm.mass_kg = pm.mass_kg * printed_scale
             components.append(pm)
             breakdowns[wing.name] = bd
     return components, breakdowns
