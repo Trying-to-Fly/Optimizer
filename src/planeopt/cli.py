@@ -63,7 +63,7 @@ def run(
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
     result = assemble.load(run_dir)
-    (run_dir / "report.html").write_text(html.render(result))
+    (run_dir / "report.html").write_text(html.render(result, run_dir))
     typer.echo(run_dir / "report.html")
 
 

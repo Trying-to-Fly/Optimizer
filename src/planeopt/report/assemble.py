@@ -14,7 +14,6 @@ import shutil
 from pathlib import Path
 
 from ..types import RunResult
-from . import html
 
 
 def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -> Path:
@@ -26,7 +25,6 @@ def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -
     (run_dir / "run.json").write_text(
         json.dumps(dataclasses.asdict(result), indent=2, default=str)
     )
-    (run_dir / "report.html").write_text(html.render(result))
 
     inputs_dir = run_dir / "inputs"
     inputs_dir.mkdir()

@@ -6,27 +6,77 @@
 <title>planeopt — {{ r.mission }} / {{ r.aircraft }}</title>
 <style>
   :root { color-scheme: light dark; }
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 62rem; padding: 0 1rem; }
   h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
   table { border-collapse: collapse; margin: .5rem 0; }
   td, th { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: .3rem .7rem; text-align: left; }
   .status { padding: .6rem 1rem; border-radius: .5rem; background: color-mix(in srgb, orange 18%, transparent); }
   .meta { opacity: .7; font-size: .85rem; }
-  code { font-size: .9em; }
+  .ok { color: #2c8a2c; font-weight: 600; } .bad { color: #c33; font-weight: 600; }
+  img { max-width: 100%; }
+  .grid { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 </style>
 </head>
 <body>
 <h1>planeopt run — {{ r.mission }} / {{ r.aircraft }}</h1>
-<p class="meta">objective: <b>{{ r.objective }}</b> ({{ r.diagnostics.get("objective_units","") }},
+<p class="meta">objective: <b>{{ r.objective }}</b>
+({{ r.performance.get("objective_units", r.diagnostics.get("objective_units","")) }},
 wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</p>
 <p class="status">{{ r.status }}</p>
 
+{% if r.performance.get("best") %}
+{% set best = r.performance["best"] %}
+<h2>Best operating point</h2>
+<table>
+<tr><th>{{ r.objective }}</th><td><b>{{ "%.1f"|format(best.get("objective_value", 0)) }} {{ r.performance.get("objective_units","") }}</b></td></tr>
+<tr><th>V</th><td>{{ "%.1f"|format(best["V_ms"]) }} m/s</td></tr>
+<tr><th>P_elec</th><td>{{ "%.1f"|format(best["P_elec_w"]) }} W ({{ "%.1f"|format(r.performance["watts_per_kg"]) }} W/kg)</td></tr>
+<tr><th>L/D (trimmed)</th><td>{{ "%.1f"|format(best["L_over_D"]) }}</td></tr>
+<tr><th>CL</th><td>{{ "%.2f"|format(best["CL"]) }}</td></tr>
+<tr><th>alpha / ruddervator</th><td>{{ "%.1f"|format(best["alpha_deg"]) }}° / {{ "%.1f"|format(best["deflection_deg"]) }}°</td></tr>
+<tr><th>prop J vs peak-η J</th><td>{{ "%.2f"|format(best["J"]) }} / {{ "%.2f"|format(best["J_peak_eta"]) }}</td></tr>
+<tr><th>η prop / motor / chain</th><td>{{ "%.2f"|format(best["eta_prop"]) }} / {{ "%.2f"|format(best["eta_motor"]) }} / {{ "%.2f"|format(best["eta_chain"]) }}</td></tr>
+<tr><th>Wh/km (airspeed)</th><td>{{ "%.2f"|format(r.performance["wh_per_km_airspeed"]) }}</td></tr>
+</table>
+{% endif %}
+
+{% for fig in figures %}
+<img src="data:image/png;base64,{{ fig.b64 }}" alt="{{ fig.name }}">
+{% endfor %}
+
+<h2>Constraints</h2>
+<table>
+{% for k, v in r.constraints.items() %}
+<tr><th>{{ k }}</th>
+<td>{% if v is sameas true %}<span class="ok">pass</span>{% elif v is sameas false %}<span class="bad">FAIL</span>{% elif v is number %}{{ "%.3f"|format(v) }}{% else %}{{ v }}{% endif %}</td></tr>
+{% endfor %}
+</table>
+
 <h2>Geometry</h2>
 <table>
-{% for k, v in r.geometry.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}
+{% for k, v in r.geometry.items() %}<tr><th>{{ k }}</th><td>{% if v is number %}{{ "%.3f"|format(v) }}{% else %}{{ v }}{% endif %}</td></tr>{% endfor %}
 </table>
 
 <h2>Masses</h2>
+{% if r.masses.get("auw_kg") %}
+<p><b>AUW {{ "%.0f"|format(r.masses["auw_kg"]*1000) }} g</b> · CG at {{ "%.1f"|format(r.masses["x_cg_m"]*1000) }} mm ·
+wing loading {{ "%.1f"|format(r.masses["wing_loading_g_dm2"]) }} g/dm²</p>
+{% endif %}
+<div class="grid">
+{% if r.masses.get("components") %}
+<table>
+<tr><th>component</th><th>g</th></tr>
+{% for k, v in r.masses["components"].items() %}<tr><td>{{ k }}</td><td>{{ "%.0f"|format(v*1000) }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+{% for surf, bd in (r.masses.get("printed_breakdown") or {}).items() %}
+<table>
+<tr><th colspan="2">{{ surf }} terms{% if not bd.get("calibrated") %} <span class="bad">(uncalibrated)</span>{% endif %}</th></tr>
+{% for k, v in bd.items() if k not in ("profile", "calibrated") %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+</table>
+{% endfor %}
+</div>
+
 {% if r.masses.get("fixed_totals") %}
 <table>
 {% for k, v in r.masses["fixed_totals"].items() %}<tr><th>{{ k }}</th><td>{{ "%.4f"|format(v) }}</td></tr>{% endfor %}
@@ -38,16 +88,6 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 {% for k, v in r.masses["fixed_equipment"].items() %}<tr><td>{{ k }}</td><td>{{ "%.3f"|format(v) }}</td></tr>{% endfor %}
 </table>
 {% endif %}
-
-<h2>Performance</h2>
-<table>
-{% for k, v in r.performance.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}
-</table>
-
-<h2>Mission constraints</h2>
-<table>
-{% for k, v in r.constraints.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}
-</table>
 
 {% if r.notes %}
 <h2>Notes</h2>

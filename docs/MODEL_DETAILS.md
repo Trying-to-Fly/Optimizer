@@ -347,8 +347,16 @@ Every champion gets the same battery, assembling the diagnostics from all module
 
 ### 6.5 Phase 1 validation gate
 
-Before any optimization: run the fixed sample aircraft through all models and compare
-against the spec's trusted numbers (stall ~8.3 m/s, cruise 80–110 W at 12–14 m/s,
-endurance 30–40 min). Triage discrepancies in order of calibratability: mass (slicer
+Before any optimization: run the fixed sample aircraft through all models and check
+plausibility. Important: the sample spec's performance figures (stall ~8.3 m/s,
+cruise 80–110 W, endurance 30–40 min) are **rough estimates, not ground truth** —
+agreement with them proves nothing. The gate's hard anchors are **published data from
+real comparable aircraft** (1.5–2.2 m electric endurance types with logged cruise
+power, printed-structure weights from published 3D-printed designs — collected in
+`VALIDATION_ANCHORS.md`), forming plausibility bands for W/kg at cruise, Wh/km,
+wing-loading-vs-stall-speed, and printed g/m² of wing area. The spec numbers serve
+only as weak priors; a large model-vs-spec discrepancy triggers investigation, not
+automatic model correction. Triage remains in order of calibratability: mass (slicer
 data) → aero (XFOIL spot-check) → propulsion (uncalibratable; adjust posture, not
-the model). Optimization results are not trusted until this gate passes.
+the model). Optimization results are not trusted until the model sits inside the
+real-aircraft bands.

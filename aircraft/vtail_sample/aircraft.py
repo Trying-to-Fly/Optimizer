@@ -24,7 +24,7 @@ from planeopt.types import (
     PropConfig,
 )
 
-from lwpla_a1 import LWPLA_A1  # construction profile, same directory
+from lwpla_a1 import LWPLA_A1, LWPLA_A1_TAIL  # construction profiles, same directory
 
 # --- spec numbers (DESIGN_SPEC.md) ---
 WING_X_LE = 0.390  # wing root LE station
@@ -57,11 +57,21 @@ class VTailSample:
         # V-tail: root LE placed so tail AC sits ~TAIL_ARM behind wing AC.
         # Wing AC ~ 25% MAC (MAC LE aligns with root LE); tail MAC ~0.131 m.
         tail_x_le = WING_X_LE + 0.25 * 0.201 + TAIL_ARM - 0.25 * 0.131
+        # ruddervator: 40 mm constant chord -> hinge at ~73% of root chord
+        ruddervator = asb.ControlSurface(
+            name="ruddervator", symmetric=True, deflection=0, hinge_point=0.73
+        )
         vtail = asb.Wing(
             name="vtail",
             symmetric=True,
             xsecs=[
-                asb.WingXSec(xyz_le=[0, 0, 0], chord=0.150, twist=0, airfoil=naca0009),
+                asb.WingXSec(
+                    xyz_le=[0, 0, 0],
+                    chord=0.150,
+                    twist=0,
+                    airfoil=naca0009,
+                    control_surfaces=[ruddervator],
+                ),
                 asb.WingXSec(
                     xyz_le=[
                         0.040,  # 7.1 deg LE sweep over 320 mm panel
@@ -96,6 +106,22 @@ class VTailSample:
             PointMass("hardware_misc", 0.050, 0.450),
         ]
 
+    def structure_extras(self) -> list[PointMass]:
+        # Fixed at M1; spar entries become sized variables at M3 (MODEL_DETAILS 1.3).
+        return [
+            PointMass("wing_spars_joiners", 0.100, 0.456),  # 10x8 + 2x 8x6 CF + joiners, at 30% chord
+            PointMass("boom", 0.042, 0.960),  # 12x10 CF, 750 mm, mid-boom
+            PointMass("pod", 0.250, 0.300),  # printed pod incl. hatch (frozen geometry)
+            PointMass("nose_ballast", 0.070, 0.015),  # spec balance solution; variable at M3
+        ]
+
+    def parasite_bodies(self) -> list[dict]:
+        # pod: ~68x88 mm rounded rect x 585 mm; boom: 12 mm x ~650 mm exposed
+        return [
+            {"name": "pod", "wetted_area_m2": 0.183, "length_m": 0.585, "form_factor": 1.25},
+            {"name": "boom", "wetted_area_m2": 0.0245, "length_m": 0.650, "form_factor": 1.10},
+        ]
+
     def powertrain(self) -> PowertrainConfig:
         return PowertrainConfig(
             motor=MotorConfig(
@@ -110,7 +136,7 @@ class VTailSample:
                 name="aeronaut_cam_11x6_folding",
                 diameter_m=0.2794,
                 pitch_m=0.1524,
-                proxy_table="apc_11x55e",  # blend toward 11x7e handled at ingest
+                proxy_table="apc_11x6_blend",  # pitch-blended 11x5.5E/11x7E (tools/ingest_props.py)
                 folding_derate=0.95,
             ),
             battery=BatteryConfig(capacity_ah=4.0, v_nominal=14.8, usable_fraction=0.80),
@@ -120,7 +146,7 @@ class VTailSample:
         )
 
     def construction(self) -> dict[str, ConstructionProfile]:
-        return {"wing": LWPLA_A1, "vtail": LWPLA_A1}
+        return {"wing": LWPLA_A1, "vtail": LWPLA_A1_TAIL}
 
 
 AIRCRAFT = VTailSample()

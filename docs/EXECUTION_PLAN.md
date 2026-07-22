@@ -114,7 +114,7 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
 | Milestone | Delivers | Gate |
 |---|---|---|
 | **M0 — scaffold** | uv project, git init, types, sample aircraft/mission modules import cleanly, empty-report pipeline runs end-to-end | `planeopt run` produces a (trivial) run dir |
-| **M1 — Phase 1 gate** | Fixed-design evaluation: geometry → mass/CG → aero (trimmed) → propulsion, full champion report, **no optimizer** | Sample plane vs. spec numbers (stall ~8.3 m/s, 80–110 W cruise, 30–40 min) within triaged tolerances — MODEL_DETAILS §6.5 |
+| **M1 — Phase 1 gate** | Fixed-design evaluation: geometry → mass/CG → aero (trimmed) → propulsion, full champion report, **no optimizer** | Sample plane lands inside plausibility bands built from real comparable aircraft (`VALIDATION_ANCHORS.md`); spec figures are weak priors only — MODEL_DETAILS §6.5 |
 | **M2 — wing opt** | Endurance-mission NLP: span/chord/taper/speed free, mass closure, stall + min-speed + Re + manufacturing constraints, multi-start | Converges from perturbed starts to the same champion; shadow prices reported |
 | **M3 — full vehicle** | Tail sizing, CG/ballast/battery-position, static margin, explicit-deflection trim, continuous spar sizing + structure constraints | Full §4 constraint set active-set report is sane |
 | **M4 — decision engine** | Discrete airfoil outer loop, re-solve battery (mass ±10%, η ±10%, tripped polars), flatness sweep, ε-constraint Pareto sweeps, weighted-sum quick look | Complete champion report per MODEL_DETAILS §6.4 |

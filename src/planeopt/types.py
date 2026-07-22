@@ -127,9 +127,19 @@ class AircraftDefinition(Protocol):
 
     def fixed_equipment(self) -> list[PointMass]: ...
 
+    def structure_extras(self) -> list[PointMass]:
+        """Non-surface structure: spars, boom, pod, ballast. Fixed values at M1;
+        spar/ballast entries become design-variable-driven at M2/M3."""
+        ...
+
     def powertrain(self) -> PowertrainConfig: ...
 
     def construction(self) -> dict[str, ConstructionProfile]: ...
+
+    def parasite_bodies(self) -> list[dict]:
+        """Non-lifting bodies for the drag buildup (MODEL_DETAILS.md section 3.1):
+        [{name, wetted_area_m2, length_m, form_factor}]."""
+        ...
 
 
 @dataclass
