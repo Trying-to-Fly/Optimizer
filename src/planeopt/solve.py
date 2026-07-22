@@ -64,17 +64,23 @@ def run(
     # advance-ratio cap (beyond 95% of the fitted table the CT->0 tail of the
     # polynomial fit is not trustworthy)
     j_cap = 0.95 * propulsion.PropTable(pt.prop.proxy_table).j_max
+    defl_cap = getattr(aircraft, "trim_deflection_limit_deg", None)
     legal = [
         s
         for s in feasible
         if s["V_ms"] >= mission.v_min_ms - 1e-9
         and s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6
         and s["J"] <= j_cap + 1e-6
+        and (defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3)
     ]
     candidates = legal if legal else feasible
     sign = 1 if objective.direction == "maximize" else -1
     best = max(candidates, key=lambda s: sign * s.get("objective_value", -np.inf))
-    sm = aero.static_margin(airplane, best["V_ms"], x_cg, airplane.c_ref)
+    # evaluate dCm/dCL at the trim alpha — LiftingLine's derivative is
+    # alpha-dependent, so a fixed reference alpha disagrees with the NLP
+    sm = aero.static_margin(
+        airplane, best["V_ms"], x_cg, airplane.c_ref, alpha0=best["alpha_deg"]
+    )
 
     result = RunResult(
         aircraft=aircraft.name,
@@ -120,6 +126,7 @@ def run(
             "wind_mode": objective.wind_mode,
             "stall_detail": stall,
             "neutral_point_m": sm["x_np_m"],
+            "sm_local_slopes": sm.get("sm_local_slopes"),
             "J_vs_peak": {"J_cruise": best["J"], "J_peak_eta": best["J_peak_eta"]},
             "uncalibrated_construction": [
                 k for k, v in printed_breakdown.items() if not v["calibrated"]

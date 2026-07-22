@@ -95,13 +95,25 @@ def stall_speed(airplane, weight_n: float, rho=1.225, knockdown=0.90) -> dict:
 
 
 def static_margin(airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0) -> dict:
-    """SM = -dCm/dCL about the CG; x_np = x_cg + SM * c_ref."""
-    da = 1.0
-    r1 = _run_ll(airplane, V, alpha0 - da, 0.0, x_cg)
-    r2 = _run_ll(airplane, V, alpha0 + da, 0.0, x_cg)
-    dcm_dcl = (float(r2["Cm"]) - float(r1["Cm"])) / (float(r2["CL"]) - float(r1["CL"]))
-    sm = -dcm_dcl
-    return {"static_margin": sm, "x_np_m": x_cg + sm * c_ref}
+    """SM = -dCm/dCL about the CG; x_np = x_cg + SM * c_ref.
+
+    Least-squares slope over an alpha window centered on alpha0 rather than a
+    +/-1 deg finite difference: LiftingLine's Cm(alpha) is nonlinear enough that
+    the local derivative varies strongly with alpha (see FINDINGS.md — the SM
+    model's dominant fidelity issue, along with the missing fuselage moment).
+    The per-alpha local slopes are returned so the nonlinearity is visible."""
+    alphas = [alpha0 + d for d in (-2.0, -1.0, 0.0, 1.0, 2.0)]
+    runs = [_run_ll(airplane, V, a, 0.0, x_cg) for a in alphas]
+    cls = np.array([float(r["CL"]) for r in runs])
+    cms = np.array([float(r["Cm"]) for r in runs])
+    A = np.vstack([cls, np.ones_like(cls)]).T
+    slope, _ = np.linalg.lstsq(A, cms, rcond=None)[0]
+    sm = -float(slope)
+    local = [
+        {"alpha": alphas[i], "sm_local": -float((cms[i + 1] - cms[i]) / (cls[i + 1] - cls[i]))}
+        for i in range(len(alphas) - 1)
+    ]
+    return {"static_margin": sm, "x_np_m": x_cg + sm * c_ref, "sm_local_slopes": local}
 
 
 def clmax_3d(airfoil, re: float, knockdown: float = 0.90) -> float:

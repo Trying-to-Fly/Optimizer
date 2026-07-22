@@ -49,9 +49,21 @@ regularly sees >6–7 m/s wind, that's the trade to argue about.
 - Cruise power sits at the **optimistic edge** of the real-aircraft bands
   (14 W/kg vs. measured 34 W/kg for a draggier Mini Talon; sailplane floor
   10–17 W/kg) — smooth polars, no prop-in-wake losses, vendor motor constants.
-- Static margin numbers have **no fuselage/boom destabilizing moment**
-  (LiftingLine is lifting-surfaces-only) — modeled NP is biased aft, so the
-  "true" SM at these CGs is lower than reported. Correction is an open M-item.
+- **The static-margin model is the weakest link in the loop right now**, twice
+  over: (a) no fuselage/boom destabilizing moment (LiftingLine is
+  lifting-surfaces-only), biasing the neutral point aft; (b) LiftingLine's
+  dCm/dCL is strongly alpha-dependent for this configuration — at the M3
+  champion, the local SM reads ~0.080 at cruise alpha ~4 deg but collapses
+  toward ~0.01 by alpha ~6 deg (regression over the window: ~0.04). Because the
+  SM-window constraint evaluated at cruise alpha is what pushes cruise speed to
+  10.9 m/s and shrinks the tail to its floor, **the tail sizing and cruise-speed
+  results inherit this fragility** — treat them as provisional until the SM
+  model gets a fuselage-moment correction and a more robust NP estimate
+  (options: slender-body/Munk fuselage term + Cm-alpha regression in the NLP,
+  a VLM/AVL derivative cross-check, or deferring SM to flow5 validation).
+  This is also the source of the reported NLP-vs-re-evaluation objective gap
+  (~8 min): the numeric re-evaluation finds slower operating points the NLP's
+  alpha-local SM constraint rejects.
 - Tripped Δ(objective) ≈ −9 to −11 min across candidates: the design survives
   losing its laminar runs, but calibrating print-surface reality matters.
 - Chain efficiency ~0.39–0.45 at cruise: the 900 kV motor is far from its happy

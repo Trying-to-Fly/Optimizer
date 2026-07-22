@@ -34,6 +34,7 @@ TAIL_ARM = 0.700  # wing AC -> tail AC
 class VTailSample:
     name = "vtail_sample_v1.2"
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
+    trim_deflection_limit_deg = 5.5  # <= 1/3 of the +/-12 mm low-rate throw
 
     DV_DEFAULTS = {
         # wing (M2)
@@ -73,9 +74,8 @@ class VTailSample:
         # outer panel must exist
         opti.subject_to(dv["span"] >= 0.75 + 0.1)
         if deflection_deg is not None:
-            # trim uses <= 1/3 of the +/-12 mm low-rate throw (~16.7 deg full)
-            opti.subject_to(deflection_deg <= 5.5)
-            opti.subject_to(deflection_deg >= -5.5)
+            opti.subject_to(deflection_deg <= self.trim_deflection_limit_deg)
+            opti.subject_to(deflection_deg >= -self.trim_deflection_limit_deg)
 
     def structure_constraints(self, opti, dv, weight_n) -> None:
         """Spar sizing constraints at n = 5 g limit load (MODEL_DETAILS 1.3)."""
