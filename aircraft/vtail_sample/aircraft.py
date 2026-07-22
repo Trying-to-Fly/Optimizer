@@ -34,20 +34,48 @@ TAIL_ARM = 0.700  # wing AC -> tail AC
 class VTailSample:
     name = "vtail_sample_v1.2"
 
+    def design_variables(self, opti, inits: dict | None = None) -> dict:
+        """M2 wing-optimization variables. Architecture mapping: the 700 mm
+        constant-chord center section is fixed (spar + print sections); span and
+        taper act on the outer panels; cruise state vars live in solve, not here."""
+        i = {"span": 1.8, "c_root": 0.22, "taper": 0.68} | (inits or {})
+        return {
+            "span": opti.variable(init_guess=i["span"], lower_bound=1.5, upper_bound=2.2),
+            "c_root": opti.variable(init_guess=i["c_root"], lower_bound=0.16, upper_bound=0.245),
+            "taper": opti.variable(init_guess=i["taper"], lower_bound=0.40, upper_bound=1.0),
+        }
+
+    def geometry_constraints(self, opti, dv, V) -> None:
+        """Aircraft-specific manufacturing/geometry constraints (symbolic-safe)."""
+        c_tip = dv["c_root"] * dv["taper"]
+        # tip Reynolds floor (project rule; MODEL_DETAILS section 4)
+        opti.subject_to(1.225 * V * c_tip / 1.81e-5 >= 90e3)
+        # A1 print bed: chord already bounded by c_root upper bound (245 mm)
+        # outer panel must exist
+        opti.subject_to(dv["span"] >= 0.75 + 0.1)
+
     def geometry(self, dv=None) -> asb.Airplane:
+        """dv=None -> the fixed v1.2 spec design; else the parametric architecture
+        (works with floats or Opti symbolics — no branching on dv *values*)."""
         sd7037 = asb.Airfoil("sd7037")
         naca0009 = asb.Airfoil("naca0009")
+
+        if dv is None:
+            dv = {"span": 1.8, "c_root": 0.22, "taper": 150 / 220}
+        span, c_root, taper = dv["span"], dv["c_root"], dv["taper"]
+        semi_center = 0.350  # center section half-width (fixed: spar + print sections)
+        outer = span / 2 - semi_center
 
         wing = asb.Wing(
             name="wing",
             symmetric=True,
             xsecs=[
                 # straight LE: all taper from the trailing edge
-                asb.WingXSec(xyz_le=[0, 0.000, 0], chord=0.220, twist=0, airfoil=sd7037),
-                asb.WingXSec(xyz_le=[0, 0.350, 0], chord=0.220, twist=0, airfoil=sd7037),
+                asb.WingXSec(xyz_le=[0, 0.000, 0], chord=c_root, twist=0, airfoil=sd7037),
+                asb.WingXSec(xyz_le=[0, semi_center, 0], chord=c_root, twist=0, airfoil=sd7037),
                 asb.WingXSec(
-                    xyz_le=[0, 0.900, 0.550 * np.sind(3)],  # 3 deg outer-panel dihedral
-                    chord=0.150,
+                    xyz_le=[0, span / 2, outer * np.sind(3)],  # 3 deg outer-panel dihedral
+                    chord=c_root * taper,
                     twist=-2,  # washout, linear across outer panel
                     airfoil=sd7037,
                 ),
@@ -89,7 +117,7 @@ class VTailSample:
             name=self.name,
             wings=[wing, vtail],
             s_ref=wing.area(),
-            c_ref=0.201,
+            c_ref=wing.area() / wing.span(),  # mean chord (symbolic-safe MAC proxy)
             b_ref=wing.span(),
         )
 

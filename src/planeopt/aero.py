@@ -102,3 +102,12 @@ def static_margin(airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0) -> 
     dcm_dcl = (float(r2["Cm"]) - float(r1["Cm"])) / (float(r2["CL"]) - float(r1["CL"]))
     sm = -dcm_dcl
     return {"static_margin": sm, "x_np_m": x_cg + sm * c_ref}
+
+
+def clmax_3d(airfoil, re: float, knockdown: float = 0.90) -> float:
+    """Numeric wing-level CL_max used as a constant in the M2 NLP (weak Re
+    dependence; the critical-section method replaces this at M3)."""
+    aero = airfoil.get_aero_from_neuralfoil(
+        alpha=np.arange(0, 16.0, 0.25), Re=re, model_size="large"
+    )
+    return knockdown * float(np.max(aero["CL"]))

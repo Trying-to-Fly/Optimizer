@@ -28,7 +28,9 @@ def printed_surface(wing, profile: ConstructionProfile) -> tuple[PointMass, dict
     joints = profile.k_joint_kg * b / profile.section_length_m  # continuous, not ceil'd
     mass = profile.finish_factor * (skin + ribs + joints + profile.overhead_kg)
 
-    x_cg = wing.aerodynamic_center()[0] + 0.20 * c_mean  # ~45% mean chord
+    # ~45% mean chord behind the root LE (arithmetic, symbolic-safe — the AC
+    # helper is numeric-only); fine at station-level fidelity for unswept LEs
+    x_cg = wing.xsecs[0].xyz_le[0] + 0.45 * c_mean
     breakdown = {
         "skin_kg": skin,
         "ribs_kg": ribs,

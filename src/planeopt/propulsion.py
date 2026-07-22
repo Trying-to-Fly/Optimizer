@@ -99,3 +99,38 @@ def solve(V: float, thrust_req: float, pt: PowertrainConfig, rho: float = 1.225)
         "eta_motor": float(p_shaft / p_motor_in) if p_motor_in > 0 else 0.0,
         "eta_chain": float(thrust_req * V / p_bus) if p_bus > 0 else 0.0,
     }
+
+
+def _horner(coeffs, x):
+    """polyval that stays symbolic-safe (works on floats and CasADi MX)."""
+    y = 0.0
+    for c in coeffs:
+        y = y * x + float(c)
+    return y
+
+
+def chain(V, n, pt: PowertrainConfig, rho: float = 1.225) -> dict:
+    """Symbolic-safe propulsion chain for the optimizer (MODEL_DETAILS section 6.1).
+
+    V: airspeed, n: prop speed in rev/s — both may be Opti variables. The caller
+    adds the thrust-match equality (thrust == drag). Same physics as solve().
+    """
+    prop = PropTable(pt.prop.proxy_table)
+    D = pt.prop.diameter_m
+    J = V / (n * D)
+    ct = _horner(prop.ct_coeffs, J)
+    cp = _horner(prop.cp_coeffs, J)
+    thrust = ct * rho * n**2 * D**4
+    p_shaft = cp * rho * n**3 * D**5 / pt.prop.folding_derate
+    torque = p_shaft / (2 * np.pi * n)
+
+    motor = pe.motor_electric_performance(
+        rpm=n * 60.0,
+        torque=torque,
+        kv=pt.motor.kv_rpm_per_volt,
+        resistance=pt.motor.resistance_ohm,
+        no_load_current=pt.motor.no_load_current_a,
+    )
+    p_bus = motor["voltage"] * motor["current"] / pt.esc_efficiency
+    return {"J": J, "j_max": prop.j_max, "thrust_n": thrust, "p_shaft_w": p_shaft,
+            "p_bus_w": p_bus, "current_a": motor["current"], "voltage": motor["voltage"]}

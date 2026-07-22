@@ -60,6 +60,28 @@ def run(
 
 
 @app.command()
+def optimize(
+    mission: Path = typer.Argument(..., help="Mission module, e.g. missions/endurance_sample.py"),
+    aircraft: Path = typer.Option(..., "--aircraft", "-a", help="Aircraft package dir or aircraft.py"),
+    runs_dir: Path = typer.Option(Path("runs"), help="Root directory for run artifacts"),
+    multistart: int = typer.Option(3, help="Number of NLP starts (1 = nominal only)"),
+    flatness: bool = typer.Option(True, help="Span flatness sweep (re-optimized)"),
+):
+    """Optimize AIRCRAFT for MISSION (M2: wing + cruise state); write run artifacts."""
+    ac, ac_file = load_aircraft(aircraft)
+    ms, ms_file = load_mission(mission)
+    result, run_dir = solve.optimize(
+        ac, ms, runs_dir, input_files=[ac_file, ms_file],
+        multistart=multistart, flatness=flatness,
+    )
+    champ = result.performance["optimization"]["champion"]
+    typer.echo(f"status: {result.status}")
+    typer.echo(f"champion: {champ['dv']} V={champ['V_ms']:.1f} -> "
+               f"{champ['objective_value']:.1f} {result.performance.get('objective_units','')}")
+    typer.echo(run_dir)
+
+
+@app.command()
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
     result = assemble.load(run_dir)

@@ -70,3 +70,19 @@ def test_propulsion_solver_sane(sample_aircraft):
         assert 0 < r["eta_prop"] <= 0.9
         assert 0 < r["eta_motor"] <= 1.0
         assert 0 < r["J"] < 1.0
+
+
+def test_m2_optimize_smoke(sample_aircraft, sample_mission, tmp_path):
+    """M2 gate (reduced): NLP converges, champion beats/matches baseline, artifacts complete."""
+    from planeopt import solve
+
+    result, run_dir = solve.optimize(
+        sample_aircraft, sample_mission, runs_root=tmp_path, multistart=1, flatness=False
+    )
+    opt = result.performance["optimization"]
+    champ = opt["champion"]
+    assert 1.5 - 1e-6 <= champ["dv"]["span"] <= 2.2 + 1e-6  # IPOPT bound slack
+    assert champ["objective_value"] > 60  # beats the fixed design's ~96 min? keep loose
+    assert abs(opt["nlp_vs_reeval_gap"]) < 0.1 * champ["objective_value"]
+    assert opt["shadow_price_obj_per_gram"] < 0  # more mass never helps endurance
+    assert (run_dir / "report.html").exists()

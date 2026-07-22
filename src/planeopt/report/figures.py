@@ -34,3 +34,18 @@ def power_curves(sweep: list[dict], mission, objective, out_dir: Path) -> None:
     fig.tight_layout()
     fig.savefig(out_dir / "power_curves.png", dpi=110)
     plt.close(fig)
+
+
+def flatness_plot(flat: list[dict], champion: dict, out_dir: Path) -> None:
+    pts = [f for f in flat if f["objective_value"] is not None]
+    if not pts:
+        return
+    fig, ax = plt.subplots(figsize=(5, 3.4))
+    ax.plot([f["span"] for f in pts], [f["objective_value"] for f in pts], "o-", ms=4)
+    ax.axvline(champion["dv"]["span"], color="g", ls="--", lw=1, alpha=0.7)
+    ax.set(xlabel="span (m), all else re-optimized", ylabel="objective",
+           title="Flatness of the optimum")
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_dir / "flatness.png", dpi=110)
+    plt.close(fig)
