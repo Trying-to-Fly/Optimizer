@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>planeopt — {{ r.mission }} / {{ r.aircraft }}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+  table { border-collapse: collapse; margin: .5rem 0; }
+  td, th { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: .3rem .7rem; text-align: left; }
+  .status { padding: .6rem 1rem; border-radius: .5rem; background: color-mix(in srgb, orange 18%, transparent); }
+  .meta { opacity: .7; font-size: .85rem; }
+  code { font-size: .9em; }
+</style>
+</head>
+<body>
+<h1>planeopt run — {{ r.mission }} / {{ r.aircraft }}</h1>
+<p class="meta">objective: <b>{{ r.objective }}</b> ({{ r.diagnostics.get("objective_units","") }},
+wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</p>
+<p class="status">{{ r.status }}</p>
+
+<h2>Geometry</h2>
+<table>
+{% for k, v in r.geometry.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}
+</table>
+
+<h2>Masses</h2>
+{% if r.masses.get("fixed_totals") %}
+<table>
+{% for k, v in r.masses["fixed_totals"].items() %}<tr><th>{{ k }}</th><td>{{ "%.4f"|format(v) }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+{% if r.masses.get("fixed_equipment") %}
+<table>
+<tr><th>fixed equipment</th><th>kg</th></tr>
+{% for k, v in r.masses["fixed_equipment"].items() %}<tr><td>{{ k }}</td><td>{{ "%.3f"|format(v) }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+
+<h2>Performance</h2>
+<table>
+{% for k, v in r.performance.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}
+</table>
+
+<h2>Mission constraints</h2>
+<table>
+{% for k, v in r.constraints.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% endfor %}
+</table>
+
+{% if r.notes %}
+<h2>Notes</h2>
+<ul>{% for n in r.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+{% endif %}
+</body>
+</html>
