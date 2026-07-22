@@ -1,0 +1,45 @@
+{
+  "axis": "min cruise speed (m/s)",
+  "points": [
+    {
+      "v_floor": 10.0,
+      "objective_value": 99.44742458423916,
+      "V_ms": 10.889160099626416,
+      "P_elec_w": 25.573892304198985,
+      "auw_kg": 1.8688250721703623,
+      "span": 2.2000000219972753
+    },
+    {
+      "v_floor": 11.0,
+      "objective_value": 98.96005390372967,
+      "V_ms": 10.99999989000544,
+      "P_elec_w": 25.714616533701225,
+      "auw_kg": 1.8731851778276734,
+      "span": 2.2000000219945846
+    },
+    {
+      "v_floor": 12.0,
+      "objective_value": 84.52120387352386,
+      "V_ms": 11.999999880002914,
+      "P_elec_w": 30.61996599400221,
+      "auw_kg": 2.0173261166450116,
+      "span": 2.0406261869655204
+    },
+    {
+      "v_floor": 13.0,
+      "objective_value": 70.7826744609382,
+      "V_ms": 12.99999987000871,
+      "P_elec_w": 37.14541724568705,
+      "auw_kg": 2.2168741673181085,
+      "span": 2.128522475893846
+    },
+    {
+      "v_floor": 14.0,
+      "failed": "Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:\n.../casadi/core/optistack_inte"
+    },
+    {
+      "v_floor": 15.0,
+      "failed": "Error in Opti::solve [OptiNode] at .../casadi/core/optistack.cpp:217:\n.../casadi/core/optistack_inte"
+    }
+  ]
+}
