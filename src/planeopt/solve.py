@@ -116,10 +116,12 @@ def run(
             "v_stall_ms": stall["v_stall_ms"],
             "stall_ok": (mission.v_stall_max_ms is None)
             or (stall["v_stall_ms"] <= mission.v_stall_max_ms * 1.01),  # 1% tol: active != violated
-            "static_margin": sm["static_margin"],
-            "sm_in_range": mission.static_margin_range[0]
-            <= sm["static_margin"]
-            <= mission.static_margin_range[1],
+            "static_margin": float(sm["static_margin"]),
+            "sm_in_range": bool(
+                mission.static_margin_range[0]
+                <= sm["static_margin"]
+                <= mission.static_margin_range[1]
+            ),
             "trim_deflection_deg": best["deflection_deg"],
         },
         diagnostics={

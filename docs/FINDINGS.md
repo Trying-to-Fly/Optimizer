@@ -4,18 +4,29 @@ What the optimizer has actually said about the DESIGN_SPEC.md plane so far.
 All numbers from uncalibrated models (construction profile from ballparks,
 propulsion from datasheets/proxy tables): **trust the rankings and the active
 constraint set, not the absolute minutes** (see VALIDATION_ANCHORS.md).
-Generated 2026-07-23, M3/M4 runs.
+Generated 2026-07-23, M3/M4 runs. Updated same day after the SM fix
+(Munk fuselage term + regression derivative) and the span-cap raise to 3.0 m.
 
-## 1. The active constraint set (what actually shapes this airplane)
+## 1. The champion (post-SM-fix, span cap 3.0 m)
 
-| Constraint | Status at the optimum | Meaning |
+**Span 2.59 m — an interior optimum, off every bound.** With load-scaled spars the
+mass price of span honestly balances induced drag. Champion: span 2.59, root chord
+181 mm, taper 0.73, tail arm 550 mm, tail scale 0.79, spars 14×1.1 / 12×1.4 mm,
+ballast 0 g, battery full forward, cruise 10.1 m/s, AUW 1988 g, 23.4 W →
+**107.5 min** (multi-start 3/3 identical; flatness peaks at ~2.6 m:
+88 → 98 → 104 → 107 min over 1.75–2.5 m; spans ≥2.75 fail to converge with the
+14 mm spar-OD ceiling).
+
+### Active constraint set
+
+| Constraint | Status | Meaning |
 |---|---|---|
-| Static margin ≥ 8% | **active** | The tail is sized by stability, not by anything aerodynamic — the optimizer shrinks the tail to its floor (scale 0.70, arm 590 mm vs. the spec's 700 mm). Every extra cm² of tail is pure loss at this CG. |
-| Span ≤ 2.2 m | **active** | Even with spar mass now load-scaled, span still pays. The bound is the mission/config choice, not physics. |
-| Gust margin CL ≤ 0.7·CLmax | **active** | Sets cruise speed (~10.9 m/s), not the wind floor (9.5). The plane cruises faster than power-optimal because slow flight leaves no CL headroom. |
-| Ballast ≥ 0 | **active at 0** | With the battery at its forward stop (95 mm), no nose lead is needed. The spec's 70 g ballast is avoidable by layout. |
-| Spar OD bounds | **active** | Optimizer wants max-diameter, thin-wall tubes (center 14×0.8). Notably: the spec's 10×8 center spar **fails** the 5 g / SF 2.0 root-stress check (~300 MPa vs. 200 allowable). Either accept a lower limit load/SF or upsize the spar. |
-| Stall ≤ 8 m/s | active in most variants | The wing-area sizer. The 8.0 limit is a mission input; the spec itself estimated 8.3 — worth an explicit decision. |
+| Static margin ≥ 8% | **active** | Tail sized by stability (scale 0.79, arm at its 550 mm floor). Now includes the Munk fuselage term. |
+| Gust margin CL ≤ 0.7·CLmax | **active** | Sets cruise speed, not the wind floor. |
+| Ballast ≥ 0 | **active at 0** | Battery at forward stop; the spec's 70 g nose lead is avoidable by layout. |
+| Trim throw ≤ ±5.5° | **active** | The champion trims right at the ⅓-throw reserve — ruddervator authority is a real currency here. |
+| Spar OD ≤ 14 mm (fit in the root section) | **active** | Optimizer wants max-diameter thin-wall; also: the spec's 10×8 center spar **fails** the 5 g / SF 2.0 root-stress check (~300 vs 200 MPa allowable). |
+| Stall ≤ 8 m/s | active | The wing-area sizer (kept at 8.0 by decision, 2026-07-23). |
 
 ## 2. Airfoil study (discrete outer loop, full re-optimization per candidate)
 
@@ -49,21 +60,15 @@ regularly sees >6–7 m/s wind, that's the trade to argue about.
 - Cruise power sits at the **optimistic edge** of the real-aircraft bands
   (14 W/kg vs. measured 34 W/kg for a draggier Mini Talon; sailplane floor
   10–17 W/kg) — smooth polars, no prop-in-wake losses, vendor motor constants.
-- **The static-margin model is the weakest link in the loop right now**, twice
-  over: (a) no fuselage/boom destabilizing moment (LiftingLine is
-  lifting-surfaces-only), biasing the neutral point aft; (b) LiftingLine's
-  dCm/dCL is strongly alpha-dependent for this configuration — at the M3
-  champion, the local SM reads ~0.080 at cruise alpha ~4 deg but collapses
-  toward ~0.01 by alpha ~6 deg (regression over the window: ~0.04). Because the
-  SM-window constraint evaluated at cruise alpha is what pushes cruise speed to
-  10.9 m/s and shrinks the tail to its floor, **the tail sizing and cruise-speed
-  results inherit this fragility** — treat them as provisional until the SM
-  model gets a fuselage-moment correction and a more robust NP estimate
-  (options: slender-body/Munk fuselage term + Cm-alpha regression in the NLP,
-  a VLM/AVL derivative cross-check, or deferring SM to flow5 validation).
-  This is also the source of the reported NLP-vs-re-evaluation objective gap
-  (~8 min): the numeric re-evaluation finds slower operating points the NLP's
-  alpha-local SM constraint rejects.
+- **Static margin (fixed 2026-07-23, watch it anyway):** the model now carries a
+  Munk slender-body fuselage term and estimates dCm/dCL by regression over a
+  ±2° alpha window, because LiftingLine's local derivative oscillates with
+  alpha (raw local slopes at the old champion: 0.12 → −0.01 → 0.06). Numeric
+  cross-check at the new champion: SM 0.097 vs the NLP's 0.080 — same window,
+  consistent. Residual caveats: the Munk term is a slender-body estimate for a
+  fat pod, and LL's Cm noise is averaged, not eliminated — flow5 should still
+  own the final stability verdict. Remaining NLP-vs-re-eval gap ~4% is
+  V-grid quantization plus this SM estimator difference.
 - Tripped Δ(objective) ≈ −9 to −11 min across candidates: the design survives
   losing its laminar runs, but calibrating print-surface reality matters.
 - Chain efficiency ~0.39–0.45 at cruise: the 900 kV motor is far from its happy
@@ -75,7 +80,9 @@ regularly sees >6–7 m/s wind, that's the trade to argue about.
 
 1. Slice 2–3 wing sections at different chords → `tools/fit_profile.py` →
    calibrated construction profile (turns mass model from ballpark to data).
-2. Decide the stall-speed limit (8.0 vs 8.3+ m/s) and the span cap as mission
-   inputs — both are active constraints, so they move the answer directly.
+2. ~~Stall limit / span cap decisions~~ — decided 2026-07-23: stall stays
+   8.0 m/s; span cap raised to 3.0 m, revealing the 2.59 m interior optimum.
+   Open follow-up: whether a 2.6 m wing is acceptable for transport/handling,
+   and whether the 14 mm spar-OD ceiling (root-section fit) is right.
 3. XFOIL spot-check of AG35 vs SD7037 at Re 150–200k (one-off, per §3.1) before
    committing the airfoil switch.
