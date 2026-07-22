@@ -44,6 +44,36 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 <img src="data:image/png;base64,{{ fig.b64 }}" alt="{{ fig.name }}">
 {% endfor %}
 
+{% if r.performance.get("optimization") %}
+{% set opt = r.performance["optimization"] %}
+<h2>Optimization</h2>
+<table>
+<tr><th>design variable</th><th>champion</th></tr>
+{% for k, v in opt["champion"]["dv"].items() %}<tr><td>{{ k }}</td><td>{{ "%.4f"|format(v) }}</td></tr>{% endfor %}
+<tr><td>static margin (NLP)</td><td>{{ "%.3f"|format(opt["champion"].get("static_margin", 0)) }}</td></tr>
+<tr><td>multistart spread</td><td>{{ "%.3f"|format(opt.get("multistart_objective_spread", 0)) }}</td></tr>
+<tr><td>shadow price</td><td>{{ "%.4f"|format(opt.get("shadow_price_obj_per_gram", 0)) }} /g</td></tr>
+</table>
+{% if opt.get("resolve_battery") %}
+<h2>Re-solve battery (full re-optimizations)</h2>
+<table>
+<tr><th>case</th><th>objective</th><th>delta</th><th>span</th><th>SM</th><th>ballast g</th></tr>
+{% for k, v in opt["resolve_battery"].items() %}
+<tr><td>{{ k }}</td>
+{% if v.get("failed") %}<td colspan="4" class="bad">{{ v["failed"] }}</td>
+{% else %}<td>{{ "%.1f"|format(v["objective_value"]) }}</td><td>{{ "%+.1f"|format(v["delta"]) }}</td>
+<td>{{ "%.2f"|format(v["span"]) }}</td><td>{{ "%.3f"|format(v["static_margin"]) }}</td>
+<td>{{ "%.0f"|format(v["ballast_kg"]*1000) }}</td>{% endif %}</tr>
+{% endfor %}
+</table>
+{% endif %}
+{% if opt.get("tripped_polars") %}
+<p><b>Tripped polars:</b> ΔCD {{ "%.4f"|format(opt["tripped_polars"]["dcd_total"]) }}
+{% if opt["tripped_polars"]["objective_tripped"] %} → {{ "%.1f"|format(opt["tripped_polars"]["objective_tripped"]) }}
+({{ "%+.1f"|format(opt["tripped_polars"]["delta"]) }}) if all laminar runs are lost{% endif %}</p>
+{% endif %}
+{% endif %}
+
 <h2>Constraints</h2>
 <table>
 {% for k, v in r.constraints.items() %}
