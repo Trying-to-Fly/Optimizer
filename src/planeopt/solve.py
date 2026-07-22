@@ -60,11 +60,16 @@ def run(
     stall = aero.stall_speed(airplane, weight_n)
 
     feasible = [s for s in sweep if "infeasible" not in s]
+    # same feasibility rules as the NLP: wind floor, gust margin, and the prop
+    # advance-ratio cap (beyond 95% of the fitted table the CT->0 tail of the
+    # polynomial fit is not trustworthy)
+    j_cap = 0.95 * propulsion.PropTable(pt.prop.proxy_table).j_max
     legal = [
         s
         for s in feasible
         if s["V_ms"] >= mission.v_min_ms - 1e-9
-        and s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6  # same gust margin as the NLP
+        and s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6
+        and s["J"] <= j_cap + 1e-6
     ]
     candidates = legal if legal else feasible
     sign = 1 if objective.direction == "maximize" else -1
