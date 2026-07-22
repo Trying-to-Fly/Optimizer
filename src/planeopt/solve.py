@@ -56,8 +56,11 @@ def run(
             point["objective_value"] = objective.evaluator(float(V), p["P_elec_w"], mission, pt)
         sweep.append(point)
 
-    # --- stall (also provides CL_max for the gust-margin filter below) ---
-    stall = aero.stall_speed(airplane, weight_n)
+    # --- stall: critical-section method (also feeds the gust-margin filter) ---
+    clmax_ab = aero.clmax_log_fit(airplane.wings[0].xsecs[0].airfoil)
+    stall = aero.critical_stall_speed(airplane, weight_n, clmax_ab)
+    re_s = 1.225 * stall["v_stall_ms"] * (airplane.s_ref / airplane.b_ref) / 1.81e-5
+    stall["cl_max_3d"] = 0.9 * (clmax_ab[0] + clmax_ab[1] * np.log(re_s))
 
     feasible = [s for s in sweep if "infeasible" not in s]
     # same feasibility rules as the NLP: wind floor, gust margin, and the prop
@@ -143,6 +146,12 @@ def run(
 
     run_dir = assemble.write_run_dir(result, runs_root, input_files or [])
     figures.power_curves(sweep, mission, objective, run_dir / "figures")
+    figures.stall_spanwise(stall, run_dir / "figures")
+    planes = {"current": airplane}
+    if dv is not None:
+        planes = {"baseline (defaults)": aircraft.geometry(None), "optimized": airplane}
+    figures.planform_compare(planes, run_dir / "figures")
+    figures.three_view(airplane, run_dir / "figures")
     (run_dir / "report.html").write_text(report_html.render(result, run_dir))
     return result, run_dir
 
@@ -232,12 +241,22 @@ def _solve_nlp(
     opti.subject_to(sm >= mission.static_margin_range[0])
     opti.subject_to(sm <= mission.static_margin_range[1])
 
-    # stall: wing-level CLmax constant (numeric precompute at ~stall Re)
-    clmax = aero.clmax_3d(airplane.wings[0].xsecs[0].airfoil, re=1.1e5)
+    # stall: critical-section method (Schrenk loading + local clmax(Re) fit),
+    # evaluated at the mission stall-speed limit — MODEL_DETAILS 3.4
+    clmax_ab = aero.clmax_log_fit(airplane.wings[0].xsecs[0].airfoil)
     if mission.v_stall_max_ms is not None:
-        opti.subject_to(2 * weight_n / (1.225 * s_ref * clmax) <= mission.v_stall_max_ms**2)
-    # gust margin (MODEL_DETAILS section 4)
-    opti.subject_to(aero_run["CL"] <= 0.7 * clmax)
+        v_s = mission.v_stall_max_ms
+        cl_stall = 2 * weight_n / (1.225 * v_s**2 * s_ref)
+        stations = aero.wing_stations(airplane.wings[0])
+        ratios = aero.critical_section_ratios(
+            stations, s_ref, airplane.b_ref, cl_stall, v_s, clmax_ab
+        )
+        opti.subject_to(aero.smooth_max(ratios) <= 1.0)
+    # gust margin (MODEL_DETAILS section 4), wing-level clmax from the same fit
+    c_mean = s_ref / airplane.b_ref
+    re_cruise = 1.225 * V * c_mean / 1.81e-5
+    clmax_wing = 0.9 * (clmax_ab[0] + clmax_ab[1] * np.log(re_cruise))
+    opti.subject_to(aero_run["CL"] <= 0.7 * clmax_wing)
     if objective.wind_mode == "constraint":
         opti.subject_to(V >= mission.v_min_ms)
     if mission.ballast_max_kg is not None and "ballast_kg" in dv:
@@ -263,7 +282,7 @@ def _solve_nlp(
         "P_elec_w": float(sol(p_bus_eff)),
         "drag_n": float(sol(drag)),
         "J": float(sol(pr["J"])),
-        "clmax_3d_used": clmax,
+        "clmax_ab_used": clmax_ab,
     }
 
 

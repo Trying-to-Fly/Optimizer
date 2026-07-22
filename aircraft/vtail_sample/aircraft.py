@@ -36,15 +36,24 @@ class VTailSample:
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
     trim_deflection_limit_deg = 5.5  # <= 1/3 of the +/-12 mm low-rate throw
 
+    # Architecture v2 (planform generalization): variable-width flat/dihedral
+    # center panel + 3 outer panels per side, each with its own dihedral and
+    # chord ratio -> covers straight-tapered, polyhedral ("curved glider"), and
+    # near-elliptical families. Defaults reproduce the v1.2 spec exactly
+    # (linear taper 220->150, flat 700 mm center, 3 deg outer dihedral).
     DV_DEFAULTS = {
-        # wing (M2)
-        "span": 1.8, "c_root": 0.22, "taper": 150 / 220,
-        # tail + balance + structure (M3)
+        # wing planform
+        "span": 1.8, "c_root": 0.22, "center_width": 0.700,
+        "r1": 196.667 / 220, "r2": 173.333 / 196.667, "r3": 150 / 173.333,
+        "d0": 0.0, "d1": 3.0, "d2": 3.0, "d3": 3.0,  # per-panel dihedral, deg
+        "washout_tip": -2.0,
+        # tail + balance + structure
         "tail_arm": 0.700, "tail_scale": 1.0,
         "spar_od_center": 0.010, "spar_wall_center": 0.001,
         "spar_od_outer": 0.008, "spar_wall_outer": 0.001,
         "ballast_kg": 0.070, "x_battery": 0.115,
     }
+    min_effective_dihedral_deg = 2.0  # lateral-stability proxy for an aileron ship
 
     def design_variables(self, opti, inits: dict | None = None) -> dict:
         """Full-vehicle variables (M3). Architecture mapping: the 700 mm
@@ -54,7 +63,11 @@ class VTailSample:
         and battery station. Cruise-state vars live in solve, not here."""
         i = self.DV_DEFAULTS | (inits or {})
         bounds = {
-            "span": (1.5, 3.0), "c_root": (0.16, 0.245), "taper": (0.40, 1.0),  # span cap raised: find the interior optimum
+            "span": (1.5, 3.0), "c_root": (0.16, 0.245),
+            "center_width": (0.10, 1.20),
+            "r1": (0.55, 1.0), "r2": (0.55, 1.0), "r3": (0.55, 1.0),
+            "d0": (0.0, 10.0), "d1": (0.0, 20.0), "d2": (0.0, 20.0), "d3": (0.0, 20.0),
+            "washout_tip": (-4.0, 0.0),
             "tail_arm": (0.55, 0.85), "tail_scale": (0.70, 1.40),
             "spar_od_center": (0.006, 0.014), "spar_wall_center": (0.0006, 0.002),
             "spar_od_outer": (0.005, 0.012), "spar_wall_outer": (0.0005, 0.0018),
@@ -67,12 +80,31 @@ class VTailSample:
 
     def geometry_constraints(self, opti, dv, V, deflection_deg=None) -> None:
         """Aircraft-specific manufacturing/geometry/throw constraints (symbolic-safe)."""
-        c_tip = dv["c_root"] * dv["taper"]
+        c_tip = dv["c_root"] * dv["r1"] * dv["r2"] * dv["r3"]
         # tip Reynolds floor (project rule; MODEL_DETAILS section 4)
         opti.subject_to(1.225 * V * c_tip / 1.81e-5 >= 90e3)
         # A1 print bed: chord already bounded by c_root upper bound (245 mm)
-        # outer panel must exist
-        opti.subject_to(dv["span"] >= 0.75 + 0.1)
+        # outer panels must exist
+        opti.subject_to(dv["span"] >= dv["center_width"] + 0.20)
+        # lateral-stability proxy: roll-moment-weighted dihedral floor. Dihedral's
+        # restoring moment scales with panel area x spanwise arm, so the weight is
+        # A_i * y_centroid_i — without the arm the optimizer games the metric by
+        # piling dihedral inboard where it buys no roll stiffness. (The optimizer
+        # cannot see dihedral's benefit at all — LL has no lateral DOF — so this
+        # floor is the only thing keeping the wing from going flat.)
+        cw2 = dv["center_width"] / 2
+        outer3 = (dv["span"] / 2 - cw2) / 3
+        c0, c1 = dv["c_root"], dv["c_root"] * dv["r1"]
+        c2, c3 = c1 * dv["r2"], c1 * dv["r2"] * dv["r3"]
+        panels = [
+            (cw2 * c0, cw2 / 2, dv["d0"]),
+            (outer3 * (c0 + c1) / 2, cw2 + 0.5 * outer3, dv["d1"]),
+            (outer3 * (c1 + c2) / 2, cw2 + 1.5 * outer3, dv["d2"]),
+            (outer3 * (c2 + c3) / 2, cw2 + 2.5 * outer3, dv["d3"]),
+        ]
+        w_sum = sum(a * y for a, y, _ in panels)
+        eff_dihedral = sum(a * y * d for a, y, d in panels) / w_sum
+        opti.subject_to(eff_dihedral >= self.min_effective_dihedral_deg)
         if deflection_deg is not None:
             opti.subject_to(deflection_deg <= self.trim_deflection_limit_deg)
             opti.subject_to(deflection_deg >= -self.trim_deflection_limit_deg)
@@ -83,15 +115,18 @@ class VTailSample:
 
         n_lim = 5.0
         semi = dv["span"] / 2
+        cw2 = dv["center_width"] / 2
         m_center = structures.semispan_root_moment(weight_n, n_lim, semi)
         structures.spar_constraints(
-            opti, dv["spar_od_center"], dv["spar_wall_center"], 0.350, m_center
+            opti, dv["spar_od_center"], dv["spar_wall_center"], cw2, m_center
         )
-        # outer segment: lift outboard of the joint (area fraction approx),
+        # outer segment: lift outboard of the first joint (area fraction approx),
         # centroid arm 0.424 x outer length
-        outer = semi - 0.350
-        s_half = 0.350 * dv["c_root"] + outer * dv["c_root"] * (1 + dv["taper"]) / 2
-        f_outer = (outer * dv["c_root"] * (1 + dv["taper"]) / 2) / s_half
+        outer = semi - cw2
+        c1 = dv["c_root"] * dv["r1"]
+        c3 = c1 * dv["r2"] * dv["r3"]
+        s_half = cw2 * dv["c_root"] + outer * (dv["c_root"] + c3) / 2
+        f_outer = (outer * (dv["c_root"] + c3) / 2) / s_half
         m_outer = n_lim * (weight_n / 2) * f_outer * 0.424 * outer
         structures.spar_constraints(
             opti, dv["spar_od_outer"], dv["spar_wall_outer"], 0.85 * outer, m_outer
@@ -108,23 +143,37 @@ class VTailSample:
         if dv is None:
             dv = {}
         dv = self.DV_DEFAULTS | dv
-        span, c_root, taper = dv["span"], dv["c_root"], dv["taper"]
-        semi_center = 0.350  # center section half-width (fixed: spar + print sections)
-        outer = span / 2 - semi_center
+        span, c_root = dv["span"], dv["c_root"]
+        cw2 = dv["center_width"] / 2
+        outer3 = (span / 2 - cw2) / 3  # three equal-width outer panels per side
+
+        # chords at the panel breaks (straight LE: all taper from the TE)
+        chords = [
+            c_root,
+            c_root,
+            c_root * dv["r1"],
+            c_root * dv["r1"] * dv["r2"],
+            c_root * dv["r1"] * dv["r2"] * dv["r3"],
+        ]
+        ys = [0.0, cw2, cw2 + outer3, cw2 + 2 * outer3, span / 2]
+        zs = [0.0]
+        for width, ang in [
+            (cw2, dv["d0"]), (outer3, dv["d1"]), (outer3, dv["d2"]), (outer3, dv["d3"])
+        ]:
+            zs.append(zs[-1] + width * np.sind(ang))
+        # washout: 0 across the center panel, linear to washout_tip at the tip
+        twists = [0.0, 0.0]
+        for k in (1, 2, 3):
+            twists.append(dv["washout_tip"] * k / 3)
 
         wing = asb.Wing(
             name="wing",
             symmetric=True,
             xsecs=[
-                # straight LE: all taper from the trailing edge
-                asb.WingXSec(xyz_le=[0, 0.000, 0], chord=c_root, twist=0, airfoil=wing_af),
-                asb.WingXSec(xyz_le=[0, semi_center, 0], chord=c_root, twist=0, airfoil=wing_af),
                 asb.WingXSec(
-                    xyz_le=[0, span / 2, outer * np.sind(3)],  # 3 deg outer-panel dihedral
-                    chord=c_root * taper,
-                    twist=-2,  # washout, linear across outer panel
-                    airfoil=wing_af,
-                ),
+                    xyz_le=[0, ys[k], zs[k]], chord=chords[k], twist=twists[k], airfoil=wing_af
+                )
+                for k in range(5)
             ],
         ).translate([WING_X_LE, 0, 0])
 
@@ -190,11 +239,12 @@ class VTailSample:
         from planeopt import structures
 
         d = self.DV_DEFAULTS | (dv or {})
-        outer = d["span"] / 2 - 0.350
+        outer = d["span"] / 2 - d["center_width"] / 2
         spar_mass = (
-            structures.tube_mass(d["spar_od_center"], d["spar_wall_center"], 0.700)
+            structures.tube_mass(d["spar_od_center"], d["spar_wall_center"], d["center_width"])
             + 2 * structures.tube_mass(d["spar_od_outer"], d["spar_wall_outer"], 0.85 * outer)
-            + 0.035  # joiner blocks + pins (constant)
+            + 0.035  # dihedral-joint joiner blocks + pins
+            + 0.016  # 2 extra polyhedral-break joiners per side (arch v2)
         )
         x_spar = WING_X_LE + 0.30 * d["c_root"]
         boom_len = d["tail_arm"] + 0.05  # socket to tail block

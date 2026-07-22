@@ -173,3 +173,99 @@ def tripped_cd_delta(airplane, V: float, CL: float, rho=1.225, mu=1.81e-5) -> di
         delta += d
         detail[wing.name] = {"re": re, "alpha_used": a, "dcd": d}
     return {"dcd_total": delta, "per_surface": detail}
+
+
+# ---------------------------------------------------------------- stall (M3.5)
+# Critical-section method (MODEL_DETAILS 3.4): Schrenk spanwise loading + local
+# 2D cl_max at local Re; the wing "stalls" when any station hits its section
+# limit. Approximations, documented: Schrenk loading (not the LL distribution),
+# 2D washout increment with a_2d ~ 5.7/rad, section-limit factor 0.95.
+
+A2D_PER_RAD = 5.7
+SECTION_FACTOR = 0.95
+
+
+def clmax_log_fit(airfoil, re_lo=6e4, re_hi=3e5, n=5) -> tuple[float, float]:
+    """Numeric precompute: cl_max(Re) ~ A + B*ln(Re) over the class's Re range."""
+    res = np.geomspace(re_lo, re_hi, n)
+    clm = []
+    for re in res:
+        aero = airfoil.get_aero_from_neuralfoil(
+            alpha=np.arange(0, 16.0, 0.25), Re=re, model_size="large"
+        )
+        clm.append(float(np.max(aero["CL"])))
+    B, A = np.polyfit(np.log(res), clm, 1)
+    return float(A), float(B)
+
+
+def wing_stations(wing) -> list[dict]:
+    """Analysis stations from a Wing's xsec breakpoints + panel midpoints.
+
+    Pure attribute arithmetic — works with floats or Opti symbolics, any
+    architecture built from xsecs. Root station excluded (never critical)."""
+    xs = wing.xsecs
+    st = []
+    for i in range(len(xs) - 1):
+        y0, y1 = xs[i].xyz_le[1], xs[i + 1].xyz_le[1]
+        c0, c1 = xs[i].chord, xs[i + 1].chord
+        t0, t1 = xs[i].twist, xs[i + 1].twist
+        st.append({"y": (y0 + y1) / 2, "c": (c0 + c1) / 2, "twist": (t0 + t1) / 2})
+        st.append({"y": y1, "c": c1, "twist": t1})
+    return st
+
+
+def critical_section_ratios(stations, S, b, CL, V, clmax_ab, rho=1.225, mu=1.81e-5):
+    """cl_local/cl_max_local per station at (CL, V). Symbolic-safe.
+
+    Schrenk: c_S = (c + c_ell)/2; cl = CL*c_S/c + a_2d*(twist - twist_bar) with
+    the loading-weighted mean twist. sqrt is regularized at the tip."""
+    A, B = clmax_ab
+    c_s, cl_base = [], []
+    for st in stations:
+        eta = 2 * st["y"] / b
+        c_ell = (4 * S / (np.pi * b)) * (1 - eta**2 + 1e-4) ** 0.5
+        c_s.append((st["c"] + c_ell) / 2)
+    w_sum = sum(c_s)
+    t_bar = sum(c_s[i] * stations[i]["twist"] for i in range(len(stations))) / w_sum
+    out = []
+    for i, st in enumerate(stations):
+        cl = CL * c_s[i] / st["c"] + A2D_PER_RAD * (st["twist"] - t_bar) * np.pi / 180
+        re = rho * V * st["c"] / mu
+        clmax = SECTION_FACTOR * (A + B * np.log(re))
+        out.append(cl / clmax)
+    return out
+
+
+def smooth_max(vals, sharpness=20.0):
+    """Log-sum-exp upper bound on max(vals); symbolic-safe, differentiable."""
+    return np.log(sum(np.exp(sharpness * v) for v in vals)) / sharpness
+
+
+def critical_stall_speed(airplane, weight_n, clmax_ab, rho=1.225) -> dict:
+    """Numeric: V where the most-loaded station reaches its section limit."""
+    wing = airplane.wings[0]
+    stations = wing_stations(wing)
+    S, b = float(wing.area()), float(wing.span())
+
+    def worst(V):
+        CL = weight_n / (0.5 * rho * V**2 * S)
+        r = critical_section_ratios(stations, S, b, CL, V, clmax_ab, rho)
+        return max(float(x) for x in r)
+
+    lo, hi = 5.0, 20.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if worst(mid) > 1:
+            lo = mid
+        else:
+            hi = mid
+    v_stall = (lo + hi) / 2
+    CL = weight_n / (0.5 * rho * v_stall**2 * S)
+    ratios = [float(x) for x in critical_section_ratios(stations, S, b, CL, v_stall, clmax_ab, rho)]
+    return {
+        "v_stall_ms": v_stall,
+        "stations_y": [float(s["y"]) for s in stations],
+        "ratios_at_stall": ratios,
+        "critical_y": float(stations[int(np.argmax(ratios))]["y"]),
+        "clmax_ab": clmax_ab,
+    }

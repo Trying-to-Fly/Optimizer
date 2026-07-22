@@ -76,7 +76,27 @@ regularly sees >6–7 m/s wind, that's the trade to argue about.
   pack-voltage-to-load match is the single biggest endurance lever the fixed
   equipment list is hiding.
 
-## 5. Next calibration actions (highest value first)
+## 5. Scope decisions (2026-07-23, second session)
+
+- **Planform generalization implemented** (architecture v2 of the sample
+  aircraft): variable center-section width, 3 outer panels per side with
+  independent dihedral and chord ratios (covers straight-with-dihedral,
+  polyhedral/"curved glider", and near-elliptical families), washout variable,
+  roll-moment-weighted effective-dihedral floor (≥2°) as the lateral-stability
+  proxy, and the critical-section stall model that makes planform/washout
+  results meaningful.
+- **Winglets deferred, deliberately:** with span free at an interior optimum,
+  plain span extension dominates winglets; and a credible winglet delta needs
+  VLM-grade nonplanar induced-drag modeling (LiftingLine mishandles
+  near-vertical surfaces). Revisit only as a span-capped mission study with a
+  VLM cross-check.
+- Early architecture-v2 signals: the critical-section stall model ends the
+  runaway-taper incentive (the optimizer holds tip chord — r3 → 1.0 — instead
+  of leaning on washout), and the dihedral *distribution* is a flat direction
+  of the optimum (the floor binds, but where the degrees live barely moves the
+  objective — treat any specific polyhedral shape as a choice, not a result).
+
+## 6. Next calibration actions (highest value first)
 
 1. Slice 2–3 wing sections at different chords → `tools/fit_profile.py` →
    calibrated construction profile (turns mass model from ballpark to data).

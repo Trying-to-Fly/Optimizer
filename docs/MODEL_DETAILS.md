@@ -205,8 +205,13 @@ part of the optimization state:
 - **Neutral point / static margin:** from the same VLM (dCm/dCL), differentiable, so
   the static-margin window is an ordinary smooth constraint against the mass model's CG.
 - **Stall / CL_max:** critical-section method — at the stall condition no spanwise
-  station may exceed its local NeuralFoil cl_max. Captures taper/washout effects and
-  doubles as the tip-stall diagnostic; a single global CL_max factor would not.
+  station may exceed its local NeuralFoil cl_max. Implemented (2026-07-23) as:
+  Schrenk spanwise loading + washout increment (a_2d ≈ 5.7/rad) over stations taken
+  from the wing's cross-sections and panel midpoints; local cl_max(Re) from a
+  per-airfoil log-linear fit of NeuralFoil maxima; constraint via smooth-max
+  (log-sum-exp). Captures taper/washout/planform-shape effects and doubles as the
+  tip-stall diagnostic (the report plots cl/cl_max spanwise at stall). Documented
+  approximation: Schrenk loading, not the LL distribution.
 - **Gust margin:** CL_cruise ≤ ~0.7 × CL_max (from the concept doc's trim row).
 - **Lateral-directional:** not dynamically modeled. A vertical-tail-volume floor
   (from the projected V-tail geometry at its fixed dihedral) stands in as the
