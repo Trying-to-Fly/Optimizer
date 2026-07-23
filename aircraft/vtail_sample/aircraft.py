@@ -483,6 +483,53 @@ class VTailSample:
             bodies.append(fuselage.boom_body(x_tail - (p["bay_end"] + p["tail_len"])))
         return bodies
 
+    def design_brief(self, dv: dict | None = None, shadow_per_g=None) -> dict:
+        """Designer-facing numbers for the CAD round-trip (report/brief.py).
+        Everything here derives from declared data + the champion design vector."""
+        d = self.DV_DEFAULTS | (dv or {})
+        p = self.pod_dims(d)
+        env, clr = self.COMPONENT_ENVELOPES, self.POD_WALL_CLEARANCE
+        batt = env["battery"]
+        d_eq = (p["w"] * p["h"]) ** 0.5
+        half = batt["length"] / 2
+        x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
+        pod_end = p["bay_end"] + p["tail_len"]
+        mm = lambda v: f"{v * 1000:.0f} mm"
+
+        brief = {
+            "Cross-section (front view)": {
+                "inner floor (battery + 4 mm play)": f"{mm(batt['width'] + 0.004)} W x {mm(batt['height'] + 0.004)} H",
+                "wall + foam liner allowance, per side": mm(clr),
+                "champion outer section": f"{mm(p['w'])} W x {mm(p['h'])} H (rounded rectangle)",
+            },
+            "Length budget (champion optimum)": {
+                "nose (elliptical, floor 1.0 x d_eq)": f"{mm(d['pod_nose'])} (floor {mm(1.0 * d_eq)})",
+                "equipment bay (constant section)": mm(d["pod_bay"]),
+                "boat-tail (floor 1.8 x d_eq)": f"{mm(p['tail_len'])} (floor {mm(1.8 * d_eq)})",
+                "overall pod": mm(p["length"]),
+                "fineness (L / d_eq)": f"{p['length'] / d_eq:.2f}",
+            },
+            "Balance — battery must reach these stations": {
+                "bay interior spans": f"{mm(p['bay_start'])} to {mm(p['bay_end'])} aft of nose datum",
+                "battery CG window (3 mm end margins)": f"{mm(p['bay_start'] + 0.003 + half)} to {mm(p['bay_end'] - 0.003 - half)}",
+                "champion battery CG": mm(d["x_battery"]),
+            },
+            "Fixed interfaces": {
+                "wing saddle (bay aft end, datum anchor)": mm(self.POD_BAY_END_X),
+                "pod centerline below wing datum": mm(0.030),
+                "boom socket at tail cap (pod-boom topology)": f"12 mm OD at station {mm(pod_end)}",
+                "tail block station (champion tail arm)": mm(x_tail),
+                "ESC / FC+GPS stack lengths": f"{mm(env['esc']['length'])} / {mm(env['fc_gps']['length'])}",
+            },
+        }
+        if shadow_per_g is not None:
+            g_per_swet = 1.465 * 1000  # pod skin model: grams per m2 wetted
+            brief["Deviation prices (mass route only — drag adds on top)"] = {
+                "+0.01 m2 wetted area": f"{abs(shadow_per_g) * g_per_swet * 0.01:.2f} objective units",
+                "+100 g anywhere": f"{abs(shadow_per_g) * 100:.2f} objective units",
+            }
+        return brief
+
     def powertrain(self) -> PowertrainConfig:
         return PowertrainConfig(
             motor=MotorConfig(

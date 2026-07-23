@@ -74,6 +74,27 @@ def test_boom_emerges_from_geometry(sample_aircraft):
     assert bb2["wetted_area_m2"] > bb["wetted_area_m2"]
 
 
+def test_design_brief_renders(sample_aircraft):
+    """CAD round-trip step (a): brief renders from declared data alone —
+    framework must not need any aircraft-specific knowledge."""
+    from planeopt import types
+    from planeopt.report import brief
+
+    result = types.RunResult(
+        aircraft="x", mission="m", objective="endurance", status="s", created="t",
+        performance={"optimization": {"champion": {
+            "objective_value": 100.0, "V_ms": 10.0, "auw_kg": 1.9,
+            "static_margin": 0.08, "dv": dict(sample_aircraft.DV_DEFAULTS),
+        }, "shadow_price_obj_per_gram": -0.07}, "objective_units": "min"},
+    )
+    text = brief.render(result, sample_aircraft)
+    assert "Cross-section" in text and "battery CG window" in text
+    assert "Deviation prices" in text
+    # graceful without the hook
+    class Bare: ...
+    assert "Design brief" in brief.render(result, Bare())
+
+
 def test_loft_symbolic_safe(sample_aircraft):
     """Opti variables flow through pod_dims/loft/body_dict without branching."""
     opti = asb.Opti()

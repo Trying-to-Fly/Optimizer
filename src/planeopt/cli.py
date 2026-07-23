@@ -113,6 +113,21 @@ def airfoils(
 
 
 @app.command()
+def brief(
+    run_dir: Path = typer.Argument(..., help="A runs/<...> directory"),
+    aircraft: Path = typer.Option(..., "--aircraft", "-a", help="Aircraft package dir or aircraft.py"),
+):
+    """Render design_brief.md from a run — the CAD round-trip's handoff document."""
+    from .report import brief as brief_mod
+
+    ac, _ = load_aircraft(aircraft)
+    result = assemble.load(run_dir)
+    out = run_dir / "design_brief.md"
+    out.write_text(brief_mod.render(result, ac))
+    typer.echo(out)
+
+
+@app.command()
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
     result = assemble.load(run_dir)
