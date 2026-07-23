@@ -69,13 +69,32 @@ def load_step(path, n_sections: int = 32, tess_tol: float = 5e-4) -> ImportedSha
     swet = float(sum(s.Area() for s in solids))
     vol = float(sum(s.Volume() for s in solids))
 
-    verts = []
+    verts, tri_a, tri_b = [], [], []
     for s in solids:
-        vv, _tris = s.tessellate(tess_tol)
-        verts.extend((v.x, v.y, v.z) for v in vv)
-    pts = np.array(verts)
+        vv, tris = s.tessellate(tess_tol)
+        v = np.array([(p.x, p.y, p.z) for p in vv])
+        verts.append(v)
+        t = np.asarray(tris, dtype=int)
+        # triangle edges as endpoint pairs — a slab's y/z extents over a
+        # triangulated surface are attained on triangle edges, so sampling
+        # edge/boundary crossings makes the scan exact for the tessellation
+        # (vertex binning alone fails on extrusions: no interior vertices)
+        tri_a.append(v[np.concatenate([t[:, 0], t[:, 1], t[:, 2]])])
+        tri_b.append(v[np.concatenate([t[:, 1], t[:, 2], t[:, 0]])])
+    pts = np.vstack(verts)
     x0, x1 = float(pts[:, 0].min()), float(pts[:, 0].max())
     edges = np.linspace(x0, x1, n_sections + 1)
+
+    a, b = np.vstack(tri_a), np.vstack(tri_b)
+    ax, bx = a[:, 0], b[:, 0]
+    crossings = [pts]
+    for e in edges[1:-1]:
+        m = (np.minimum(ax, bx) < e) & (np.maximum(ax, bx) > e)
+        if not m.any():
+            continue
+        t_frac = (e - ax[m]) / (bx[m] - ax[m])
+        crossings.append(a[m] + t_frac[:, None] * (b[m] - a[m]))
+    pts = np.vstack(crossings)
     sections = []
     for i in range(n_sections):
         m = (pts[:, 0] >= edges[i]) & (pts[:, 0] <= edges[i + 1])
