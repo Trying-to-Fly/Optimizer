@@ -41,9 +41,11 @@ class VTailSample:
 
     # --- fuselage (MODEL_DETAILS section 7) ---
     # "pod_boom": lofted pod + CF boom (spec layout); "integrated": the pod's
-    # tail cone runs all the way to the tail block, no separate boom (the
-    # topology study in solve.optimize flips this attr)
+    # tail cone runs all the way to the tail block, no separate boom. The
+    # topology study enumerates every entry in fuselage_topologies — the boom
+    # is a candidate the study prices, not an assumption.
     fuselage_topology = "pod_boom"
+    fuselage_topologies = ["pod_boom", "integrated"]
     POD_BAY_END_X = 0.410  # bay/wing-saddle joint station — the loft's anchor
     POD_XS_SPEC = (0.068, 0.088)  # spec cross-section (w, h) at pod_xs = 1
     POD_WALL_CLEARANCE = 0.0035  # printed wall + foam liner per side

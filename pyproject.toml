@@ -14,6 +14,12 @@ dependencies = [
     "typer>=0.27.0",
 ]
 
+[project.optional-dependencies]
+# CAD round-trip (.STEP import): OpenCascade kernel — heavy, so opt-in.
+cad = [
+    "cadquery>=2.4",
+]
+
 [project.scripts]
 planeopt = "planeopt.cli:app"
 

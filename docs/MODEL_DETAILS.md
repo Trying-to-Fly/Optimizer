@@ -392,9 +392,10 @@ Every champion gets the same battery, assembling the diagnostics from all module
    opinion at the champion geometry, and a continuous-cant cross-check (outer
    panel freed to ~88 deg, explicit winglet off — indicative only, since the
    Schrenk stations include the canted panel).
-6. Fuselage topology study (§7.4, when the aircraft declares a topology): one full
-   re-optimization of the alternative topology; if it wins it becomes the champion
-   (objective delta and adoption reported either way).
+6. Fuselage topology study (§7.4, when the aircraft declares candidate
+   topologies): one full re-optimization per declared alternative; the winner
+   becomes the champion (per-candidate objective deltas and the adoption
+   verdict reported either way).
 
 ### 6.5 Phase 1 validation gate
 
@@ -491,10 +492,41 @@ is genuinely optimized.
 
 ### 7.4 Topology study — discrete outer loop
 
-`pod_boom` (lofted pod + CF boom, the spec layout) vs `integrated` (the pod's
-tail cone runs all the way to the tail block — cone length derived from
-`tail_arm`, printed cone replaces the boom, plus an internal 8 mm CF stiffener
-to keep the printed tail credible at this fidelity). Per §6.3, plain
-enumeration: one full re-optimization per topology; if integrated wins it
-becomes the champion and the numeric re-evaluation runs with it. Reported in
-the champion battery either way (§6.4 item 6).
+The aircraft declares a **list** of candidate topologies
+(`fuselage_topologies`) — the CF boom is a candidate the study *prices*,
+never an assumption. Sample: `pod_boom` (lofted pod + CF boom, the spec
+layout) and `integrated` (the pod's tail cone runs all the way to the tail
+block — cone length derived from `tail_arm`, printed cone replaces the boom,
+plus an internal 8 mm CF stiffener to keep the printed tail credible at this
+fidelity); twin-boom or others slot in as more declared entries. Per §6.3,
+plain enumeration: one full re-optimization per candidate; the winner becomes
+the champion and the numeric re-evaluation runs with it. Reported in the
+champion battery either way (§6.4 item 6) — this is how the app *suggests*
+whether a boom is worth it.
+
+### 7.5 CAD round-trip (imported fuselage)
+
+The parametric loft (§7.1) is the recommendation engine; a real airplane's
+fuselage is designed by a human. Workflow (decided 2026-07-23):
+
+1. **Brief** — `planeopt brief <run> -a <aircraft>` renders `design_brief.md`
+   from a champion run: packaging floors, length budgets and proportion
+   floors, battery-CG window, fixed interfaces, and shadow-price deviation
+   costs. Everything comes from declared data via the aircraft's optional
+   `design_brief(dv, shadow_per_g)` hook — any archetype, any mission.
+2. **CAD** — the user designs around the brief (SolidWorks or similar) and
+   exports **.STEP**.
+3. **Import + review** — `planeopt.cadimport.load_step` (optional `cad`
+   extra: cadquery/OpenCascade) reads exact B-rep wetted area and volume plus
+   a station scan; `planeopt.shapereview.review` applies the drag *rules*
+   (nose fineness ≥ 1.0 d_eq, boat-tail half-angle ≤ 21° — set so the app's
+   own floor-tight loft passes — fineness band 4–9) and prices the
+   wetted-area delta vs the minimal loft through the skin-mass model and the
+   mass shadow price. Honest scope: the flat-plate + FF model cannot rank
+   surface sculpting, so the review checks rules and prices integrals — it
+   does not pretend to CFD.
+4. **Re-optimize** — the imported shape becomes the fuselage
+   (`ImportedShape.body_dict` feeds the same buildup + Munk contract), with
+   two scale variables (length, cross-section) so the app sizes the user's
+   shape without mutating its character; scales pin to 1 to take it as-is.
+   (NLP wiring lands with the first imported-fuselage aircraft.)

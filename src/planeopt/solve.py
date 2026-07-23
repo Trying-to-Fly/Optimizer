@@ -374,32 +374,36 @@ def optimize(
         except RuntimeError as e:
             battery[label] = {"failed": str(e)[:120]}
 
-    # fuselage topology study (MODEL_DETAILS section 7): pod-and-boom vs the
-    # integrated cone-to-tail fuselage, full re-optimization. If integrated
-    # wins it becomes the champion and stays active for the winglet study and
+    # fuselage topology study (MODEL_DETAILS section 7.4): the aircraft declares
+    # a LIST of candidate topologies (e.g. CF boom vs integrated cone — a boom
+    # is a suggestion the study prices, never an assumption). One full
+    # re-optimization per candidate (section 6.3 enumeration); the winner
+    # becomes the champion and stays active through the winglet study and
     # numeric re-evaluation (restored in the re-eval finally).
     topology_study = None
     orig_topology = getattr(aircraft, "fuselage_topology", None)
-    if orig_topology == "pod_boom":
-        aircraft.fuselage_topology = "integrated"
-        try:
-            r_int = _solve_nlp(aircraft, mission)
-            adopted = sign * (r_int["objective_value"] - champion["objective_value"]) > 0
-            topology_study = {
-                "integrated": {
-                    **{k: r_int[k] for k in ("objective_value", "V_ms", "auw_kg")},
-                    "pod_len": r_int["dv"]["pod_nose"] + r_int["dv"]["pod_bay"],
-                },
-                "delta_objective": r_int["objective_value"] - champion["objective_value"],
-                "integrated_adopted": adopted,
-            }
-            if adopted:
-                champion = r_int
-            else:
-                aircraft.fuselage_topology = "pod_boom"
-        except RuntimeError as e:
-            topology_study = {"integrated": {"failed": str(e)[:120]}}
-            aircraft.fuselage_topology = "pod_boom"
+    candidates = [
+        t for t in getattr(aircraft, "fuselage_topologies", []) if t != orig_topology
+    ]
+    if orig_topology is not None and candidates:
+        topology_study = {"baseline": orig_topology, "alternatives": {}, "adopted": orig_topology}
+        for topo in candidates:
+            aircraft.fuselage_topology = topo
+            try:
+                r_t = _solve_nlp(aircraft, mission)
+                delta = r_t["objective_value"] - champion["objective_value"]
+                topology_study["alternatives"][topo] = {
+                    **{k: r_t[k] for k in ("objective_value", "V_ms", "auw_kg")},
+                    "delta_objective": delta,
+                }
+                if sign * delta > 0:
+                    champion = r_t
+                    topology_study["adopted"] = topo
+                else:
+                    aircraft.fuselage_topology = topology_study["adopted"]
+            except RuntimeError as e:
+                topology_study["alternatives"][topo] = {"failed": str(e)[:120]}
+                aircraft.fuselage_topology = topology_study["adopted"]
 
     # winglet study (MODEL_DETAILS 3.6): paired on/off re-optimization at the
     # same span cap, an inviscid VLM second opinion on the induced-drag delta,
