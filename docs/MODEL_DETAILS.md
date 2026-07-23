@@ -223,6 +223,44 @@ VLM + 2D strip corrections; the pusher prop operating in the tail's wake is unmo
 fuselage lift/moment contributions are approximated by the buildup only. flow5
 cross-checks champions; flight test closes the gap.
 
+### 3.6 Winglets and the projected-span cap
+
+Winglets only make sense against a span cap: with span free, flat span always wins
+on induced drag, so the optimizer never grows one. With a manufacturing cap on
+**projected (front-view y) span**, a winglet raises effective aerodynamic span
+without widening the footprint, paying with wetted area, mass, and toe-setting risk.
+The model lets the NLP referee that trade:
+
+- **Representation**: the winglet is a **separate `asb.Wing`** ("winglet") rooted at
+  the wing tip — not extra tip xsecs. Feasibility test (2026-07): LiftingLine handles
+  the tip junction cleanly either way, but the in-wing variant corrupts the VLM
+  cross-check; the separate surface also keeps the Schrenk stations, the dihedral
+  proxy, `Wing.span()`, and per-surface mass accounting clean by construction.
+  Variables (aircraft-level): length, cant (floored at ~55 deg so the panel can't
+  become a stall-model-invisible span extension), root-chord ratio, taper, toe.
+- **Span bookkeeping**: the architecture places panels by **arc length** (y from
+  cos(dihedral), z from sin) — the `span` variable is material span, and
+  `b_ref` = projected span. The cap applies to projected span *including* the
+  winglet's y-projection; material span is bounded by the same cap. Consequence
+  observed at the 2.2 m sample cap: the optimizer cants outer panels (polyhedral)
+  to tuck full material span + winglet inside the footprint.
+- **Induced-drag fidelity**: LL sees the nonplanar benefit (k_induced fell ~7.5%
+  for a 0.15 m winglet in the feasibility test) but is *conservative* vs an
+  inviscid VLM fit (~12%). Champions get a numeric VLM second opinion
+  (`aero.vlm_induced_check`, CD = CD0 + k·CL² fit, on/off comparison).
+- **Exclusions, all conservative**: winglet contributes nothing to the Schrenk
+  critical-section stall model, the effective-dihedral floor, or s_ref. Its own
+  stall risk is handled by a toe bound (±3 deg) and a 60k mean-chord Re floor
+  (relaxed vs the 90k wing-tip rule) — a per-section winglet loading limit is a
+  known gap (FINDINGS).
+- **Dihedral credit** (same change): each panel's contribution to the lateral floor
+  is now `(180/π)·sin·cos` of its angle — ≈ the raw angle at small angles, →0
+  vertical — so a near-vertical panel (continuous-cant study, `d3_max_deg`≈88)
+  cannot game the floor.
+- **Mass**: printed pair via its own ConstructionProfile plus explicit tip-socket
+  joiners (~16 g/aircraft, sample) — at sample constants the pair costs ~55 g,
+  which is the hurdle the drag saving must clear in the on/off study.
+
 ---
 
 ## 4. Constraint formalization
@@ -349,6 +387,11 @@ Every champion gets the same battery, assembling the diagnostics from all module
 4. Flatness: 1D sweep of span around the optimum **with all other variables
    re-optimized at each point** (a frozen-variable sweep exaggerates curvature);
    on a plateau, prefer the smaller/stiffer/cheaper end.
+5. Winglet study (§3.6, when the aircraft enables winglets): paired winglet-off
+   re-optimization at the same cap (objective delta), VLM induced-drag second
+   opinion at the champion geometry, and a continuous-cant cross-check (outer
+   panel freed to ~88 deg, explicit winglet off — indicative only, since the
+   Schrenk stations include the canted panel).
 
 ### 6.5 Phase 1 validation gate
 

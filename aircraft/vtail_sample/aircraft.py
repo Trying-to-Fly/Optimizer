@@ -24,7 +24,7 @@ from planeopt.types import (
     PropConfig,
 )
 
-from lwpla_a1 import LWPLA_A1, LWPLA_A1_TAIL  # construction profiles, same directory
+from lwpla_a1 import LWPLA_A1, LWPLA_A1_TAIL, LWPLA_A1_WINGLET  # construction profiles
 
 # --- spec numbers (DESIGN_SPEC.md) ---
 WING_X_LE = 0.390  # wing root LE station
@@ -32,9 +32,12 @@ TAIL_ARM = 0.700  # wing AC -> tail AC
 
 
 class VTailSample:
-    name = "vtail_sample_v1.2"
+    name = "vtail_sample_v1.3"
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
     trim_deflection_limit_deg = 5.5  # <= 1/3 of the +/-12 mm low-rate throw
+    span_cap_m = 2.2  # manufacturing cap on PROJECTED (front-view y) span, winglet included
+    winglet = True  # tip winglet as a separate asb.Wing (parametric designs only)
+    d3_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
 
     # Architecture v2 (planform generalization): variable-width flat/dihedral
     # center panel + 3 outer panels per side, each with its own dihedral and
@@ -47,6 +50,9 @@ class VTailSample:
         "r1": 196.667 / 220, "r2": 173.333 / 196.667, "r3": 150 / 173.333,
         "d0": 0.0, "d1": 3.0, "d2": 3.0, "d3": 3.0,  # per-panel dihedral, deg
         "washout_tip": -2.0,
+        # winglet (consumed only when self.winglet; lengths m, angles deg,
+        # wl_cr is winglet-root chord as a fraction of the wing tip chord)
+        "wl_len": 0.12, "wl_cant": 75.0, "wl_cr": 0.80, "wl_taper": 0.70, "wl_toe": -1.0,
         # tail + balance + structure
         "tail_arm": 0.700, "tail_scale": 1.0,
         "spar_od_center": 0.010, "spar_wall_center": 0.001,
@@ -63,16 +69,25 @@ class VTailSample:
         and battery station. Cruise-state vars live in solve, not here."""
         i = self.DV_DEFAULTS | (inits or {})
         bounds = {
-            "span": (1.5, 3.0), "c_root": (0.16, 0.245),
+            "span": (1.5, self.span_cap_m), "c_root": (0.16, 0.245),
             "center_width": (0.10, 1.20),
             "r1": (0.55, 1.0), "r2": (0.55, 1.0), "r3": (0.55, 1.0),
-            "d0": (0.0, 10.0), "d1": (0.0, 20.0), "d2": (0.0, 20.0), "d3": (0.0, 20.0),
+            "d0": (0.0, 10.0), "d1": (0.0, 20.0), "d2": (0.0, 20.0),
+            "d3": (0.0, self.d3_max_deg),
             "washout_tip": (-4.0, 0.0),
             "tail_arm": (0.55, 0.85), "tail_scale": (0.70, 1.40),
             "spar_od_center": (0.006, 0.014), "spar_wall_center": (0.0006, 0.002),
             "spar_od_outer": (0.005, 0.012), "spar_wall_outer": (0.0005, 0.0018),
             "ballast_kg": (0.0, 0.200), "x_battery": (0.095, 0.135),
         }
+        if self.winglet:
+            # cant floor 55 deg keeps the panel a genuine winglet — below that it
+            # is a span extension the Schrenk stall model cannot see (it is
+            # excluded from the main wing's stations)
+            bounds |= {
+                "wl_len": (0.05, 0.30), "wl_cant": (55.0, 88.0),
+                "wl_cr": (0.40, 0.95), "wl_taper": (0.50, 1.0), "wl_toe": (-3.0, 3.0),
+            }
         return {
             k: opti.variable(init_guess=i[k], lower_bound=lo, upper_bound=hi)
             for k, (lo, hi) in bounds.items()
@@ -86,6 +101,24 @@ class VTailSample:
         # A1 print bed: chord already bounded by c_root upper bound (245 mm)
         # outer panels must exist
         opti.subject_to(dv["span"] >= dv["center_width"] + 0.20)
+        # manufacturing span cap on PROJECTED span: the dv "span" is material
+        # (arc) span; front-view width comes from each panel's cos(dihedral),
+        # plus the winglet's y-projection when present
+        cw2_p = dv["center_width"] / 2
+        w3 = (dv["span"] / 2 - cw2_p) / 3
+        proj_semi = cw2_p * np.cosd(dv["d0"]) + w3 * (
+            np.cosd(dv["d1"]) + np.cosd(dv["d2"]) + np.cosd(dv["d3"])
+        )
+        proj_span = 2 * proj_semi
+        if self.winglet:
+            proj_span = proj_span + 2 * dv["wl_len"] * np.cosd(dv["wl_cant"])
+            # winglet mean-chord Reynolds floor: relaxed vs the 90k tip rule
+            # (small vertical surface, tolerates more drag creep than the wing)
+            c_wl_mean = c_tip * dv["wl_cr"] * (1 + dv["wl_taper"]) / 2
+            opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 >= 60e3)
+            # winglet stays shorter than the last wing panel (buildable socket)
+            opti.subject_to(dv["wl_len"] <= w3)
+        opti.subject_to(proj_span <= self.span_cap_m)
         # lateral-stability proxy: roll-moment-weighted dihedral floor. Dihedral's
         # restoring moment scales with panel area x spanwise arm, so the weight is
         # A_i * y_centroid_i — without the arm the optimizer games the metric by
@@ -103,7 +136,13 @@ class VTailSample:
             (outer3 * (c2 + c3) / 2, cw2 + 2.5 * outer3, dv["d3"]),
         ]
         w_sum = sum(a * y for a, y, _ in panels)
-        eff_dihedral = sum(a * y * d for a, y, d in panels) / w_sum
+        # credit per panel is sin*cos, not the raw angle: the restoring moment
+        # needs both a sideflow AoA (sin) and a vertical force component (cos),
+        # so credit ~ d at small angles and -> 0 as a panel goes vertical — a
+        # near-vertical panel (continuous-cant study) cannot game the floor.
+        # The winglet is excluded entirely (conservative).
+        credit = lambda d: (180 / np.pi) * np.sind(d) * np.cosd(d)
+        eff_dihedral = sum(a * y * credit(d) for a, y, d in panels) / w_sum
         opti.subject_to(eff_dihedral >= self.min_effective_dihedral_deg)
         if deflection_deg is not None:
             opti.subject_to(deflection_deg <= self.trim_deflection_limit_deg)
@@ -140,6 +179,7 @@ class VTailSample:
         wing_af = asb.Airfoil(self.wing_airfoil)
         naca0009 = asb.Airfoil("naca0009")
 
+        parametric = dv is not None
         if dv is None:
             dv = {}
         dv = self.DV_DEFAULTS | dv
@@ -155,11 +195,15 @@ class VTailSample:
             c_root * dv["r1"] * dv["r2"],
             c_root * dv["r1"] * dv["r2"] * dv["r3"],
         ]
-        ys = [0.0, cw2, cw2 + outer3, cw2 + 2 * outer3, span / 2]
-        zs = [0.0]
+        # arc-length panels: "span" is material span along the panels; y/z come
+        # from each panel's dihedral, so projected span = sum(w*cos d) — exact at
+        # high cant (continuous-cant study), 0.1% from the old flat-y placement
+        # at the spec's 3 deg
+        ys, zs = [0.0], [0.0]
         for width, ang in [
             (cw2, dv["d0"]), (outer3, dv["d1"]), (outer3, dv["d2"]), (outer3, dv["d3"])
         ]:
+            ys.append(ys[-1] + width * np.cosd(ang))
             zs.append(zs[-1] + width * np.sind(ang))
         # washout: 0 across the center panel, linear to washout_tip at the tip
         twists = [0.0, 0.0]
@@ -176,6 +220,34 @@ class VTailSample:
                 for k in range(5)
             ],
         ).translate([WING_X_LE, 0, 0])
+
+        # winglet: separate Wing rooted at the tip (parametric designs only —
+        # the v1.2 spec fixture has none). Separate so the Schrenk stall
+        # stations, dihedral proxy, and Wing.span() of the main wing stay clean;
+        # LiftingLine picks up the nonplanar induced benefit either way
+        # (verified against VLM, MODEL_DETAILS 3.6).
+        winglet = None
+        if self.winglet and parametric:
+            wl_cr = chords[4] * dv["wl_cr"]
+            wl_ct = wl_cr * dv["wl_taper"]
+            # root TE flush with the wing-tip TE; tip raked back 25% of length
+            x0 = WING_X_LE + chords[4] - wl_cr
+            dy = dv["wl_len"] * np.cosd(dv["wl_cant"])
+            dz = dv["wl_len"] * np.sind(dv["wl_cant"])
+            winglet = asb.Wing(
+                name="winglet",
+                symmetric=True,
+                xsecs=[
+                    asb.WingXSec(
+                        xyz_le=[x0, ys[4], zs[4]], chord=wl_cr,
+                        twist=dv["wl_toe"], airfoil=wing_af,
+                    ),
+                    asb.WingXSec(
+                        xyz_le=[x0 + 0.25 * dv["wl_len"], ys[4] + dy, zs[4] + dz],
+                        chord=wl_ct, twist=dv["wl_toe"], airfoil=wing_af,
+                    ),
+                ],
+            )
 
         # V-tail: root LE placed so tail AC sits ~tail_arm behind wing AC.
         # Wing AC ~ 25% mean chord (straight LE); tail MAC ~0.131 m x tail_scale.
@@ -212,10 +284,12 @@ class VTailSample:
 
         return asb.Airplane(
             name=self.name,
-            wings=[wing, vtail],
+            wings=[wing, vtail] + ([winglet] if winglet is not None else []),
             s_ref=wing.area(),
             c_ref=wing.area() / wing.span(),  # mean chord (symbolic-safe MAC proxy)
-            b_ref=wing.span(),
+            # projected (front-view y) span: the manufacturing-capped quantity,
+            # and the b the y-based Schrenk stations are consistent with
+            b_ref=2 * ys[4],
         )
 
     def fixed_equipment(self, dv: dict | None = None) -> list[PointMass]:
@@ -248,12 +322,17 @@ class VTailSample:
         )
         x_spar = WING_X_LE + 0.30 * d["c_root"]
         boom_len = d["tail_arm"] + 0.05  # socket to tail block
-        return [
+        extras = [
             PointMass("wing_spars_joiners", spar_mass, x_spar),
             PointMass("boom", 0.056 * boom_len, 0.583 + boom_len / 2),  # 12x10 CF g/m
             PointMass("pod", 0.250, 0.300),  # printed pod incl. hatch (frozen geometry)
             PointMass("nose_ballast", d["ballast_kg"], 0.015),
         ]
+        if self.winglet and dv is not None:
+            # tip sockets + pins, ~8 g per side (printed surface mass itself
+            # comes from the winglet ConstructionProfile via massmodel)
+            extras.append(PointMass("winglet_joiners", 0.016, x_spar))
+        return extras
 
     def parasite_bodies(self) -> list[dict]:
         # pod: ~68x88 mm rounded rect x 585 mm; boom: 12 mm x ~650 mm exposed
@@ -288,7 +367,7 @@ class VTailSample:
         )
 
     def construction(self) -> dict[str, ConstructionProfile]:
-        return {"wing": LWPLA_A1, "vtail": LWPLA_A1_TAIL}
+        return {"wing": LWPLA_A1, "vtail": LWPLA_A1_TAIL, "winglet": LWPLA_A1_WINGLET}
 
 
 AIRCRAFT = VTailSample()

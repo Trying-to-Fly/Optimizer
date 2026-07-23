@@ -175,6 +175,34 @@ def tripped_cd_delta(airplane, V: float, CL: float, rho=1.225, mu=1.81e-5) -> di
     return {"dcd_total": delta, "per_surface": detail}
 
 
+def vlm_induced_check(planes: dict, V: float, alphas=(2.0, 4.0, 6.0), rho=1.225) -> dict:
+    """Numeric second opinion on nonplanar induced drag (winglet study,
+    MODEL_DETAILS 3.6): fit CD = CD0 + k*CL^2 to an inviscid VLM alpha sweep per
+    configuration. LL is the in-loop model; comparing k across {winglet_on,
+    winglet_off} checks the induced-drag delta with an independent method.
+    (LL was the conservative of the two in the feasibility test.)"""
+    out = {}
+    for label, plane in planes.items():
+        cls, cds = [], []
+        for a in alphas:
+            r = asb.VortexLatticeMethod(
+                airplane=plane,
+                op_point=asb.OperatingPoint(velocity=V, alpha=float(a)),
+                xyz_ref=[0.0, 0.0, 0.0],
+            ).run()
+            cls.append(float(r["CL"]))
+            cds.append(float(r["CD"]))
+        k, cd0 = np.polyfit(np.array(cls) ** 2, np.array(cds), 1)
+        ar = float(plane.b_ref**2 / plane.s_ref)
+        out[label] = {
+            "k_induced": float(k),
+            "cd0_inviscid": float(cd0),
+            # span efficiency wrt PROJECTED span — e > 1 is the nonplanar payoff
+            "e_projected_span": float(1 / (np.pi * ar * k)),
+        }
+    return out
+
+
 # ---------------------------------------------------------------- stall (M3.5)
 # Critical-section method (MODEL_DETAILS 3.4): Schrenk spanwise loading + local
 # 2D cl_max at local Re; the wing "stalls" when any station hits its section

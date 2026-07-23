@@ -59,7 +59,7 @@ def run(
     # --- stall: critical-section method (also feeds the gust-margin filter) ---
     clmax_ab = aero.clmax_log_fit(airplane.wings[0].xsecs[0].airfoil)
     stall = aero.critical_stall_speed(airplane, weight_n, clmax_ab)
-    re_s = 1.225 * stall["v_stall_ms"] * (airplane.s_ref / airplane.b_ref) / 1.81e-5
+    re_s = 1.225 * stall["v_stall_ms"] * airplane.c_ref / 1.81e-5
     stall["cl_max_3d"] = 0.9 * (clmax_ab[0] + clmax_ab[1] * np.log(re_s))
 
     feasible = [s for s in sweep if "infeasible" not in s]
@@ -252,8 +252,11 @@ def _solve_nlp(
             stations, s_ref, airplane.b_ref, cl_stall, v_s, clmax_ab
         )
         opti.subject_to(aero.smooth_max(ratios) <= 1.0)
-    # gust margin (MODEL_DETAILS section 4), wing-level clmax from the same fit
-    c_mean = s_ref / airplane.b_ref
+    # gust margin (MODEL_DETAILS section 4), wing-level clmax from the same fit.
+    # c_ref (area / material span), NOT s_ref/b_ref: b_ref is projected span, and
+    # via that route extra dihedral would inflate the modeled chord Re and game
+    # the gust constraint.
+    c_mean = airplane.c_ref
     re_cruise = 1.225 * V * c_mean / 1.81e-5
     clmax_wing = 0.9 * (clmax_ab[0] + clmax_ab[1] * np.log(re_cruise))
     opti.subject_to(aero_run["CL"] <= 0.7 * clmax_wing)
@@ -308,6 +311,9 @@ def optimize(
             "taper": float(np.clip(0.68 * rng.uniform(0.85, 1.15), 0.45, 0.95)),
             "V": float(11 * rng.uniform(0.85, 1.2)),
         }
+        if getattr(aircraft, "winglet", False):
+            inits["wl_len"] = float(0.12 * rng.uniform(0.5, 1.8))
+            inits["wl_cant"] = float(rng.uniform(60.0, 85.0))
         try:
             results.append(_solve_nlp(aircraft, mission, inits=inits))
             starts.append(f"perturbed_{i}")
@@ -324,10 +330,11 @@ def optimize(
     bumped = _solve_nlp(aircraft, mission, extra_mass_kg=0.020)
     shadow_per_g = (bumped["objective_value"] - champion["objective_value"]) / 20.0
 
-    # flatness: re-optimize everything else at fixed spans
+    # flatness: re-optimize everything else at fixed spans (up to the cap)
     flat = []
+    span_cap = getattr(aircraft, "span_cap_m", 3.0)
     if flatness:
-        for s_fix in np.arange(1.5, 3.01, 0.25):
+        for s_fix in np.linspace(1.5, span_cap, 6):
             try:
                 r = _solve_nlp(aircraft, mission, fixed={"span": float(s_fix)})
                 flat.append({"span": float(s_fix), "objective_value": r["objective_value"]})
@@ -354,14 +361,82 @@ def optimize(
         except RuntimeError as e:
             battery[label] = {"failed": str(e)[:120]}
 
+    # winglet study (MODEL_DETAILS 3.6): paired on/off re-optimization at the
+    # same span cap, an inviscid VLM second opinion on the induced-drag delta,
+    # and the continuous-cant cross-check (outermost panel freed to ~88 deg, no
+    # explicit winglet — does one emerge from the planform architecture alone?)
+    winglet_study = None
+    winglet_rejected = False
+    if getattr(aircraft, "winglet", False):
+        winglet_study = {}
+        r_on = champion  # the winglet-bearing solve, kept for the VLM check
+        aircraft.winglet = False
+        try:
+            r_off = _solve_nlp(aircraft, mission)
+            winglet_study["off"] = {
+                **{k: r_off[k] for k in ("objective_value", "V_ms", "auw_kg")},
+                "span": r_off["dv"]["span"],
+            }
+            winglet_study["delta_objective"] = (
+                champion["objective_value"] - r_off["objective_value"]
+            )
+            # rejection rule (EXECUTION_PLAN M4.5 gate): winglet=True only means
+            # "consider one" — wl_len's lower bound forces it into the on-solve,
+            # so if the off-solve wins, IT is the champion and the numeric
+            # re-evaluation below runs winglet-free
+            if sign * winglet_study["delta_objective"] < 0:
+                winglet_rejected = True
+                champion = r_off
+            winglet_study["winglet_rejected"] = winglet_rejected
+        except RuntimeError as e:
+            winglet_study["off"] = {"failed": str(e)[:120]}
+        finally:
+            aircraft.winglet = True
+
+        champ_plane_on = aircraft.geometry(r_on["dv"])
+        aircraft.winglet = False
+        try:
+            champ_plane_off = aircraft.geometry(r_on["dv"])
+        finally:
+            aircraft.winglet = True
+        try:
+            winglet_study["vlm_check"] = aero.vlm_induced_check(
+                {"winglet_on": champ_plane_on, "winglet_off": champ_plane_off},
+                r_on["V_ms"],
+            )
+        except Exception as e:  # numeric cross-check must never kill the run
+            winglet_study["vlm_check"] = {"failed": str(e)[:120]}
+
+        prev_d3 = getattr(aircraft, "d3_max_deg", 20.0)
+        aircraft.winglet, aircraft.d3_max_deg = False, 88.0
+        try:
+            r_cant = _solve_nlp(aircraft, mission)
+            winglet_study["continuous_cant"] = {
+                "objective_value": r_cant["objective_value"],
+                "d3_deg": r_cant["dv"]["d3"],
+                "span": r_cant["dv"]["span"],
+                "caveat": "Schrenk stall stations include the canted panel — indicative only",
+            }
+        except RuntimeError as e:
+            winglet_study["continuous_cant"] = {"failed": str(e)[:120]}
+        finally:
+            aircraft.winglet, aircraft.d3_max_deg = True, prev_d3
+
     # numeric re-evaluation of the champion through the full M1 pipeline
-    result, run_dir = run(
-        aircraft, mission, runs_root, input_files, dv=champion["dv"]
-    )
+    # (winglet-free when the study rejected it — champion is the off-solve then)
+    if winglet_rejected:
+        aircraft.winglet = False
+    try:
+        result, run_dir = run(
+            aircraft, mission, runs_root, input_files, dv=champion["dv"]
+        )
+        # tripped-polar dual evaluation at the champion point (MODEL_DETAILS 3.2)
+        best = result.performance["best"]
+        champ_plane = aircraft.geometry(champion["dv"])
+    finally:
+        if winglet_rejected:
+            aircraft.winglet = True
     result.status = M2_STATUS
-    # tripped-polar dual evaluation at the champion point (MODEL_DETAILS 3.2)
-    best = result.performance["best"]
-    champ_plane = aircraft.geometry(champion["dv"])
     trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
     q = 0.5 * 1.225 * best["V_ms"] ** 2
     drag_tripped = best["drag_n"] + q * champ_plane.s_ref * trip["dcd_total"]
@@ -381,6 +456,7 @@ def optimize(
     result.performance["optimization"] = {
         "champion": champion,
         "resolve_battery": battery,
+        "winglet_study": winglet_study,
         "tripped_polars": tripped,
         "multistart": [
             {"start": s, **({k: v for k, v in r.items() if k != "clmax_3d_used"})}

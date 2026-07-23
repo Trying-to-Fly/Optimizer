@@ -32,6 +32,10 @@ report.html + inputs snapshot).
 - M3: full vehicle — pitch trim (explicit ruddervator), static-margin window,
   gust margin, continuous spar sizing, ballast/battery-position balance,
   tail arm + tail scale
+- M4.5: projected-span manufacturing cap (2.2 m on the sample) + parametric
+  winglet (separate surface, length/cant/chords/toe), with a winglet on/off
+  study, VLM induced-drag cross-check, and continuous-cant check in the
+  champion battery (`docs/MODEL_DETAILS.md` section 3.6)
 
 ```sh
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample

@@ -109,7 +109,40 @@ regularly sees >6–7 m/s wind, that's the trade to argue about.
    calibrated construction profile (turns mass model from ballpark to data).
 2. ~~Stall limit / span cap decisions~~ — decided 2026-07-23: stall stays
    8.0 m/s; span cap raised to 3.0 m, revealing the 2.59 m interior optimum.
-   Open follow-up: whether a 2.6 m wing is acceptable for transport/handling,
-   and whether the 14 mm spar-OD ceiling (root-section fit) is right.
+   ~~Open follow-up: whether a 2.6 m wing is acceptable for transport/handling~~
+   — decided 2026-07-23 (third session): projected span capped at 2.2 m (§7).
+   Still open: whether the 14 mm spar-OD ceiling (root-section fit) is right.
 3. XFOIL spot-check of AG35 vs SD7037 at Re 150–200k (one-off, per §3.1) before
    committing the airfoil switch.
+
+## 7. Span cap + winglet study (2026-07-23, third session — M4.5)
+
+Decision inputs: the 2.6–2.84 m champions were judged unrealistic to build and
+handle; cap set at **2.2 m projected (front-view) span**, winglet-inclusive.
+Model changes: arc-length panel placement (exact at high cant), `b_ref` =
+projected span, explicit winglet as a separate Wing (length/cant/chord/taper/toe,
+cant floored at 55° so it can't become a stall-model-invisible span extension),
+sin·cos dihedral credit (a vertical panel earns none), winglet mass via its own
+construction profile + 16 g tip joiners.
+
+- **The cap costs ~7.4 min (−6.5%)**: 106.7 min at 2.2 m vs 114.1 at 2.84 m,
+  and the flatness sweep still climbs into the cap (96.5 / 103.9 / 106.2 min at
+  1.92 / 2.06 / 2.2 m) — span remains the binding constraint, as the shadow
+  prices have said all along.
+- **Winglets rejected at this cap, by three independent routes.** (1) Paired
+  study: winglet-off re-optimization beats the winglet-on champion by 0.49 min
+  (106.70 vs 106.21; the on-solve had already shrunk the winglet to its 50 mm
+  lower bound). (2) VLM cross-check at the on-champion: k_induced is *higher*
+  with the tiny winglet (0.0133 vs 0.0122) — at 50 mm it sits inside the tip
+  vortex core and its toe costs side-force drag. (3) Continuous-cant study
+  (outer panel freed to 88°): converges to d3 → 0° at exactly the winglet-off
+  objective. The champion pipeline now auto-rejects the winglet when the off-
+  solve wins (`winglet_rejected` in the run.json winglet_study block).
+- Physics reading: at ~55 g printed+joiner mass and ~60–70k winglet-chord Re,
+  the profile-drag + mass toll exceeds the induced saving a ≤2.2 m span budget
+  can buy back. Winglets would re-enter only with a much tighter cap, a
+  lighter/calibrated construction, or a mission flown at higher CL.
+- Standing caveats: winglet sections have no per-station stall limit (toe
+  bounded ±3° + Re floor instead); LL was conservative vs VLM on nonplanar
+  benefit in the feasibility test, so the rejection is not an artifact of LL
+  under-crediting — VLM rejects it too.

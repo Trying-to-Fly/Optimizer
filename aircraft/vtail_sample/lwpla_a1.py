@@ -24,3 +24,7 @@ import dataclasses
 # V-tail variant: same construction, smaller per-surface overhead
 # (root block ~22 g + linkages ~6 g instead of wing servo mounts/tips)
 LWPLA_A1_TAIL = dataclasses.replace(LWPLA_A1, name="lwpla_a1_tail", overhead_kg=0.030)
+
+# Winglet variant: tiny surface — tip cap + glue face only; the root socket is
+# accounted separately as winglet_joiners in structure_extras
+LWPLA_A1_WINGLET = dataclasses.replace(LWPLA_A1, name="lwpla_a1_winglet", overhead_kg=0.010)
