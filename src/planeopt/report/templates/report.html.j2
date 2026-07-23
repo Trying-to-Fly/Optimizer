@@ -34,7 +34,7 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 <tr><th>P_elec</th><td>{{ "%.1f"|format(best["P_elec_w"]) }} W ({{ "%.1f"|format(r.performance["watts_per_kg"]) }} W/kg)</td></tr>
 <tr><th>L/D (trimmed)</th><td>{{ "%.1f"|format(best["L_over_D"]) }}</td></tr>
 <tr><th>CL</th><td>{{ "%.2f"|format(best["CL"]) }}</td></tr>
-<tr><th>alpha / ruddervator</th><td>{{ "%.1f"|format(best["alpha_deg"]) }}° / {{ "%.1f"|format(best["deflection_deg"]) }}°</td></tr>
+<tr><th>alpha / pitch-trim defl</th><td>{{ "%.1f"|format(best["alpha_deg"]) }}° / {{ "%.1f"|format(best["deflection_deg"]) }}°</td></tr>
 <tr><th>prop J vs peak-η J</th><td>{{ "%.2f"|format(best["J"]) }} / {{ "%.2f"|format(best["J_peak_eta"]) }}</td></tr>
 <tr><th>η prop / motor / chain</th><td>{{ "%.2f"|format(best["eta_prop"]) }} / {{ "%.2f"|format(best["eta_motor"]) }} / {{ "%.2f"|format(best["eta_chain"]) }}</td></tr>
 <tr><th>Wh/km (airspeed)</th><td>{{ "%.2f"|format(r.performance["wh_per_km_airspeed"]) }}</td></tr>

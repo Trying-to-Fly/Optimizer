@@ -35,6 +35,7 @@ def run(
     objective = OBJECTIVES[mission.objective]
     pt = aircraft.powertrain()
     bodies = aircraft.parasite_bodies(dv)
+    pitch_control = getattr(aircraft, "pitch_control_name", "ruddervator")
 
     airplane = aircraft.geometry(dv)
     components, printed_breakdown = massmodel.build(aircraft, airplane, dv)
@@ -46,7 +47,7 @@ def run(
     sweep = []
     for V in np.arange(*v_sweep):
         try:
-            t = aero.trim(airplane, float(V), weight_n, x_cg, bodies)
+            t = aero.trim(airplane, float(V), weight_n, x_cg, bodies, control_name=pitch_control)
             p = propulsion.solve(float(V), t["drag_n"], pt)
         except (RuntimeError, ValueError) as e:
             sweep.append({"V_ms": float(V), "infeasible": str(e)})
@@ -67,7 +68,11 @@ def run(
     # advance-ratio cap (beyond 95% of the fitted table the CT->0 tail of the
     # polynomial fit is not trustworthy)
     j_cap = 0.95 * propulsion.PropTable(pt.prop.proxy_table).j_max
+    # throw-limit policy may be a plain number or a callable of the design vector
+    # (hinge fraction free -> the degree cap depends on the control chord)
     defl_cap = getattr(aircraft, "trim_deflection_limit_deg", None)
+    if callable(defl_cap):
+        defl_cap = float(defl_cap(dv))
     legal = [
         s
         for s in feasible
@@ -212,8 +217,10 @@ def _solve_nlp(
     x_cg = totals["x_cg_m"]
     weight_n = auw * G
 
-    # cruise point: trimmed (explicit ruddervator deflection, Cm about produced CG)
-    plane_defl = airplane.with_control_deflections({"ruddervator": defl})
+    # cruise point: trimmed (explicit deflection of the aircraft-declared pitch
+    # surface — "ruddervator", "elevator", ... — Cm about produced CG)
+    pitch_control = getattr(aircraft, "pitch_control_name", "ruddervator")
+    plane_defl = airplane.with_control_deflections({pitch_control: defl})
     aero_run = asb.LiftingLine(
         airplane=plane_defl,
         op_point=asb.OperatingPoint(velocity=V, alpha=alpha),
@@ -374,36 +381,40 @@ def optimize(
         except RuntimeError as e:
             battery[label] = {"failed": str(e)[:120]}
 
-    # fuselage topology study (MODEL_DETAILS section 7.4): the aircraft declares
-    # a LIST of candidate topologies (e.g. CF boom vs integrated cone — a boom
-    # is a suggestion the study prices, never an assumption). One full
-    # re-optimization per candidate (section 6.3 enumeration); the winner
-    # becomes the champion and stays active through the winglet study and
-    # numeric re-evaluation (restored in the re-eval finally).
-    topology_study = None
-    orig_topology = getattr(aircraft, "fuselage_topology", None)
-    candidates = [
-        t for t in getattr(aircraft, "fuselage_topologies", []) if t != orig_topology
-    ]
-    if orig_topology is not None and candidates:
-        topology_study = {"baseline": orig_topology, "alternatives": {}, "adopted": orig_topology}
-        for topo in candidates:
-            aircraft.fuselage_topology = topo
+    # discrete studies (MODEL_DETAILS 6.3): the aircraft declares
+    # `discrete_options = {attr: [candidate values]}` — e.g. fuselage topology
+    # (section 7.4) or tail type (section 8) — every candidate a suggestion the
+    # study prices, never an assumption. Plain enumeration, one full
+    # re-optimization per alternative, in declared order (greedy: each study
+    # runs with the previous studies' adopted values). A winner becomes the
+    # champion and stays active through the winglet study and numeric
+    # re-evaluation (originals restored in the re-eval finally).
+    discrete_studies = {}
+    discrete_originals = {}
+    for attr, candidates in (getattr(aircraft, "discrete_options", None) or {}).items():
+        baseline = getattr(aircraft, attr)
+        discrete_originals[attr] = baseline
+        study = {"baseline": baseline, "alternatives": {}, "adopted": baseline}
+        for cand in candidates:
+            if cand == baseline:
+                continue
+            setattr(aircraft, attr, cand)
             try:
-                r_t = _solve_nlp(aircraft, mission)
-                delta = r_t["objective_value"] - champion["objective_value"]
-                topology_study["alternatives"][topo] = {
-                    **{k: r_t[k] for k in ("objective_value", "V_ms", "auw_kg")},
+                r_c = _solve_nlp(aircraft, mission)
+                delta = r_c["objective_value"] - champion["objective_value"]
+                study["alternatives"][cand] = {
+                    **{k: r_c[k] for k in ("objective_value", "V_ms", "auw_kg")},
                     "delta_objective": delta,
                 }
                 if sign * delta > 0:
-                    champion = r_t
-                    topology_study["adopted"] = topo
+                    champion = r_c
+                    study["adopted"] = cand
                 else:
-                    aircraft.fuselage_topology = topology_study["adopted"]
+                    setattr(aircraft, attr, study["adopted"])
             except RuntimeError as e:
-                topology_study["alternatives"][topo] = {"failed": str(e)[:120]}
-                aircraft.fuselage_topology = topology_study["adopted"]
+                study["alternatives"][cand] = {"failed": str(e)[:120]}
+                setattr(aircraft, attr, study["adopted"])
+        discrete_studies[attr] = study
 
     # winglet study (MODEL_DETAILS 3.6): paired on/off re-optimization at the
     # same span cap, an inviscid VLM second opinion on the induced-drag delta,
@@ -451,20 +462,22 @@ def optimize(
         except Exception as e:  # numeric cross-check must never kill the run
             winglet_study["vlm_check"] = {"failed": str(e)[:120]}
 
-        prev_d3 = getattr(aircraft, "d3_max_deg", 20.0)
-        aircraft.winglet, aircraft.d3_max_deg = False, 88.0
+        prev_cant = getattr(aircraft, "tip_dihedral_max_deg", 20.0)
+        aircraft.winglet, aircraft.tip_dihedral_max_deg = False, 88.0
         try:
             r_cant = _solve_nlp(aircraft, mission)
             winglet_study["continuous_cant"] = {
                 "objective_value": r_cant["objective_value"],
-                "d3_deg": r_cant["dv"]["d3"],
+                "tip_dihedral_deg": r_cant["dv"].get("dihedral_tip"),
+                "d_exp": r_cant["dv"].get("d_exp"),
                 "span": r_cant["dv"]["span"],
-                "caveat": "Schrenk stall stations include the canted panel — indicative only",
+                "caveat": "Schrenk stall stations include the canted region — "
+                "indicative only; the spar-fit constraint also binds high cant",
             }
         except RuntimeError as e:
             winglet_study["continuous_cant"] = {"failed": str(e)[:120]}
         finally:
-            aircraft.winglet, aircraft.d3_max_deg = True, prev_d3
+            aircraft.winglet, aircraft.tip_dihedral_max_deg = True, prev_cant
 
     # numeric re-evaluation of the champion through the full M1 pipeline
     # (winglet-free when the study rejected it — champion is the off-solve then)
@@ -480,8 +493,8 @@ def optimize(
     finally:
         if winglet_rejected:
             aircraft.winglet = True
-        if orig_topology is not None:
-            aircraft.fuselage_topology = orig_topology
+        for attr, val in discrete_originals.items():
+            setattr(aircraft, attr, val)
     result.status = M2_STATUS
     trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
     q = 0.5 * 1.225 * best["V_ms"] ** 2
@@ -502,7 +515,7 @@ def optimize(
     result.performance["optimization"] = {
         "champion": champion,
         "resolve_battery": battery,
-        "fuselage_topology_study": topology_study,
+        "discrete_studies": discrete_studies or None,
         "winglet_study": winglet_study,
         "tripped_polars": tripped,
         "multistart": [

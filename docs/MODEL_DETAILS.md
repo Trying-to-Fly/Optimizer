@@ -213,9 +213,10 @@ part of the optimization state:
   tip-stall diagnostic (the report plots cl/cl_max spanwise at stall). Documented
   approximation: Schrenk loading, not the LL distribution.
 - **Gust margin:** CL_cruise ≤ ~0.7 × CL_max (from the concept doc's trim row).
-- **Lateral-directional:** not dynamically modeled. A vertical-tail-volume floor
-  (from the projected V-tail geometry at its fixed dihedral) stands in as the
-  constraint; flow5 and flight test own the rest.
+- **Lateral-directional:** not dynamically modeled. A declared vertical-tail-volume
+  floor stands in as the constraint (§8 — V-tail effective vertical area
+  S·sin²Γ with the V-angle free; conventional/T fin area directly); flow5 and
+  flight test own the rest.
 
 ### 3.5 Known fidelity limits (restated from the concept doc)
 
@@ -286,13 +287,14 @@ Assembly of every constraint as it actually enters the NLP. Mission-type numbers
 | Min cruise speed | V_cruise ≥ V_wind + penetration margin (the wind model for endurance-class objectives — see §5.2) | ≥ ~9–10 m/s |
 | Static margin | SM_min ≤ (x_np − x_cg)/MAC ≤ SM_max | 8–15% |
 | Gust margin | CL_cruise ≤ 0.7 × CL_max | — |
-| Trim authority | equivalent TE deflection ≤ ⅓ throw | ±12 mm throw |
+| Trim authority | deflection ≤ (⅓ throw)/control chord — the degree cap is derived from the free hinge fraction (§8) | ±12 mm throw |
 | Ballast | 0 ≤ m_ballast ≤ cap | 70 g |
-| Tip Reynolds | Re_tip ≥ floor | 90k |
+| Tip Reynolds | Re_tip ≥ floor (wing); tail/fin mean chord ≥ relaxed floor (§8) | 90k / 60k |
 | Spar stress | σ_root ≤ σ_allow/SF at limit load (§1.3) | n = 5 g |
 | Spar stiffness | tip deflection ≤ cap at limit load | ~5% semi-span |
+| Spar fit | dihedral-curve sag across each straight spar's run + spar OD ≤ usable section depth (§9) | 0.70 × t/c × c |
 | Manufacturing | chord ≤ printable max; battery-bay volume respected (pod frozen) | A1: chord ≲ 245 mm |
-| Directional | vertical-tail volume ≥ floor (§3.4) | Vv ≥ ~0.03 |
+| Directional | vertical-tail volume ≥ declared floor (§8; V-tail counts S·sin²Γ) | Vv ≥ 0.030 |
 | Bounds | span, taper, chord, speeds, spar dims — simple box bounds | span 1.5–2.2 m etc. |
 
 Smoothness rule: anything involving a max over stations or a table lookup uses a
@@ -392,10 +394,13 @@ Every champion gets the same battery, assembling the diagnostics from all module
    opinion at the champion geometry, and a continuous-cant cross-check (outer
    panel freed to ~88 deg, explicit winglet off — indicative only, since the
    Schrenk stations include the canted panel).
-6. Fuselage topology study (§7.4, when the aircraft declares candidate
-   topologies): one full re-optimization per declared alternative; the winner
-   becomes the champion (per-candidate objective deltas and the adoption
-   verdict reported either way).
+6. Discrete studies (§6.3, when the aircraft declares
+   `discrete_options = {attr: [candidates]}` — fuselage topology §7.4, tail
+   type §8, any future configuration question): one full re-optimization per
+   declared alternative, run in declared order (greedy — each study inherits
+   the previous studies' adopted values); a winner becomes the champion
+   (per-candidate objective deltas and the adoption verdict reported either
+   way in `discrete_studies`).
 
 ### 6.5 Phase 1 validation gate
 
@@ -499,9 +504,9 @@ is genuinely optimized.
 
 ### 7.4 Topology study — discrete outer loop
 
-The aircraft declares a **list** of candidate topologies
-(`fuselage_topologies`) — the CF boom is a candidate the study *prices*,
-never an assumption. Sample: `pod_boom` (lofted pod + CF boom, the spec
+The aircraft declares a **list** of candidate topologies (an entry in
+`discrete_options`, the generic declared-study mechanism of §6.3/§6.4 item 6)
+— the CF boom is a candidate the study *prices*, never an assumption. Sample: `pod_boom` (lofted pod + CF boom, the spec
 layout) and `integrated` (the pod's tail cone runs all the way to the tail
 block — cone length derived from `tail_arm`, printed cone replaces the boom,
 plus an internal 8 mm CF stiffener to keep the printed tail credible at this
@@ -537,3 +542,118 @@ fuselage is designed by a human. Workflow (decided 2026-07-23):
    two scale variables (length, cross-section) so the app sizes the user's
    shape without mutating its character; scales pin to 1 to take it as-is.
    (NLP wiring lands with the first imported-fuselage aircraft.)
+
+---
+
+## 8. Tail — declared types, per-dimension surfaces
+
+Through M4.6 the tail was one uniform `tail_scale` knob on the spec V-tail;
+the fuselage-phase champion pinned it at its 0.70 floor, making the
+parameterization the binding limitation. Decided 2026-07-23 (fifth session):
+tail TYPE is the only discrete choice; everything inside a type is a
+continuous per-dimension variable. `tail_scale` is retired.
+
+### 8.1 Types — the discrete study
+
+The aircraft declares `tail_type` plus a candidate list in
+`discrete_options["tail_type"]` (**[sample]** `vtail`, `conventional`,
+`ttail`), enumerated by the generic mechanism (§6.3): one full
+re-optimization per type, winner adopted, all priced in `discrete_studies`.
+Per type the generator produces consistently named surfaces so mass mapping
+(§1.2) works by construction profile: `vtail` (tail profile) or `hstab`
+(tail profile) + `fin` (fin profile — smaller overhead, no in-surface servo).
+The T-tail additionally prices a declared stab-on-fin mount mass
+(**[sample]** 20 g at the tail block) and mounts the hstab at the fin tip
+(LL sees the raised surface leave the wing's downwash field).
+
+### 8.2 Variables and placement
+
+Free within a type: `t_span`, `t_c_root`, `t_taper`, `t_sweep` (in-plane LE
+sweep), `t_dihedral` (V-angle, V-tail only), `cs_frac` (hinge/chord fraction,
+0.2–0.4), and for conventional/T the fin's own `fin_height`, `fin_c_root`,
+`fin_taper`, `fin_sweep`. The surface's **AC is placed exactly `tail_arm`
+behind the wing AC including the sweep offset** (root LE at
+`ac_x − s̄·tanΛ − 0.25·MAC`, with s̄ the arc distance to the MAC station), so
+sweep cannot buy moment arm the boom-length accounting doesn't pay for.
+Tail and fin mean chords carry a 60k Reynolds floor (relaxed vs the 90k
+wing-tip rule — winglet precedent).
+
+### 8.3 Trim surface and throw policy
+
+The pitch surface is a real `ControlSurface` named by the aircraft
+(`pitch_control_name`: "ruddervator" / "elevator") — the framework's trim
+solve and NLP read the declared name, never a hardcoded one. Deflection
+effectiveness and its drag increment come from asb's control-surface model
+(effectiveness `1 − hinge^2.75`). The throw limit stays policy — trim uses
+≤ ⅓ of the declared TE throw (**[sample]** ±12 mm) — but the *degree* cap is
+now derived: `limit = (⅓·throw)/(cs_frac · t_c_mean)`. A larger hinge
+fraction gains effectiveness per degree yet loses allowed degrees, so
+`cs_frac` is a genuine trade, not a free knob. No servo-torque model
+(decision 2026-07-23).
+
+### 8.4 Directional floor
+
+LL has no yaw axis: without a constraint, fins optimize to zero and V-tails
+shed angle. A declared vertical-tail-volume floor stands in (§3.4):
+`Vv = S_v_eff · l_v / (S_ref · b_proj) ≥ v_tail_volume_min`, with
+`S_v_eff = S_tail·sin²Γ` for the V-tail (angle free) and the fin's area for
+conventional/T; `l_v ≈ tail_arm` (CG sits near the wing AC at this
+fidelity). **[sample]** floor 0.030 — provenance: the spec's own tail works
+out to Vv = 0.034, and 0.02–0.04 is class practice.
+
+---
+
+## 9. Wing dihedral — one curve family (architecture v3)
+
+The v2 wing carried four independent panel dihedrals (d0–d3). Retired
+2026-07-23 (user decision): the piecewise breaks complicated spar holes (a
+joiner block at every break), and the M4.6 champion showed the dihedral
+*distribution* is a flat direction — the polyhedral middle ground paid build
+complexity for nothing.
+
+### 9.1 The family
+
+Local dihedral is one smooth two-parameter family over arc fraction
+η ∈ [0, 1] from root to tip:
+
+    δ(η) = dihedral_tip · η^d_exp        d_exp ∈ [0, 2]
+
+`d_exp = 0` is **exactly a single simple dihedral angle**; `d_exp > 0` is a
+**fully curved wing** — flat at the root (which the wing-saddle wants),
+curvature building outboard, gull-like at high exponent. The optimizer picks
+the shape inside one continuous family; nothing discrete, nothing arbitrary.
+Panels still place by arc length (`span` = material span, `b_ref` =
+projected span), with δ sampled at each panel's midpoint (midpoint rule) via
+a helper shared between geometry and constraints, so the two cannot drift.
+The projected-span cap, the sin·cos effective-dihedral floor (§3.6), and the
+Schrenk stations all consume the sampled panels unchanged. The dv=None
+fixture keeps the frozen v1.2 spec panels (flat center + 3° outer) forever.
+
+### 9.2 Straight-spar fit — buildability as geometry
+
+Build standard: both tube spars stay **straight** (center + outer runs,
+§1.3) — no segment joiners, spar holes drillable in a straight line. The
+curve's sag across each spar's run must leave room for the tube inside the
+usable section depth:
+
+    sag(η) + spar_OD ≤ SPAR_DEPTH_FRACTION · t/c · c(η)
+
+checked at the run midpoint (center spar) and the interior panel breaks
+(outer spar), with curve height from the small-angle integral
+`z(η) = semi · δ_tip[rad] · η^(q+1)/(q+1)` (documented approximation, ≤ 11%
+high at the 20° tip-angle cap; the family is convex so these stations bound
+the sag). **[sample]** depth fraction 0.70 of the airfoil's max thickness.
+A wing that cannot pass a sufficiently sized straight spar is *unbuildable*,
+so this is a hard geometry constraint, not a priced penalty — same posture
+as the packaging floors (§7.2). At `d_exp = 0` the sag is identically zero:
+simple dihedral always fits. Honest caveat: segmented multi-joint spars
+could follow stronger curves; that escape is deliberately unmodeled (it is
+the complexity this rework removed), so "curve rejected, spar-fit binding"
+means rejected *under the two-straight-spar build standard*. The v2
+per-break joiner mass (16 g) is deleted; the root/center-outer joiner block
+mass stays.
+
+The continuous-cant winglet cross-check (§3.6) now frees `dihedral_tip` to
+~88° instead of a last-panel angle; the spar-fit constraint binds high cant,
+which is a true statement about straight-spar buildability — the check
+remains indicative-only.

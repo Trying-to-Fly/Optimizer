@@ -21,9 +21,14 @@ LWPLA_A1 = ConstructionProfile(
 
 import dataclasses
 
-# V-tail variant: same construction, smaller per-surface overhead
-# (root block ~22 g + linkages ~6 g instead of wing servo mounts/tips)
+# Tail variant (V-tail panels or horizontal stab): same construction, smaller
+# per-surface overhead (root block ~22 g + linkages ~6 g instead of wing servo
+# mounts/tips)
 LWPLA_A1_TAIL = dataclasses.replace(LWPLA_A1, name="lwpla_a1_tail", overhead_kg=0.030)
+
+# Fin variant (conventional/T-tail types): root mount + rudder hinge hardware
+# only — the tail servos are counted once in fixed_equipment regardless of type
+LWPLA_A1_FIN = dataclasses.replace(LWPLA_A1, name="lwpla_a1_fin", overhead_kg=0.020)
 
 # Winglet variant: tiny surface — tip cap + glue face only; the root socket is
 # accounted separately as winglet_joiners in structure_extras

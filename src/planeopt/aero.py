@@ -3,10 +3,11 @@
 M1 implementation (numeric, fixed design):
 - Lifting surfaces: asb.LiftingLine — nonlinear lifting line, viscous from
   NeuralFoil 2D data, handles sweep/dihedral/multiple wings, and respects
-  ControlSurface deflections (explicit ruddervator trim, section 3.3).
+  ControlSurface deflections (explicit pitch-control trim, section 3.3; the
+  trim surface's name is declared by the aircraft, `pitch_control_name`).
 - Non-lifting bodies: flat-plate + form-factor buildup from
   aircraft.parasite_bodies(), plus an excrescence margin (section 3.1).
-- Trim: 2-unknown root solve (alpha, symmetric ruddervator deflection) for
+- Trim: 2-unknown root solve (alpha, symmetric pitch-control deflection) for
   L = W and Cm(CG) = 0.
 - Stall: wing-level CL_max from the root airfoil's NeuralFoil cl_max at stall Re
   with a 3D knockdown; the critical-section method replaces this at M2/M3.
@@ -35,8 +36,8 @@ def body_cd0(bodies: list[dict], V: float, s_ref: float, rho=1.225, mu=1.81e-5) 
     return EXCRESCENCE * d / s_ref
 
 
-def _run_ll(airplane, V, alpha, deflection, x_cg):
-    p = airplane.with_control_deflections({"ruddervator": float(deflection)})
+def _run_ll(airplane, V, alpha, deflection, x_cg, control_name="ruddervator"):
+    p = airplane.with_control_deflections({control_name: float(deflection)})
     return asb.LiftingLine(
         airplane=p,
         op_point=asb.OperatingPoint(velocity=V, alpha=float(alpha)),
@@ -44,22 +45,28 @@ def _run_ll(airplane, V, alpha, deflection, x_cg):
     ).run()
 
 
-def trim(airplane, V: float, weight_n: float, x_cg: float, bodies: list[dict], rho=1.225) -> dict:
-    """Solve (alpha, ruddervator deflection) for L = W and Cm = 0 at speed V."""
+def trim(
+    airplane, V: float, weight_n: float, x_cg: float, bodies: list[dict], rho=1.225,
+    control_name: str = "ruddervator",
+) -> dict:
+    """Solve (alpha, pitch-control deflection) for L = W and Cm = 0 at speed V.
+
+    The pitch-trim surface is declared by the aircraft (`pitch_control_name`,
+    e.g. "ruddervator" or "elevator") — the framework assumes no tail type."""
     s_ref = airplane.s_ref
     q = 0.5 * rho * V**2
     cl_req = weight_n / (q * s_ref)
 
     def residuals(x):
         a, d = x
-        r = _run_ll(airplane, V, a, d, x_cg)
+        r = _run_ll(airplane, V, a, d, x_cg, control_name)
         return [float(r["CL"]) - cl_req, float(r["Cm"])]
 
     sol = root(residuals, x0=[2.0, 0.0], method="hybr", tol=1e-8)
     if not sol.success:
         raise RuntimeError(f"trim failed at V={V}: {sol.message}")
     alpha, deflection = sol.x
-    r = _run_ll(airplane, V, alpha, deflection, x_cg)
+    r = _run_ll(airplane, V, alpha, deflection, x_cg, control_name)
 
     cd_total = float(r["CD"]) + body_cd0(bodies, V, s_ref)
     drag = q * s_ref * cd_total

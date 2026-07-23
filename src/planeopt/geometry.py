@@ -21,6 +21,17 @@ def summarize(airplane: asb.Airplane) -> dict:
         "aspect_ratio": float(wing.aspect_ratio()),
         "mean_chord_m": float(wing.area() / wing.span()),
         "n_wings": len(airplane.wings),
+        # per-surface dims, architecture-agnostic (span() is front-view arc
+        # length, so a vertical fin reports its height here)
+        "surfaces": {
+            w.name: {
+                "span_m": round(float(w.span()), 4),
+                "area_m2": round(float(w.area()), 5),
+                "root_chord_m": round(float(w.xsecs[0].chord), 4),
+                "tip_chord_m": round(float(w.xsecs[-1].chord), 4),
+            }
+            for w in airplane.wings
+        },
     }
     wl = next((w for w in airplane.wings if w.name == "winglet"), None)
     if wl is not None:
