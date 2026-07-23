@@ -1,8 +1,9 @@
-# HANDOFF — Plane Optimizer (written 2026-07-23, end of fourth session)
+# HANDOFF — Plane Optimizer (updated 2026-07-24, end of fifth session)
 
 Orientation for a fresh agent picking up this project. Read this, then
 `EXECUTION_PLAN.md` (milestones), `MODEL_DETAILS.md` (per-module equations —
-§7 is the fuselage), and `FINDINGS.md` (§8 is the latest champion).
+§7 fuselage, §8 tail, §9 wing dihedral family), and `FINDINGS.md` (§9 is the
+latest champion).
 
 ## 1. What this project is
 
@@ -32,9 +33,9 @@ mission. New features enter as framework hooks + aircraft-declared data.
 - **Timing on /mnt/c:** one NLP solve ~5–6 min; full champion battery
   ~100 min; `tests/test_run.py::test_m3_optimize_smoke` runs optimize() and
   cannot finish in 30 min — don't wait on it; the champion run covers that
-  path. The other 15+ tests are fast (`.venv/bin/python -m pytest -q
+  path. The other ~40 tests are fast (`.venv/bin/python -m pytest -q
   tests/test_configs.py tests/test_winglet.py tests/test_fuselage.py
-  tests/test_shapereview.py`).
+  tests/test_shapereview.py tests/test_tail.py tests/test_wingcurve.py`).
 
 ## 3. How the user works (important)
 
@@ -50,7 +51,47 @@ studies rather than assumed.
 
 ## 4. State as of this handoff
 
-All committed and pushed through `d6f38cf`:
+**Fifth session (2026-07-24) — M4.7 done.** Committed and pushed:
+
+- **Generic discrete studies**: `solve.optimize` enumerates any declared
+  `discrete_options = {attr: [candidates]}` (fuselage topology + tail type
+  both use it; run.json key `discrete_studies`; originals restored in the
+  re-eval finally).
+- **Tail phase** (MODEL_DETAILS §8): types vtail/conventional/ttail;
+  per-dimension vars (t_span/t_c_root/t_taper/t_sweep, t_dihedral or
+  fin_*, cs_frac 0.2–0.4); `tail_scale` retired; declared
+  `pitch_control_name` threads through trim (no hardcoded "ruddervator");
+  throw cap derived from hinge fraction (`trim_deflection_limit_deg` may be
+  a callable of dv); declared `v_tail_volume_min = 0.030`; T-tail mount
+  mass. Tail AC placed at tail_arm including sweep offset.
+- **Wing arch v3** (MODEL_DETAILS §9, user decision): dihedral curve
+  δ(η) = dihedral_tip·η^d_exp replaced per-panel d0–d3; straight-spar sag
+  fit is a HARD constraint (0.70·t/c usable depth); per-break joiner mass
+  deleted; continuous-cant study frees `tip_dihedral_max_deg` (renamed from
+  d3_max_deg). CasADi gotcha: never evaluate η^q at η=0 symbolically (NaN
+  in the exponent derivative) — z(0)=0 analytically.
+- **Champion (run `20260724T052806`, FINDINGS §9): V-tail retained,
+  109.3 min @ 2.2 m, AUW 1925 g.** Conventional −5.6, T-tail −8.5, boom
+  re-adopted (+4.9), winglet re-rejected (−0.96). Wing converges to
+  d_exp = 0 — SIMPLE dihedral (4.1° uniform) wins inside its own family;
+  spar-fit inactive at the optimum. Vv floor pulled the V-angle to its 55°
+  bound (steep-V handling costs unmodeled — treat the cap as a declared
+  practice limit). Balance now via bay stretch (486 mm, battery at 102 mm,
+  ballast 0); saddle constraint active (bay end exactly at 60% root chord)
+  and visually verified in the three-view. Stall INACTIVE for the first
+  time (7.81 vs 8.0) — gust margin sizes the wing. Pod fineness 10.7 is
+  outside the shape review's 4–9 band (see FINDINGS §9 note).
+- **STEP loader verified for real** (`uv sync --extra cad` done; needed
+  `UV_HTTP_TIMEOUT=600`): fixed the station scan (tessellation vertex
+  binning collapses on extrusions — now samples triangle-edge crossings at
+  station boundaries). `test_step_loader_roundtrip` passes un-skipped.
+- Tests: `tests/test_tail.py` (13) + `tests/test_wingcurve.py` (6) added;
+  fast suite now `test_configs test_winglet test_fuselage test_shapereview
+  test_tail test_wingcurve`. Aircraft is `vtail_sample_v1.4`.
+- Known cosmetic gap: three-view/3D artifacts draw only lofted bodies, so
+  the CF boom is invisible between pod and tail block.
+
+Fourth-session state (all still true) through `d6f38cf`:
 
 - **M0–M4.6 done.** M4.5 = projected-span cap (2.2 m) + winglet w/
   three-route on/off study (FINDINGS §7). M4.6 = fuselage phase: streamlined
@@ -84,53 +125,22 @@ All committed and pushed through `d6f38cf`:
   user: do NOT rerun for this alone — the tail-phase champion run validates
   it.
 
-## 5. Next work, in order
+## 5. Next work
 
-### A. Tail phase (user's decisions already given — do not re-ask)
+The tail phase (was item A here) and the wing dihedral-curve rework are
+DONE — see §4. Remaining, roughly in order of readiness:
 
-Types **V-tail + conventional + T-tail**, declared list, enumerated like
-fuselage topologies. Within a type free: tail span, root chord, taper,
-**sweep**, V-/fin angle. Control surfaces: **hinge/chord fraction free
-(~0.2–0.4); throw limit stays policy** (⅓ of available throw), no
-servo-torque model. Retire the single `tail_scale` knob for per-dimension
-variables. Only tail TYPE stays discrete.
-
-Implementation notes scoped so far:
-1. Generalize the discrete-study loop in `solve.optimize` (currently
-   fuselage-only) into a generic mechanism over declared attrs, e.g.
-   `discrete_options = {"fuselage_topology": [...], "tail_type": [...]}` —
-   one full re-optimization per alternative, winner adopted, all priced in
-   run.json. Keep restore-after-re-eval semantics (see current topology
-   block).
-2. Add a declared **vertical-tail-volume floor**: LL has no yaw axis, so
-   without it conventional fins optimize to zero and V-tails shed angle.
-   V-tail effective vertical area ≈ S_tail · sin²(Γ). Floor value is
-   aircraft-declared data.
-3. T-tail: declared fin structural mass penalty (stab-on-fin mount).
-4. Before coding, READ: how `_solve_nlp` does symbolic explicit-deflection
-   trim, and how `massmodel.build` maps `construction()` profiles to wing
-   names — tail generators must produce consistent wing names + profiles per
-   type. The pitch-trim control-surface name is currently hardcoded
-   "ruddervator" in `aero._run_ll` — make it declared (e.g.
-   `aircraft.pitch_control_name`) when adding conventional/T (surface
-   "elevator").
-5. After implementing: fast tests per type (geometry contract, mass mapping,
-   v-volume floor math), then ONE champion run (background, venv binary,
-   ~2 h+ with the tail-type study added), FINDINGS §9, commit, push. This
-   run doubles as first validation of the wing-saddle constraints (§4 above)
-   — check in the 3D artifact that the bay visibly carries the wing root.
-
-### B. Gated / pending items
-
-- `uv sync --extra cad` (installs cadquery) — run when NO background job is
-  alive, then `tests/test_shapereview.py::test_step_loader_roundtrip`
-  un-skips; verify it passes (the loader is written but never executed).
 - When the user delivers their SolidWorks .STEP: wire the imported-fuselage
   NLP mode — `ImportedShape.body_dict` feeds the existing bodies contract;
   two scale variables (length, cross-section) with Swet/volume fitted smooth
   over a small scale grid (volume scales exactly as sx·syz²; fit Swet);
   scales pinnable to 1. Run the shape review + report both in the run
-  artifacts.
+  artifacts. Note the fineness-band tension first (FINDINGS §9): the
+  champion pod is f = 10.7 vs the review's 4–9 band — decide with the user
+  whether to widen the band or constrain fineness in the NLP.
+- Small items worth folding into any next code session: draw the CF boom in
+  the viz twin (cosmetic gap, §4); consider whether the 55° V-angle cap
+  deserves a declared handling rationale in DESIGN docs.
 - Optional warm-start flag (`--warm-start <run dir>` reading champion dv as
   inits) — only worth it for speed; multistart agreement is already perfect.
 - Queued far-field: XFOIL spot-check AG35 vs SD7037 (FINDINGS §6), user
