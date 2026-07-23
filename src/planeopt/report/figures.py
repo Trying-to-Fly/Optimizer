@@ -117,6 +117,14 @@ def three_view(plane, out_dir: Path, fname="three_view.png") -> None:
     _plt.close(fig)
 
 
+def interactive_3d(plane, run_dir: Path, fname="interactive_3d.html") -> None:
+    """Rotatable 3D model (plotly, self-contained HTML) written next to
+    report.html — open in any browser; no display server needed."""
+    fig = plane.draw(backend="plotly", show=False)
+    fig.update_layout(title=plane.name, scene_aspectmode="data")
+    fig.write_html(run_dir / fname, include_plotlyjs=True)
+
+
 def stall_spanwise(stall: dict, out_dir: Path) -> None:
     """Spanwise cl/clmax at the stall condition — shows WHERE the wing stalls."""
     if "stations_y" not in stall:

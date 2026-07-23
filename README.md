@@ -19,7 +19,8 @@ uv run planeopt run missions/endurance_sample.py -a aircraft/vtail_sample
 ```
 
 Runs write self-contained artifact directories under `runs/` (run.json +
-report.html + inputs snapshot).
+report.html + an interactive 3D model (`interactive_3d.html`, rotatable in any
+browser) + inputs snapshot).
 
 ## Status
 

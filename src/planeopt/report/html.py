@@ -15,8 +15,12 @@ _env = jinja2.Environment(
 
 def render(result, run_dir: Path | None = None) -> str:
     figures = []
+    has_3d = False
     if run_dir is not None:
         for png in sorted((run_dir / "figures").glob("*.png")):
             b64 = base64.b64encode(png.read_bytes()).decode()
             figures.append({"name": png.stem, "b64": b64})
-    return _env.get_template("report.html.j2").render(r=result, figures=figures)
+        has_3d = (run_dir / "interactive_3d.html").exists()
+    return _env.get_template("report.html.j2").render(
+        r=result, figures=figures, has_3d=has_3d
+    )

@@ -23,6 +23,7 @@
 ({{ r.performance.get("objective_units", r.diagnostics.get("objective_units","")) }},
 wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</p>
 <p class="status">{{ r.status }}</p>
+{% if has_3d %}<p><a href="interactive_3d.html">interactive 3D model &#8599;</a> (rotate/zoom in browser)</p>{% endif %}
 
 {% if r.performance.get("best") %}
 {% set best = r.performance["best"] %}

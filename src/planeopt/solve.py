@@ -152,6 +152,7 @@ def run(
         planes = {"baseline (defaults)": aircraft.geometry(None), "optimized": airplane}
     figures.planform_compare(planes, run_dir / "figures")
     figures.three_view(airplane, run_dir / "figures")
+    figures.interactive_3d(airplane, run_dir)
     (run_dir / "report.html").write_text(report_html.render(result, run_dir))
     return result, run_dir
 
