@@ -7,15 +7,22 @@ constraint set, not the absolute minutes** (see VALIDATION_ANCHORS.md).
 Generated 2026-07-23, M3/M4 runs. Updated same day after the SM fix
 (Munk fuselage term + regression derivative) and the span-cap raise to 3.0 m.
 
-## 1. The champion (post-SM-fix, span cap 3.0 m)
+## 1. The champion (architecture v2: generalized planform + critical-section stall)
 
-**Span 2.59 m — an interior optimum, off every bound.** With load-scaled spars the
-mass price of span honestly balances induced drag. Champion: span 2.59, root chord
-181 mm, taper 0.73, tail arm 550 mm, tail scale 0.79, spars 14×1.1 / 12×1.4 mm,
-ballast 0 g, battery full forward, cruise 10.1 m/s, AUW 1988 g, 23.4 W →
-**107.5 min** (multi-start 3/3 identical; flatness peaks at ~2.6 m:
-88 → 98 → 104 → 107 min over 1.75–2.5 m; spans ≥2.75 fail to converge with the
-14 mm spar-OD ceiling).
+**Span 2.84 m, and the flatness sweep now shows a true interior peak** (90 → 101 →
+109 → 113 → 114.1 min at 2.75–2.84 m → 113.8 at 3.0). Champion: 1.16 m-wide center
+panel, chord 181 → 140 mm with **no taper on the tip panel** (the critical-section
+stall model holds tip chord for stall margin instead of leaning on washout, which
+settles at just −0.4°), dihedral 7.7°/2.7°/0°/0° (inboard panels only — but the
+dihedral *distribution* is a flat direction of the optimum; only the roll-stiffness
+floor binds), tail arm 573 mm, spars 14×1.3 / 12×0.8 mm, ballast 0 g, cruise
+9.5 m/s (wind floor active again), AUW 2034 g, 21.9 W → **114.1 min**.
+
+Verification: multi-start 3/3 identical; **NLP vs numeric re-evaluation gap 0.0 min**
+(all feasibility rules now shared); critical-section stall 7.79 ≤ 8.0 m/s with a
+root-first (docile) stall pattern; tripped polars −9.7 min, ranking intact;
+mass ±10% → ∓2.8 min, chain efficiency ±10% → ±10 min (still the dominant
+uncertainty).
 
 ### Active constraint set
 
