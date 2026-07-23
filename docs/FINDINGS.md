@@ -146,3 +146,40 @@ construction profile + 16 g tip joiners.
   bounded ±3° + Re floor instead); LL was conservative vs VLM on nonplanar
   benefit in the feasibility test, so the rejection is not an artifact of LL
   under-crediting — VLM rejects it too.
+
+## 8. Fuselage phase (2026-07-23, fourth session — M4.6, streamlined loft)
+
+Run `20260723T181336`. Freeing the fuselage (streamlined parametric loft,
+emergent boom, tail_arm 0.40–1.20) recovered the entire span-cap penalty:
+**114.1 min at 2.2 m projected** vs 106.7 with the frozen spec pod — the
+same objective the old 2.84 m champion had, at 62 cm less span.
+
+- **The pod shrinks to every floor at once**: cross-section 54×70 mm
+  (battery-width packaging floor binding), nose 61 mm (= 1.0 d_eq proportion
+  floor), boat-tail 111 mm (= 1.8 d_eq floor), bay 310 mm (battery CG
+  window), 482 mm overall — a minimal streamlined envelope around the
+  equipment, worth ~+6–7 min over the spec pod (55 g + wetted area).
+- **CF boom decisively adopted**: the integrated printed-cone topology loses
+  **8.9 min** (104.7 vs 113.6) — cone wetted area + stiffener mass beat the
+  slim CF tube. The topology study prices this; the boom is a suggestion the
+  study confirmed, not an assumption.
+- **tail_arm 519 mm — the old 0.55 m lower bound had been binding.** With
+  honest bounds the tail moves closer (shorter boom beats the longer arm;
+  tail_scale sits at its 0.70 floor). Note for the tail phase: the scale
+  floor is now the binding tail constraint — per-dimension tail variables
+  should replace it.
+- **Winglet re-rejected at the new champion** (−0.50 min paired study;
+  continuous-cant d3 → 0° at exactly the winglet-off objective). VLM
+  cross-check caveat: the 3-point quadratic fit degenerated at this
+  high-dihedral geometry (negative inviscid CD0, e_proj > 1 artifacts) —
+  treat it as qualitative this round; LL + the paired study carry the
+  verdict.
+- Dihedral redistribution: d0 at its 10° bound over the 1.16 m center panel,
+  d1 10.8°, outer panels flat — the distribution remains a flat direction;
+  the roll-stiffness floor binds, the shape is a choice.
+- Verification: multistart spread ~1e-9, NLP-vs-reeval gap ~1e-5 min,
+  flatness climbs monotonically into the cap (96.9 → 113.6 over 1.78–2.2 m;
+  1.5/1.64 m infeasible), shadow price 7.7 min/100 g, chain-η ±10% still the
+  dominant uncertainty (±10 min).
+- Artifacts: `design_brief.md` (CAD round-trip step (a)) now generated per
+  run; champion pod preview in `runs/fuselage_preview/`.
