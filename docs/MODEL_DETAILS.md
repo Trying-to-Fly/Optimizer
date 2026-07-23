@@ -425,12 +425,16 @@ stay fixed.
 
 ### 7.1 Geometry — the loft IS the model
 
-`planeopt.fuselage.loft`: superellipse cross-sections (shape 4 ≈ rounded
-rectangle) along the station line — circular-arc nose growth over intermediate
-sections, constant bay, conical tail fairing tapering to a 12 % end cap.
-Symbolic-safe (floats or Opti variables), and the NLP reads the loft's **own
-integrals** (`area_wetted()`, `volume()`), so geometry and model cannot drift
-apart.
+`planeopt.fuselage.loft`: superellipse cross-sections along the station line,
+a **streamlined family by construction** — the optimizer sizes the fuselage,
+the family guarantees it looks like one. Nose: elliptical-arc radius growth,
+tangent at the bay shoulder, section shape blending from circular at the tip
+to the bay's rounded rectangle (shape 4). Bay: constant section. Tail:
+cubic-Hermite **boat-tail** (tangent at both the shoulder and the 12 % end
+cap — no straight cone), blending back to circular. Symbolic-safe (floats or
+Opti variables; all station fractions and radius multipliers are plain
+floats), and the NLP reads the loft's **own integrals** (`area_wetted()`,
+`volume()`), so geometry and model cannot drift apart.
 
 Sample-aircraft variables: `pod_nose`, `pod_bay`, `pod_tail` (lengths) and
 `pod_xs` (cross-section scale on the spec's 68×88 mm). Anchor: the bay's aft
@@ -454,8 +458,11 @@ constraints:
   wide backstop only), so CG travel and loft stretch trade against each other;
 - bay ≥ battery + 50 mm (travel + leads); bay + cone root ≥ the full
   battery+ESC+FC stack;
-- slenderness guards (nose ≥ 0.3 d_eq, pod-boom cone ≥ 1.2 d_eq) so the
-  optimizer can't propose blunt caps the form-factor model cannot rank.
+- proportion floors (nose ≥ 1.0 d_eq, pod-boom boat-tail ≥ 1.8 d_eq): the
+  flat-plate + form-factor model cannot rank end-cap *shape quality*, so
+  plane-like proportions are imposed as geometry, not hoped for (the spec
+  pod's 30 mm nose predates these — the `dv=None` fixture is exempt);
+- pod-boom: an exposed boom must exist (pod tail cap + 100 mm ≤ tail block).
 
 ### 7.3 Aero and mass from the loft
 
@@ -469,11 +476,18 @@ the spec pod reproduces its frozen 1.25 — slenderness becomes a real trade on
 a preserved baseline. The Munk destabilizing dCm/dα (§3.4) now takes the
 loft's symbolic volume inside the NLP.
 
-Mass: pod = k_skin × S_wet + overhead (1.48 kg/m² + 50 g), calibrated to
+Mass: pod = k_skin × S_wet + overhead (1.465 kg/m² + 50 g), calibrated to
 reproduce the frozen 250 g at the spec loft — same uncalibrated-ballpark
 caveat as the wing construction profile (§1.4). ESC/FC stations ride the loft
 as length fractions of the spec layout; ballast rides the (possibly
 stretched) nose tip.
+
+The **boom is an outcome, not a constant**: it spans the pod's tail cap to
+the tail block (station from `tail_arm`), so its mass (linear density × that
+emergent length) and its drag entry (`fuselage.boom_body`, symbolic length)
+both respond as the optimizer trades pod length, tail arm, and overall
+aircraft length; `tail_arm` carries deliberately wide bounds so total length
+is genuinely optimized.
 
 ### 7.4 Topology study — discrete outer loop
 

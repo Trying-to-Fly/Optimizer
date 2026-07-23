@@ -57,6 +57,23 @@ def test_integrated_topology_flip(sample_aircraft):
         sample_aircraft.fuselage_topology = "pod_boom"
 
 
+def test_boom_emerges_from_geometry(sample_aircraft):
+    """Boom length is an outcome: pod tail cap -> tail block, mass and drag
+    both derived from it (no hardcoded stations)."""
+    d = dict(sample_aircraft.DV_DEFAULTS)
+    p = sample_aircraft.pod_dims(d)
+    x_tail = 0.390 + 0.25 * 0.201 + d["tail_arm"]
+    pod_end = p["bay_end"] + p["tail_len"]
+    boom = next(e for e in sample_aircraft.structure_extras(d) if e.name == "boom")
+    assert abs(boom.mass_kg - 0.056 * ((x_tail - pod_end) + 0.05)) < 1e-9
+    bb = next(b for b in sample_aircraft.parasite_bodies(d) if b["name"] == "boom")
+    assert abs(bb["length_m"] - (x_tail - pod_end)) < 1e-9
+    # longer tail arm -> longer boom, more drag area
+    d2 = d | {"tail_arm": 1.0}
+    bb2 = next(b for b in sample_aircraft.parasite_bodies(d2) if b["name"] == "boom")
+    assert bb2["wetted_area_m2"] > bb["wetted_area_m2"]
+
+
 def test_loft_symbolic_safe(sample_aircraft):
     """Opti variables flow through pod_dims/loft/body_dict without branching."""
     opti = asb.Opti()

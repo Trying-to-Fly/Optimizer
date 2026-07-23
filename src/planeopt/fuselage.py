@@ -3,7 +3,16 @@
 The loft IS the geometry model: superellipse cross-sections placed along the
 station line, built as an asb.Fuselage. Symbolic-safe (floats or Opti
 variables) — the NLP optimizes the loft's driving parameters and reads the
-loft's own integrals (area_wetted, volume).
+loft's own integrals (area_wetted, volume). All station fractions and radius
+multipliers are plain floats; only lengths/widths/heights may be symbolic.
+
+Profile family (streamlined by construction — the optimizer sizes it, the
+family guarantees it looks like a fuselage):
+- nose: elliptical-arc radius growth, tangent where it meets the bay, section
+  shape blending from circular at the tip to the bay's rounded rectangle;
+- bay: constant superellipse (shape 4 ~ rounded rect);
+- tail: cubic-Hermite boat-tail (tangent at the bay shoulder AND at the end
+  cap — no straight cone), shape blending back to circular at the cap.
 
 Aero enters through the existing flat-plate buildup (bodies dict) + Munk term,
 NOT through LiftingLine: asb's LL adds its own fuselage model when one is
@@ -27,35 +36,42 @@ def loft(
     x_nose=0.0,
     z_c=0.0,
     shape=4.0,
-    n_nose=3,
+    n_nose=7,
+    n_tail=7,
+    r_cap=0.12,
     name="pod",
 ) -> asb.Fuselage:
-    """Pod loft: circular-arc nose growth (n_nose intermediate sections),
-    constant superellipse bay (shape 4 ~ rounded rect), conical tail fairing."""
+    """Streamlined pod loft. r_cap is the end-cap radius fraction (boom socket
+    diameter in pod-boom topology, tail-block joint in integrated)."""
     xsecs = []
     for i in range(n_nose + 1):
         t = i / n_nose
-        r = 1e-3 + (1 - (1 - t) ** 2) ** 0.5  # 0 at the tip, 1 at the bay
+        r = 1e-3 + (1 - (1 - t) ** 2) ** 0.5  # elliptical arc: 0 at tip, tangent at bay
+        s = 2.0 + (shape - 2.0) * t  # circular tip -> rounded-rect bay
         xsecs.append(
             asb.FuselageXSec(
                 xyz_c=[x_nose + nose_len * t, 0, z_c],
                 width=width * r,
                 height=height * r,
-                shape=shape,
+                shape=s,
             )
         )
     x_bay_end = x_nose + nose_len + bay_len
     xsecs.append(
         asb.FuselageXSec(xyz_c=[x_bay_end, 0, z_c], width=width, height=height, shape=shape)
     )
-    xsecs.append(
-        asb.FuselageXSec(
-            xyz_c=[x_bay_end + tail_len, 0, z_c],
-            width=width * 0.12,
-            height=height * 0.12,
-            shape=2.0,
+    for i in range(1, n_tail + 1):
+        u = i / n_tail
+        r = 1 - (1 - r_cap) * (3 * u**2 - 2 * u**3)  # Hermite: tangent both ends
+        s = shape + (2.0 - shape) * u  # rounded-rect bay -> circular cap
+        xsecs.append(
+            asb.FuselageXSec(
+                xyz_c=[x_bay_end + tail_len * u, 0, z_c],
+                width=width * r,
+                height=height * r,
+                shape=s,
+            )
         )
-    )
     return asb.Fuselage(name=name, xsecs=xsecs)
 
 
@@ -75,4 +91,18 @@ def body_dict(fuse: asb.Fuselage, length, width, height, munk_factor=0.9, interf
         "form_factor": interference * (1 + 60 / f**3 + f / 400),
         "volume_m3": fuse.volume(),
         "munk_factor": munk_factor,
+    }
+
+
+def boom_body(exposed_len, od=0.012) -> dict:
+    """Parasite-body entry for the exposed CF boom, symbolic-safe in its
+    length (the boom now spans pod tail -> tail block, so its length is an
+    optimization outcome, not a constant)."""
+    return {
+        "name": "boom",
+        "wetted_area_m2": np.pi * od * exposed_len,
+        "length_m": exposed_len,
+        "form_factor": 1.10,
+        "volume_m3": np.pi * (od / 2) ** 2 * exposed_len,
+        "munk_factor": 0.95,
     }

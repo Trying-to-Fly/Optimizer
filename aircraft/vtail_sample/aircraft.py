@@ -93,7 +93,9 @@ class VTailSample:
             "d0": (0.0, 10.0), "d1": (0.0, 20.0), "d2": (0.0, 20.0),
             "d3": (0.0, self.d3_max_deg),
             "washout_tip": (-4.0, 0.0),
-            "tail_arm": (0.55, 0.85), "tail_scale": (0.70, 1.40),
+            # tail_arm drives overall aircraft length + boom length — genuinely
+            # wide bounds so total length is an optimization outcome
+            "tail_arm": (0.40, 1.20), "tail_scale": (0.70, 1.40),
             "spar_od_center": (0.006, 0.014), "spar_wall_center": (0.0006, 0.002),
             "spar_od_outer": (0.005, 0.012), "spar_wall_outer": (0.0005, 0.0018),
             # x_battery's real bounds are symbolic (inside the lofted bay,
@@ -226,11 +228,16 @@ class VTailSample:
             dv["pod_bay"] + p["tail_len"]
             >= batt["length"] + env["esc"]["length"] + env["fc_gps"]["length"] + 0.06
         )
-        # slenderness guards: no blunt caps the form-factor model can't rank
+        # proportion floors (streamlined family, MODEL_DETAILS 7.2): nose >= 1.0
+        # d_eq, boat-tail >= 1.8 d_eq — every candidate stays fuselage-shaped
+        # (the spec pod's 30 mm nose predates these; dv=None fixture is exempt)
         d_eq = (p["w"] * p["h"]) ** 0.5
-        opti.subject_to(dv["pod_nose"] >= 0.3 * d_eq)
+        opti.subject_to(dv["pod_nose"] >= 1.0 * d_eq)
         if self.fuselage_topology == "pod_boom":
-            opti.subject_to(dv["pod_tail"] >= 1.2 * d_eq)
+            opti.subject_to(dv["pod_tail"] >= 1.8 * d_eq)
+            # an exposed boom must exist: pod tail cap clears the tail block
+            x_tail = WING_X_LE + 0.25 * 0.201 + dv["tail_arm"]
+            opti.subject_to(p["bay_end"] + p["tail_len"] + 0.10 <= x_tail)
 
     def structure_constraints(self, opti, dv, weight_n) -> None:
         """Spar sizing constraints at n = 5 g limit load (MODEL_DETAILS 1.3)."""
@@ -422,14 +429,18 @@ class VTailSample:
             p = self.pod_dims(d)
             swet = self.fuselage_lofts(dv)[0].area_wetted()
             # k_skin x Swet + overhead, calibrated to reproduce the frozen 250 g
-            # at the spec loft (Swet 0.135 m2) — same uncalibrated caveat as wings
+            # at the spec loft (Swet 0.1365 m2) — same uncalibrated caveat as wings
             extras.append(
-                PointMass("pod", 1.48 * swet + 0.050, p["nose_tip"] + 0.51 * p["length"])
+                PointMass("pod", 1.465 * swet + 0.050, p["nose_tip"] + 0.51 * p["length"])
             )
             if self.fuselage_topology == "pod_boom":
-                boom_len = d["tail_arm"] + 0.05  # socket to tail block
+                # boom spans pod tail cap -> tail block (+50 mm sockets); its
+                # length is an outcome of tail_arm and the loft, not a constant
+                x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
+                pod_end = p["bay_end"] + p["tail_len"]
+                boom_len = (x_tail - pod_end) + 0.05
                 extras.append(
-                    PointMass("boom", 0.056 * boom_len, 0.583 + boom_len / 2)  # 12x10 CF g/m
+                    PointMass("boom", 0.056 * boom_len, (pod_end + x_tail) / 2)  # 12x10 CF g/m
                 )
             else:
                 # integrated: printed cone replaces the boom; an internal 8 mm CF
@@ -468,7 +479,8 @@ class VTailSample:
         p = self.pod_dims(d)
         bodies = [fuselage.body_dict(self.fuselage_lofts(dv)[0], p["length"], p["w"], p["h"])]
         if self.fuselage_topology == "pod_boom":
-            bodies.append(dict(self._BOOM_BODY))
+            x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
+            bodies.append(fuselage.boom_body(x_tail - (p["bay_end"] + p["tail_len"])))
         return bodies
 
     def powertrain(self) -> PowertrainConfig:
