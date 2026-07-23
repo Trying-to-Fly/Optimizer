@@ -136,9 +136,11 @@ class AircraftDefinition(Protocol):
 
     def construction(self) -> dict[str, ConstructionProfile]: ...
 
-    def parasite_bodies(self) -> list[dict]:
+    def parasite_bodies(self, dv: dict | None = None) -> list[dict]:
         """Non-lifting bodies for the drag buildup (MODEL_DETAILS.md section 3.1):
-        [{name, wetted_area_m2, length_m, form_factor}]."""
+        [{name, wetted_area_m2, length_m, form_factor}]. dv=None -> the fixed
+        baseline; with a design vector, entries may be symbolic (parametric
+        fuselage loft, section 7)."""
         ...
 
 

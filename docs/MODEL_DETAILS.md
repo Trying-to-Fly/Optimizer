@@ -392,6 +392,9 @@ Every champion gets the same battery, assembling the diagnostics from all module
    opinion at the champion geometry, and a continuous-cant cross-check (outer
    panel freed to ~88 deg, explicit winglet off — indicative only, since the
    Schrenk stations include the canted panel).
+6. Fuselage topology study (§7.4, when the aircraft declares a topology): one full
+   re-optimization of the alternative topology; if it wins it becomes the champion
+   (objective delta and adoption reported either way).
 
 ### 6.5 Phase 1 validation gate
 
@@ -408,3 +411,76 @@ automatic model correction. Triage remains in order of calibratability: mass (sl
 data) → aero (XFOIL spot-check) → propulsion (uncalibratable; adjust posture, not
 the model). Optimization results are not trusted until the model sits inside the
 real-aircraft bands.
+
+---
+
+## 7. Fuselage — parametric loft
+
+Frozen through M4.5, the fuselage becomes designable via a **parametric loft**
+(decided 2026-07-23): declared cross-sections and guide stations loft into an
+`asb.Fuselage` whose driving parameters the NLP optimizes continuously, with a
+discrete **topology study** (§7.4) covering the one non-continuous question.
+First iteration varies lengths + cross-section scale; section shape exponents
+stay fixed.
+
+### 7.1 Geometry — the loft IS the model
+
+`planeopt.fuselage.loft`: superellipse cross-sections (shape 4 ≈ rounded
+rectangle) along the station line — circular-arc nose growth over intermediate
+sections, constant bay, conical tail fairing tapering to a 12 % end cap.
+Symbolic-safe (floats or Opti variables), and the NLP reads the loft's **own
+integrals** (`area_wetted()`, `volume()`), so geometry and model cannot drift
+apart.
+
+Sample-aircraft variables: `pod_nose`, `pod_bay`, `pod_tail` (lengths) and
+`pod_xs` (cross-section scale on the spec's 68×88 mm). Anchor: the bay's aft
+end is pinned at the wing-saddle joint station (0.410 m); the nose grows
+forward from it, the tail cone aft. Defaults reproduce the spec pod exactly
+(nose tip at station 0, length 585 mm); `dv=None` keeps returning the frozen
+M1 baseline numbers forever (validation continuity — the 0.183 m² pod assumed
+an untapered prism, so the loft's 0.135 m² is not a regression but a better
+integral of the same shape).
+
+### 7.2 Packaging constraints — floors are user data
+
+Component envelopes (battery L×W×H, ESC/FC lengths) are **declared data —
+user input in the app (M5)**; the sample carries spec values. Symbolic
+constraints:
+
+- inner bay section (printed wall + liner clearance per side) ≥ battery
+  width/height + 4 mm;
+- the battery (CG at `x_battery`) stays inside the bay with 3 mm end margins —
+  these symbolic bounds are the real `x_battery` limits (its box bound is a
+  wide backstop only), so CG travel and loft stretch trade against each other;
+- bay ≥ battery + 50 mm (travel + leads); bay + cone root ≥ the full
+  battery+ESC+FC stack;
+- slenderness guards (nose ≥ 0.3 d_eq, pod-boom cone ≥ 1.2 d_eq) so the
+  optimizer can't propose blunt caps the form-factor model cannot rank.
+
+### 7.3 Aero and mass from the loft
+
+Aero enters through the **existing validated flat-plate buildup** (§3.1), NOT
+through LiftingLine: asb's LL adds its own fuselage model when one is attached,
+which would double-count drag against the M1-validated buildup. The aero
+Airplane stays wings-only; the loft attaches to a *viz twin* for the 3D
+artifacts only. `fuselage.body_dict` supplies the buildup entry: form factor
+from fineness (Hoerner, 1 + 60/f³ + f/400) × 1.08 interference, calibrated so
+the spec pod reproduces its frozen 1.25 — slenderness becomes a real trade on
+a preserved baseline. The Munk destabilizing dCm/dα (§3.4) now takes the
+loft's symbolic volume inside the NLP.
+
+Mass: pod = k_skin × S_wet + overhead (1.48 kg/m² + 50 g), calibrated to
+reproduce the frozen 250 g at the spec loft — same uncalibrated-ballpark
+caveat as the wing construction profile (§1.4). ESC/FC stations ride the loft
+as length fractions of the spec layout; ballast rides the (possibly
+stretched) nose tip.
+
+### 7.4 Topology study — discrete outer loop
+
+`pod_boom` (lofted pod + CF boom, the spec layout) vs `integrated` (the pod's
+tail cone runs all the way to the tail block — cone length derived from
+`tail_arm`, printed cone replaces the boom, plus an internal 8 mm CF stiffener
+to keep the printed tail credible at this fidelity). Per §6.3, plain
+enumeration: one full re-optimization per topology; if integrated wins it
+becomes the champion and the numeric re-evaluation runs with it. Reported in
+the champion battery either way (§6.4 item 6).

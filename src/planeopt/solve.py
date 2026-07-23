@@ -34,7 +34,7 @@ def run(
 ) -> tuple[RunResult, Path]:
     objective = OBJECTIVES[mission.objective]
     pt = aircraft.powertrain()
-    bodies = aircraft.parasite_bodies()
+    bodies = aircraft.parasite_bodies(dv)
 
     airplane = aircraft.geometry(dv)
     components, printed_breakdown = massmodel.build(aircraft, airplane, dv)
@@ -151,8 +151,20 @@ def run(
     if dv is not None:
         planes = {"baseline (defaults)": aircraft.geometry(None), "optimized": airplane}
     figures.planform_compare(planes, run_dir / "figures")
-    figures.three_view(airplane, run_dir / "figures")
-    figures.interactive_3d(airplane, run_dir)
+    # viz twin: attach the fuselage loft(s) for the 3D artifacts only — the aero
+    # airplane stays wings-only (LL would double-count fuselage drag, section 7)
+    viz_plane = airplane
+    if hasattr(aircraft, "fuselage_lofts"):
+        import aerosandbox as asb
+
+        lofts = aircraft.fuselage_lofts(dv)
+        if lofts:
+            viz_plane = asb.Airplane(
+                name=airplane.name, wings=airplane.wings, fuselages=lofts,
+                s_ref=airplane.s_ref, c_ref=airplane.c_ref, b_ref=airplane.b_ref,
+            )
+    figures.three_view(viz_plane, run_dir / "figures")
+    figures.interactive_3d(viz_plane, run_dir)
     (run_dir / "report.html").write_text(report_html.render(result, run_dir))
     return result, run_dir
 
@@ -181,10 +193,10 @@ def _solve_nlp(
 
     objective = OBJECTIVES[mission.objective]
     pt = aircraft.powertrain()
-    bodies = aircraft.parasite_bodies()
 
     opti = asb.Opti()
     dv = aircraft.design_variables(opti, inits)
+    bodies = aircraft.parasite_bodies(dv)  # may be symbolic (fuselage loft)
     V = opti.variable(init_guess=(inits or {}).get("V", 11.0), lower_bound=6.0, upper_bound=25.0)
     alpha = opti.variable(init_guess=4.0, lower_bound=-2.0, upper_bound=10.0)
     defl = opti.variable(init_guess=0.0, lower_bound=-15.0, upper_bound=15.0)
@@ -362,6 +374,33 @@ def optimize(
         except RuntimeError as e:
             battery[label] = {"failed": str(e)[:120]}
 
+    # fuselage topology study (MODEL_DETAILS section 7): pod-and-boom vs the
+    # integrated cone-to-tail fuselage, full re-optimization. If integrated
+    # wins it becomes the champion and stays active for the winglet study and
+    # numeric re-evaluation (restored in the re-eval finally).
+    topology_study = None
+    orig_topology = getattr(aircraft, "fuselage_topology", None)
+    if orig_topology == "pod_boom":
+        aircraft.fuselage_topology = "integrated"
+        try:
+            r_int = _solve_nlp(aircraft, mission)
+            adopted = sign * (r_int["objective_value"] - champion["objective_value"]) > 0
+            topology_study = {
+                "integrated": {
+                    **{k: r_int[k] for k in ("objective_value", "V_ms", "auw_kg")},
+                    "pod_len": r_int["dv"]["pod_nose"] + r_int["dv"]["pod_bay"],
+                },
+                "delta_objective": r_int["objective_value"] - champion["objective_value"],
+                "integrated_adopted": adopted,
+            }
+            if adopted:
+                champion = r_int
+            else:
+                aircraft.fuselage_topology = "pod_boom"
+        except RuntimeError as e:
+            topology_study = {"integrated": {"failed": str(e)[:120]}}
+            aircraft.fuselage_topology = "pod_boom"
+
     # winglet study (MODEL_DETAILS 3.6): paired on/off re-optimization at the
     # same span cap, an inviscid VLM second opinion on the induced-drag delta,
     # and the continuous-cant cross-check (outermost panel freed to ~88 deg, no
@@ -437,6 +476,8 @@ def optimize(
     finally:
         if winglet_rejected:
             aircraft.winglet = True
+        if orig_topology is not None:
+            aircraft.fuselage_topology = orig_topology
     result.status = M2_STATUS
     trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
     q = 0.5 * 1.225 * best["V_ms"] ** 2
@@ -457,6 +498,7 @@ def optimize(
     result.performance["optimization"] = {
         "champion": champion,
         "resolve_battery": battery,
+        "fuselage_topology_study": topology_study,
         "winglet_study": winglet_study,
         "tripped_polars": tripped,
         "multistart": [

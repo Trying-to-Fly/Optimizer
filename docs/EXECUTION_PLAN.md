@@ -119,6 +119,7 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
 | **M3 — full vehicle** | Tail sizing, CG/ballast/battery-position, static margin, explicit-deflection trim, continuous spar sizing + structure constraints | Full §4 constraint set active-set report is sane |
 | **M4 — decision engine** | Discrete airfoil outer loop, re-solve battery (mass ±10%, η ±10%, tripped polars), flatness sweep, ε-constraint Pareto sweeps, weighted-sum quick look | Complete champion report per MODEL_DETAILS §6.4 |
 | **M4.5 — winglet + span cap** | Projected-span cap (arc-length panels, `b_ref` = projected span), explicit winglet surface (separate Wing, 5 vars), winglet on/off study + VLM induced check + continuous-cant cross-check in the champion battery (MODEL_DETAILS §3.6) | Champion respects the manufacturing cap; winglet kept only if it pays through the paired study |
+| **M4.6 — fuselage loft** | Parametric superellipse pod loft (lengths + cross-section vars, loft's own integrals feed drag/Munk/mass), symbolic packaging constraints from declared component envelopes, pod-boom vs integrated topology study in the champion battery (MODEL_DETAILS §7) | `dv=None` fixture keeps the frozen M1 numbers; defaults reproduce the spec pod; topology adopted only if its full re-optimization wins |
 | **M5 — GUI (later)** | Local web UI: launch runs, browse `runs/`, compare champions | Reads run.json only — no library changes |
 
 Each milestone is independently useful, matching the concept doc's "stop whenever the

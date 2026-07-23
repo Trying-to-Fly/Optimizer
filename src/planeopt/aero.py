@@ -101,7 +101,7 @@ def fuselage_cm_alpha(bodies: list[dict], s_ref, c_ref) -> float:
     total = 0.0
     for b in bodies:
         vol = b.get("volume_m3")
-        if vol:
+        if vol is not None:  # structural check — volume may be an Opti symbolic
             total += 2 * b.get("munk_factor", 0.9) * vol
     return total / (s_ref * c_ref)
 
