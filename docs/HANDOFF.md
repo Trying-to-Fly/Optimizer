@@ -74,7 +74,15 @@ All committed and pushed through `d6f38cf`:
   priced). Loft = recommendation engine; imported STEP = real design.
 - Fuselage previews: `runs/fuselage_preview/interactive_3d.html` (champion
   pod + battery) and the run dir's `interactive_3d.html` (full aircraft).
-  User had NOT yet confirmed the new shape passes their eyeball test.
+- **Wing-saddle carry-through added AFTER the champion run** (user saw the
+  wing floating above the shrunken pod — unbuildable): bay start ≤ LE −
+  10 mm, bay end ≥ LE + 0.60·c_root (`pod_bay_end` is now a variable, not a
+  fixed anchor), pod top derived as `SADDLE_EMBED − h/2` so it always embeds
+  6 mm into the wing root plane (MODEL_DETAILS §7.2). **No champion run
+  includes these yet** — the 114.1 min figure predates them; expect the next
+  run a few minutes lower (the pod must lengthen to carry the wing). Per the
+  user: do NOT rerun for this alone — the tail-phase champion run validates
+  it.
 
 ## 5. Next work, in order
 
@@ -108,7 +116,9 @@ Implementation notes scoped so far:
    "elevator").
 5. After implementing: fast tests per type (geometry contract, mass mapping,
    v-volume floor math), then ONE champion run (background, venv binary,
-   ~2 h+ with the tail-type study added), FINDINGS §9, commit, push.
+   ~2 h+ with the tail-type study added), FINDINGS §9, commit, push. This
+   run doubles as first validation of the wing-saddle constraints (§4 above)
+   — check in the 3D artifact that the bay visibly carries the wing root.
 
 ### B. Gated / pending items
 

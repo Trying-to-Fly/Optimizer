@@ -463,7 +463,14 @@ constraints:
   flat-plate + form-factor model cannot rank end-cap *shape quality*, so
   plane-like proportions are imposed as geometry, not hoped for (the spec
   pod's 30 mm nose predates these — the `dv=None` fixture is exempt);
-- pod-boom: an exposed boom must exist (pod tail cap + 100 mm ≤ tail block).
+- pod-boom: an exposed boom must exist (pod tail cap + 100 mm ≤ tail block);
+- **wing-saddle carry-through (no floating wing)**: the constant-section bay
+  must physically carry the wing root — bay start ≤ LE − 10 mm and bay end ≥
+  LE + 0.60 · c_root (the bay aft end is a variable, `pod_bay_end`, not an
+  anchor since this rework) — and the pod top is *derived* as
+  `SADDLE_EMBED − h/2`, embedding ~6 mm above the wing chord plane, so a
+  shrunken pod can never leave the wing floating above the fuselage
+  (2026-07-23 user requirement; unbuildable otherwise).
 
 ### 7.3 Aero and mass from the loft
 

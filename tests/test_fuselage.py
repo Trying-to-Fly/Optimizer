@@ -57,6 +57,17 @@ def test_integrated_topology_flip(sample_aircraft):
         sample_aircraft.fuselage_topology = "pod_boom"
 
 
+def test_pod_top_meets_wing_root(sample_aircraft):
+    """Saddle rule: the pod top must embed into the wing root plane (z = 0)
+    regardless of pod height — a shrunken pod can't leave the wing floating."""
+    for xs in (1.0, 0.794, 1.3):
+        d = dict(sample_aircraft.DV_DEFAULTS) | {"pod_xs": xs}
+        loft = sample_aircraft.fuselage_lofts(d)[0]
+        h = sample_aircraft.POD_XS_SPEC[1] * xs
+        top = float(loft.xsecs[8].xyz_c[2]) + h / 2  # bay-end section's top (full height)
+        assert abs(top - sample_aircraft.SADDLE_EMBED) < 1e-9
+
+
 def test_boom_emerges_from_geometry(sample_aircraft):
     """Boom length is an outcome: pod tail cap -> tail block, mass and drag
     both derived from it (no hardcoded stations)."""

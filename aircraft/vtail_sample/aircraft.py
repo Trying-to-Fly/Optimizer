@@ -46,7 +46,9 @@ class VTailSample:
     # is a candidate the study prices, not an assumption.
     fuselage_topology = "pod_boom"
     fuselage_topologies = ["pod_boom", "integrated"]
-    POD_BAY_END_X = 0.410  # bay/wing-saddle joint station — the loft's anchor
+    POD_BAY_END_X = 0.410  # default bay aft end (spec); a variable since the saddle rework
+    SADDLE_CHORD_FRAC = 0.60  # bay must carry the wing root to 60% chord (no floating wing)
+    SADDLE_EMBED = 0.006  # pod top embeds this far above the wing chord plane
     POD_XS_SPEC = (0.068, 0.088)  # spec cross-section (w, h) at pod_xs = 1
     POD_WALL_CLEARANCE = 0.0035  # printed wall + foam liner per side
     # packaging envelopes (m) — user-input data in the app (M5); spec values here
@@ -70,9 +72,10 @@ class VTailSample:
         # winglet (consumed only when self.winglet; lengths m, angles deg,
         # wl_cr is winglet-root chord as a fraction of the wing tip chord)
         "wl_len": 0.12, "wl_cant": 75.0, "wl_cr": 0.80, "wl_taper": 0.70, "wl_toe": -1.0,
-        # fuselage loft (anchor: bay end fixed at POD_BAY_END_X; defaults
-        # reproduce the spec pod exactly — nose tip at station 0, length 0.585)
+        # fuselage loft (defaults reproduce the spec pod exactly — nose tip at
+        # station 0, length 0.585; pod_bay_end variable since the saddle rework)
         "pod_nose": 0.030, "pod_bay": 0.380, "pod_tail": 0.175, "pod_xs": 1.0,
+        "pod_bay_end": 0.410,
         # tail + balance + structure
         "tail_arm": 0.700, "tail_scale": 1.0,
         "spar_od_center": 0.010, "spar_wall_center": 0.001,
@@ -104,7 +107,7 @@ class VTailSample:
             # geometry_constraints) — the box bound is just a wide backstop
             "ballast_kg": (0.0, 0.200), "x_battery": (-0.10, 0.40),
             "pod_nose": (0.030, 0.25), "pod_bay": (0.20, 0.55),
-            "pod_xs": (0.75, 1.30),
+            "pod_xs": (0.75, 1.30), "pod_bay_end": (0.40, 0.62),
         }
         if self.fuselage_topology == "pod_boom":
             # integrated topology derives its cone length from tail_arm instead
@@ -131,7 +134,7 @@ class VTailSample:
         using the pod_tail variable."""
         w = self.POD_XS_SPEC[0] * d["pod_xs"]
         h = self.POD_XS_SPEC[1] * d["pod_xs"]
-        bay_end = self.POD_BAY_END_X
+        bay_end = d["pod_bay_end"]
         bay_start = bay_end - d["pod_bay"]
         nose_tip = bay_start - d["pod_nose"]
         if self.fuselage_topology == "integrated":
@@ -150,10 +153,14 @@ class VTailSample:
 
         d = self.DV_DEFAULTS | (dv or {})
         p = self.pod_dims(d)
+        # pod top always meets the wing root plane (z = 0) with a small embed —
+        # derived from pod height, so a shrunken pod can never leave the wing
+        # floating above the fuselage
+        z_c = self.SADDLE_EMBED - p["h"] / 2
         return [
             fuselage.loft(
                 d["pod_nose"], d["pod_bay"], p["tail_len"], p["w"], p["h"],
-                x_nose=p["nose_tip"], z_c=-0.030,
+                x_nose=p["nose_tip"], z_c=z_c,
             )
         ]
 
@@ -230,6 +237,12 @@ class VTailSample:
             dv["pod_bay"] + p["tail_len"]
             >= batt["length"] + env["esc"]["length"] + env["fc_gps"]["length"] + 0.06
         )
+        # wing saddle carry-through (MODEL_DETAILS 7.2): the constant-section
+        # bay must physically carry the wing root — start ahead of the LE and
+        # run to SADDLE_CHORD_FRAC of root chord. Without this the optimizer
+        # shrinks the pod and leaves the wing floating (unbuildable).
+        opti.subject_to(p["bay_start"] <= WING_X_LE - 0.010)
+        opti.subject_to(p["bay_end"] >= WING_X_LE + self.SADDLE_CHORD_FRAC * dv["c_root"])
         # proportion floors (streamlined family, MODEL_DETAILS 7.2): nose >= 1.0
         # d_eq, boat-tail >= 1.8 d_eq — every candidate stays fuselage-shaped
         # (the spec pod's 30 mm nose predates these; dv=None fixture is exempt)
@@ -517,8 +530,12 @@ class VTailSample:
                 "champion battery CG": mm(d["x_battery"]),
             },
             "Fixed interfaces": {
-                "wing saddle (bay aft end, datum anchor)": mm(self.POD_BAY_END_X),
-                "pod centerline below wing datum": mm(0.030),
+                "wing saddle: full-section bay must span": (
+                    f"{mm(WING_X_LE - 0.010)} to {mm(WING_X_LE + self.SADDLE_CHORD_FRAC * d['c_root'])}"
+                    f" (LE - 10 mm to {self.SADDLE_CHORD_FRAC:.0%} root chord); champion bay"
+                    f" {mm(p['bay_start'])} to {mm(p['bay_end'])}"
+                ),
+                "pod top embeds into wing root plane": mm(self.SADDLE_EMBED),
                 "boom socket at tail cap (pod-boom topology)": f"12 mm OD at station {mm(pod_end)}",
                 "tail block station (champion tail arm)": mm(x_tail),
                 "ESC / FC+GPS stack lengths": f"{mm(env['esc']['length'])} / {mm(env['fc_gps']['length'])}",
