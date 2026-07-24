@@ -37,9 +37,10 @@ TAIL_ARM = 0.700  # wing AC -> tail AC
 
 
 class VTailSample:
-    name = "vtail_sample_v1.4"
+    name = "vtail_sample_v1.5"
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
-    span_cap_m = 2.2  # manufacturing cap on PROJECTED (front-view y) span, winglet included
+    span_cap_m = 2.0  # manufacturing cap on PROJECTED (front-view y) span, winglet included
+    # (2.2 -> 2.0 by user decision 2026-07-24, sixth session)
     winglet = True  # tip winglet as a separate asb.Wing (parametric designs only)
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
     # usable fraction of the section's max thickness for a spar hole (skin +
@@ -51,9 +52,25 @@ class VTailSample:
     # genuinely discrete choices live here; everything else is continuous. ---
     fuselage_topology = "pod_boom"  # lofted pod + CF boom (spec layout)
     tail_type = "vtail"  # spec layout; conventional/T priced by the study
+    motor_mount = "pusher"  # spec layout: motor at the boom tip, aft of the tail
+    # Declared order = greedy study order: the mount is the biggest CG lever,
+    # so it is judged first (at the spec baseline) and topology/tail re-judge
+    # under the adopted mount.
     discrete_options = {
+        "motor_mount": ["pusher", "puller"],
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],
+    }
+
+    # --- motor-mount installation effects (MODEL_DETAILS 2.4) — declared
+    # uncalibrated ballparks the study prices, adjustable data not code.
+    # Pusher: the prop works in the boom+tail wake (an optimism all runs
+    # before 2026-07-24 silently omitted). Puller: clean inflow, but the
+    # slipstream scrubs the pod (drag factor on the pod body) and the motor
+    # mass rides the nose.
+    MOUNT_EFFECTS = {
+        "pusher": {"prop_eta_derate": 0.95, "pod_drag_factor": 1.00},
+        "puller": {"prop_eta_derate": 1.00, "pod_drag_factor": 1.10},
     }
 
     # --- tail policy + directional floor (MODEL_DETAILS section 8) ---
@@ -629,9 +646,12 @@ class VTailSample:
         d = self.DV_DEFAULTS | (dv or {})
         p = self.pod_dims(d)
         x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]  # ~tail AC station
+        # motor rides the declared mount: boom tip aft of the tail (pusher) or
+        # inside the pod nose (puller) — the biggest CG lever the study moves
+        x_motor = x_tail + 0.08 if self.motor_mount == "pusher" else p["nose_tip"] + 0.02
         return [
             PointMass("battery", 0.430, d["x_battery"]),  # inside the lofted bay
-            PointMass("motor_prop", 0.190, x_tail + 0.08),  # boom tip, aft of tail
+            PointMass("motor_prop", 0.190, x_motor),
             PointMass("esc_wiring", 0.080, p["nose_tip"] + 0.3932 * p["length"]),
             PointMass("servos_aileron", 0.024, 0.470),  # in-wing
             PointMass("servos_tail", 0.024, x_tail),  # tail root block (2 micro servos, any type)
@@ -719,7 +739,10 @@ class VTailSample:
             ]
         d = self.DV_DEFAULTS | dv
         p = self.pod_dims(d)
-        bodies = [fuselage.body_dict(self.fuselage_lofts(dv)[0], p["length"], p["w"], p["h"])]
+        pod = fuselage.body_dict(self.fuselage_lofts(dv)[0], p["length"], p["w"], p["h"])
+        # puller slipstream scrubs the pod: declared drag factor (MODEL_DETAILS 2.4)
+        pod["form_factor"] = pod["form_factor"] * self.MOUNT_EFFECTS[self.motor_mount]["pod_drag_factor"]
+        bodies = [pod]
         if self.fuselage_topology == "pod_boom":
             x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
             bodies.append(fuselage.boom_body(x_tail - (p["bay_end"] + p["tail_len"])))
@@ -791,7 +814,9 @@ class VTailSample:
                 diameter_m=0.2794,
                 pitch_m=0.1524,
                 proxy_table="apc_11x6_blend",  # pitch-blended 11x5.5E/11x7E (tools/ingest_props.py)
-                folding_derate=0.95,
+                # folding knockdown x declared mount installation derate
+                # (pusher-in-wake, MODEL_DETAILS 2.4) — composed multiplicatively
+                folding_derate=0.95 * self.MOUNT_EFFECTS[self.motor_mount]["prop_eta_derate"],
             ),
             battery=BatteryConfig(capacity_ah=4.0, v_nominal=14.8, usable_fraction=0.80),
             esc_efficiency=0.95,

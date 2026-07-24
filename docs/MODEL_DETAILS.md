@@ -162,6 +162,27 @@ chain stays datasheet/data-table only. Consequences, stated explicitly:
   peak-η J) remains the main sanity check that the proxy table is being used inside
   its trustworthy region.
 
+### 2.4 Installation effects — declared per-mount factors (2026-07-24)
+
+The motor mount (pusher / puller / future variants) is a discrete candidate
+list in `discrete_options` (§6.3). Mass placement is exact (the motor
+PointMass rides the declared mount — boom tip vs pod nose — through the
+ordinary mass/CG machinery). The installation aerodynamics, which no
+module can compute at this fidelity, enter as **declared per-mount
+factors** (`MOUNT_EFFECTS`, uncalibrated ballparks the study prices):
+
+- **Pusher**: prop-efficiency derate (**[sample]** 0.95 — the prop works in
+  the boom + tail wake), composed multiplicatively into the prop's
+  `folding_derate`. Note: every run before 2026-07-24 silently omitted this
+  penalty (§3.5 listed it as unmodeled), so absolute minutes drop ~5%
+  against older FINDINGS entries; rankings are unaffected.
+- **Puller**: clean inflow (derate 1.0), but the slipstream scrubs the pod —
+  declared drag factor (**[sample]** ×1.10) on the pod body's form factor;
+  wetted area itself is untouched.
+
+Unmodeled either way and left to build judgment: cooling, prop ground/hand
+clearance, folding-blade behavior against the pod, noise.
+
 ---
 
 ## 3. Aero & trim model
@@ -220,9 +241,10 @@ part of the optimization state:
 
 ### 3.5 Known fidelity limits (restated from the concept doc)
 
-VLM + 2D strip corrections; the pusher prop operating in the tail's wake is unmodeled;
-fuselage lift/moment contributions are approximated by the buildup only. flow5
-cross-checks champions; flight test closes the gap.
+VLM + 2D strip corrections; the pusher prop's wake operation is priced only as a
+declared efficiency derate (§2.4), not modeled; fuselage lift/moment contributions
+are approximated by the buildup only. flow5 cross-checks champions; flight test
+closes the gap.
 
 ### 3.6 Winglets and the projected-span cap
 
