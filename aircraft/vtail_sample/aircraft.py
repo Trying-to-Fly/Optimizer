@@ -37,7 +37,7 @@ TAIL_ARM = 0.700  # wing AC -> tail AC
 
 
 class VTailSample:
-    name = "vtail_sample_v1.5"
+    name = "vtail_sample_v1.6"
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
     span_cap_m = 2.0  # manufacturing cap on PROJECTED (front-view y) span, winglet included
     # (2.2 -> 2.0 by user decision 2026-07-24, sixth session)
@@ -52,12 +52,16 @@ class VTailSample:
     # genuinely discrete choices live here; everything else is continuous. ---
     fuselage_topology = "pod_boom"  # lofted pod + CF boom (spec layout)
     tail_type = "vtail"  # spec layout; conventional/T priced by the study
-    motor_mount = "pusher"  # spec layout: motor at the boom tip, aft of the tail
+    # Puller adopted as the permanent default (user decision 2026-07-24,
+    # after the M4.8 study: +10.7 min over the pusher — FINDINGS section 10).
+    # The spec's pusher stays a candidate the study re-prices every run; the
+    # dv=None fixture keeps the spec pusher layout (validation continuity).
+    motor_mount = "puller"
     # Declared order = greedy study order: the mount is the biggest CG lever,
-    # so it is judged first (at the spec baseline) and topology/tail re-judge
+    # so it is judged first (at the baseline) and topology/tail re-judge
     # under the adopted mount.
     discrete_options = {
-        "motor_mount": ["pusher", "puller"],
+        "motor_mount": ["puller", "pusher"],
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],
     }
@@ -647,8 +651,11 @@ class VTailSample:
         p = self.pod_dims(d)
         x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]  # ~tail AC station
         # motor rides the declared mount: boom tip aft of the tail (pusher) or
-        # inside the pod nose (puller) — the biggest CG lever the study moves
-        x_motor = x_tail + 0.08 if self.motor_mount == "pusher" else p["nose_tip"] + 0.02
+        # inside the pod nose (puller) — the biggest CG lever the study moves.
+        # The dv=None fixture stays the frozen spec pusher regardless of the
+        # parametric default (M1 validation continuity).
+        mount = self.motor_mount if dv is not None else "pusher"
+        x_motor = x_tail + 0.08 if mount == "pusher" else p["nose_tip"] + 0.02
         return [
             PointMass("battery", 0.430, d["x_battery"]),  # inside the lofted bay
             PointMass("motor_prop", 0.190, x_motor),

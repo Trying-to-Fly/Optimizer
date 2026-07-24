@@ -22,7 +22,13 @@ def test_default_loft_reproduces_spec_pod(sample_aircraft):
     assert abs(p["length"] - 0.585) < 1e-12
     assert abs(p["w"] - 0.068) < 1e-12 and abs(p["h"] - 0.088) < 1e-12
 
-    bodies = sample_aircraft.parasite_bodies(dict(sample_aircraft.DV_DEFAULTS))
+    # the frozen 1.25 is a spec-pusher number (no slipstream scrub) — pin the
+    # mount so the loft-FF calibration identity stays mount-independent
+    sample_aircraft.motor_mount = "pusher"
+    try:
+        bodies = sample_aircraft.parasite_bodies(dict(sample_aircraft.DV_DEFAULTS))
+    finally:
+        sample_aircraft.motor_mount = "puller"
     pod = bodies[0]
     assert abs(pod["form_factor"] - 1.25) < 0.01
     # loft integrals: tapered ends make Swet < the prism's 0.183, volume near

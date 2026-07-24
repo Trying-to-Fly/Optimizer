@@ -70,9 +70,13 @@ studies rather than assumed.
   all re-confirmed under the puller; simple dihedral again (d_exp → 0).
   Flags: SM re-eval 0.0745 vs NLP 0.080 (estimator gap now crosses the
   window floor — flow5 gate before building); `printed_mass_x1.10`
-  battery member failed to converge (first ever; re-run it); declared
-  baseline in the aircraft file is still `pusher` until the user adopts
-  puller permanently.
+  battery member failed to converge (first ever; re-run it).
+- **Puller adopted as the permanent default** (user decision, same day):
+  `motor_mount = "puller"` in the aircraft file (v1.6); the spec pusher
+  stays a re-priced candidate every run; the dv=None fixture explicitly
+  pins the spec pusher layout (M1 continuity — its powertrain derate is
+  back to the original frozen 0.95, since a puller carries no install
+  derate).
 - **Parallel battery mode** (`optimize(..., parallel=N)` / CLI
   `--parallel`): independent solves per phase run N-wide via fork
   workers (`_solve_many`; per-candidate attrs snapshot at fork; OOM'd
