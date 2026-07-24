@@ -247,3 +247,63 @@ have yaw stability.
 - Housekeeping: the three-view/3D artifacts draw only lofted bodies — the
   CF boom (a parasite body with no loft) is invisible between pod and tail;
   cosmetic, fix with a thin viz-twin loft when convenient.
+
+## 10. Span 2.0 m + motor-mount study (2026-07-24, sixth session — M4.8)
+
+Run `20260724T191453` (10 h 53 m — the last sequential battery; parallel
+mode + progress logging land next). First run with the mount installation
+effects modeled: the pusher now pays its prop-in-wake derate (0.95), the
+puller pays pod scrubbing (×1.10) — so this run also produces the first
+*honest* pusher number, and absolute minutes are not comparable to §9.
+
+**Champion: PULLER adopted, +10.7 min over the pusher — 112.5 min at
+2.0 m projected, AUW 1766 g** (22.3 W at 9.5 m/s). Better than the §9
+champion despite losing 200 mm of span and gaining a drag penalty. The win
+decomposes three ways, all pulling together:
+
+- **Clean prop inflow**: the pusher's 0.95 wake derate is ~5% of chain
+  power, gone.
+- **Mass geography**: 190 g of motor at the nose replaces the old fight
+  against a motor hanging 1.2 m aft. The bay collapses to its
+  packaging/saddle minimum (pod 419 mm vs 658 mm; pod mass 162 g vs
+  239 g), the battery sits at the bay front with ballast still 0, and the
+  tail arm stretches to 774 mm — long arms are cheap now (35 g of boom)
+  and buy SM + Vv with far less tail area (printed tail 84 g vs 113 g).
+  Net AUW −159 g.
+- **The scrubbing penalty lands on a shrunken pod**, so the ×1.10 costs
+  little — the puller's penalty shrinks with exactly the pod the puller
+  no longer needs.
+
+Rest of the battery, all judged under the adopted puller:
+
+- **V-tail wins again** (conventional −6.1, T-tail −8.1); V-angle at the
+  55° cap again; tail sweep settles to 0 (with AC-consistent placement,
+  sweep buys nothing — a flat direction, as designed).
+- **Boom re-adopted** (integrated −6.4) even though it now carries only
+  the tail. Winglet re-rejected (−1.19); continuous-cant converges to the
+  champion exactly (no cant, d_exp → 0 — **simple dihedral confirmed
+  again**, 4.1° uniform).
+- Pusher-vs-puller at a glance: pusher@2.0 = 100.6 min honest baseline;
+  flatness (pusher) climbs 98.3 → 100.6 over 1.9 → 2.0 m; 1.5–1.8 m all
+  infeasible at this cap.
+- Verification: multistart spread 7e-9; NLP-vs-reeval gap 1.6e-5;
+  shadow price 7.6 min/100 g; tripped polars −12.1 min, rankings intact;
+  chain η ±10% → −9.1/+8.9 min (dominant, as always).
+
+Caveats and flags:
+
+- **SM estimator gap now straddles the window floor**: NLP 0.080 (active)
+  vs numeric re-eval 0.0745 → `sm_in_range: false` in the re-eval. Known
+  ~0.006 estimator difference (Munk + regression vs re-eval window), but
+  this is the first champion where it crosses the line — flow5 should own
+  the final stability check before anything is built.
+- **`printed_mass_x1.10` re-solve FAILED to converge** (first battery
+  member ever to fail; IPOPT assertion at the tight cap). The −10% and
+  both η members are fine. Worth a re-run when the parallel battery lands.
+- Puller practicalities the model does not see: prop/ground clearance and
+  belly-landing behavior with a nose prop, folding-blade rest position
+  against the pod, motor cooling (improves), FPV/camera field if ever
+  relevant. Build judgment, not model output.
+- The declared baseline in the aircraft file remains `pusher` (spec
+  layout); the study adopts puller per run either way. Flip the default
+  only if the user calls the puller adopted for good.

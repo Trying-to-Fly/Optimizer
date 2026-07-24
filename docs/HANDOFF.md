@@ -58,6 +58,32 @@ studies rather than assumed.
 
 ## 4. State as of this handoff
 
+**Sixth session (2026-07-24) — M4.8 done.** Committed and pushed:
+
+- Span cap 2.2 → 2.0 m (user decision). Motor mount joined
+  `discrete_options` (judged first) with declared installation effects
+  (MODEL_DETAILS §2.4): pusher prop-in-wake derate 0.95 composed into
+  `folding_derate`, puller pod-scrubbing ×1.10 on the pod form factor,
+  motor PointMass rides the mount. Aircraft is `vtail_sample_v1.5`.
+- **Champion (run `20260724T191453`, FINDINGS §10): PULLER adopted
+  (+10.7 min), 112.5 min @ 2.0 m, AUW 1766 g.** V-tail/boom/no-winglet
+  all re-confirmed under the puller; simple dihedral again (d_exp → 0).
+  Flags: SM re-eval 0.0745 vs NLP 0.080 (estimator gap now crosses the
+  window floor — flow5 gate before building); `printed_mass_x1.10`
+  battery member failed to converge (first ever; re-run it); declared
+  baseline in the aircraft file is still `pusher` until the user adopts
+  puller permanently.
+- **Parallel battery mode** (`optimize(..., parallel=N)` / CLI
+  `--parallel`): independent solves per phase run N-wide via fork
+  workers (`_solve_many`; per-candidate attrs snapshot at fork; OOM'd
+  worker fails only its job). Default 1. §2's RAM rules updated:
+  26 GB + 10 GB swap `.wslconfig` is WRITTEN but inactive until
+  `wsl --shutdown` — verify with `free -g` before first `--parallel 2`.
+- That run took 10 h 53 m sequentially (4 infeasible flatness burns at
+  the tight cap + slow tight-cap convergence everywhere). Queued
+  speedups: per-solve progress log line, iteration cap for study/flatness
+  solves (fail in ~15 min, not 50), first `--parallel 2` battery.
+
 **Fifth session (2026-07-24) — M4.7 done.** Committed and pushed:
 
 - **Generic discrete studies**: `solve.optimize` enumerates any declared
