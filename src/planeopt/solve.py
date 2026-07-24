@@ -309,6 +309,69 @@ def _solve_nlp(
     }
 
 
+def _solve_worker(conn, aircraft, mission, kw):  # pragma: no cover — child process
+    try:
+        r = _solve_nlp(aircraft, mission, **kw)
+    except Exception as e:
+        r = {"failed": str(e)[:120]}
+    conn.send(r)
+    conn.close()
+
+
+def _solve_many(aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None) -> dict:
+    """Run independent _solve_nlp jobs, `parallel` at a time.
+
+    jobs: [(key, kwargs)] -> {key: result | {"failed": ...}}. prep(key)/restore()
+    bracket each launch so per-candidate aircraft attrs (discrete studies,
+    winglet toggles) are seen by that job only — with parallel > 1 the forked
+    child snapshots them at launch. parallel=1 is the historical in-process
+    path and the only safe mode under a ~15 GB WSL cap (each solve peaks
+    ~13 GB — HANDOFF section 2); 2-wide needs the 26 GB .wslconfig active.
+    A job failure never kills the batch.
+    """
+    results = {}
+    if parallel <= 1:
+        for key, kw in jobs:
+            if prep is not None:
+                prep(key)
+            try:
+                results[key] = _solve_nlp(aircraft, mission, **kw)
+            except RuntimeError as e:
+                results[key] = {"failed": str(e)[:120]}
+            finally:
+                if restore is not None:
+                    restore()
+        return results
+
+    import multiprocessing as mp
+    from multiprocessing.connection import wait as conn_wait
+
+    ctx = mp.get_context("fork")  # children inherit aircraft/mission — no pickling
+    pending = list(jobs)
+    running = {}  # receiving pipe end -> (key, process)
+    while pending or running:
+        while pending and len(running) < parallel:
+            key, kw = pending.pop(0)
+            rx, tx = ctx.Pipe(duplex=False)
+            if prep is not None:
+                prep(key)
+            proc = ctx.Process(target=_solve_worker, args=(tx, aircraft, mission, kw))
+            proc.start()
+            tx.close()
+            if restore is not None:
+                restore()
+            running[rx] = (key, proc)
+        for rx in conn_wait(list(running)):
+            key, proc = running.pop(rx)
+            try:
+                results[key] = rx.recv()
+            except EOFError:  # child died without reporting — OOM killer, most likely
+                results[key] = {"failed": "worker died before reporting (OOM?)"}
+            proc.join()
+            rx.close()
+    return results
+
+
 def optimize(
     aircraft,
     mission,
@@ -316,14 +379,18 @@ def optimize(
     input_files: list[Path] | None = None,
     multistart: int = 3,
     flatness: bool = True,
+    parallel: int = 1,
 ) -> tuple[RunResult, Path]:
     """M2 entry point: multi-start NLP -> champion -> shadow price -> flatness
-    sweep -> numeric re-evaluation of the champion through the M1 pipeline."""
+    sweep -> numeric re-evaluation of the champion through the M1 pipeline.
+
+    parallel: how many NLP solves may run concurrently within each independent
+    batch (multistart+bump, flatness, re-solve battery, discrete-study
+    alternatives, winglet pair). 1 = sequential (default; required under the
+    15 GB WSL cap). Cross-batch order is unchanged, so study semantics are
+    identical at any width."""
     rng = np.random.default_rng(0)
-    starts, results = [], []
-    base = _solve_nlp(aircraft, mission)
-    results.append(base)
-    starts.append("nominal")
+    jobs = [("nominal", {})]
     for i in range(multistart - 1):
         inits = {
             "span": float(1.8 * rng.uniform(0.88, 1.12)),
@@ -334,12 +401,18 @@ def optimize(
         if getattr(aircraft, "winglet", False):
             inits["wl_len"] = float(0.12 * rng.uniform(0.5, 1.8))
             inits["wl_cant"] = float(rng.uniform(60.0, 85.0))
-        try:
-            results.append(_solve_nlp(aircraft, mission, inits=inits))
-            starts.append(f"perturbed_{i}")
-        except RuntimeError as e:
-            results.append({"failed": str(e)[:120]})
-            starts.append(f"perturbed_{i} (failed)")
+        jobs.append((f"perturbed_{i}", {"inits": inits}))
+    # the +20 g shadow-price bump is independent of the champion, so it rides
+    # the same batch; its delta is computed afterwards
+    jobs.append(("mass_bump", {"extra_mass_kg": 0.020}))
+    first = _solve_many(aircraft, mission, jobs, parallel)
+    starts, results = [], []
+    for key, _ in jobs:
+        if key == "mass_bump":
+            continue
+        r = first[key]
+        results.append(r)
+        starts.append(key if "failed" not in r else f"{key} (failed)")
 
     ok = [r for r in results if "failed" not in r]
     sign = 1 if OBJECTIVES[mission.objective].direction == "maximize" else -1
@@ -347,30 +420,43 @@ def optimize(
     spread = max(abs(r["objective_value"] - champion["objective_value"]) for r in ok)
 
     # shadow price: minutes (objective units) per gram of structure
-    bumped = _solve_nlp(aircraft, mission, extra_mass_kg=0.020)
-    shadow_per_g = (bumped["objective_value"] - champion["objective_value"]) / 20.0
+    bumped = first["mass_bump"]
+    shadow_per_g = (
+        (bumped["objective_value"] - champion["objective_value"]) / 20.0
+        if "failed" not in bumped
+        else None
+    )
 
     # flatness: re-optimize everything else at fixed spans (up to the cap)
     flat = []
     span_cap = getattr(aircraft, "span_cap_m", 3.0)
     if flatness:
-        for s_fix in np.linspace(1.5, span_cap, 6):
-            try:
-                r = _solve_nlp(aircraft, mission, fixed={"span": float(s_fix)})
-                flat.append({"span": float(s_fix), "objective_value": r["objective_value"]})
-            except RuntimeError:
-                flat.append({"span": float(s_fix), "objective_value": None})
+        spans = [float(s) for s in np.linspace(1.5, span_cap, 6)]
+        fr = _solve_many(
+            aircraft, mission, [(s, {"fixed": {"span": s}}) for s in spans], parallel
+        )
+        flat = [
+            {
+                "span": s,
+                "objective_value": (
+                    fr[s]["objective_value"] if "failed" not in fr[s] else None
+                ),
+            }
+            for s in spans
+        ]
 
     # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization
-    battery = {}
-    for label, kw in [
+    battery_jobs = [
         ("printed_mass_x1.10", {"printed_scale": 1.10}),
         ("printed_mass_x0.90", {"printed_scale": 0.90}),
         ("chain_eta_x0.90", {"eta_scale": 0.90}),
         ("chain_eta_x1.10", {"eta_scale": 1.10}),
-    ]:
-        try:
-            r = _solve_nlp(aircraft, mission, **kw)
+    ]
+    battery = {}
+    for label, r in _solve_many(aircraft, mission, battery_jobs, parallel).items():
+        if "failed" in r:
+            battery[label] = {"failed": r["failed"]}
+        else:
             battery[label] = {
                 "objective_value": r["objective_value"],
                 "delta": r["objective_value"] - champion["objective_value"],
@@ -378,8 +464,6 @@ def optimize(
                 "static_margin": r["static_margin"],
                 "ballast_kg": r["dv"]["ballast_kg"],
             }
-        except RuntimeError as e:
-            battery[label] = {"failed": str(e)[:120]}
 
     # discrete studies (MODEL_DETAILS 6.3): the aircraft declares
     # `discrete_options = {attr: [candidate values]}` — e.g. fuselage topology
@@ -395,25 +479,30 @@ def optimize(
         baseline = getattr(aircraft, attr)
         discrete_originals[attr] = baseline
         study = {"baseline": baseline, "alternatives": {}, "adopted": baseline}
-        for cand in candidates:
-            if cand == baseline:
+        cands = [c for c in candidates if c != baseline]
+        # alternatives within one attr are independent solves (each candidate's
+        # solve depends only on its own attr value, not on the champion), so
+        # they may run concurrently; adoption below is order-identical to the
+        # sequential greedy (winner = argmax over baseline + candidates)
+        res = _solve_many(
+            aircraft, mission, [(c, {}) for c in cands], parallel,
+            prep=lambda c, a=attr: setattr(aircraft, a, c),
+            restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
+        )
+        for cand in cands:
+            r_c = res[cand]
+            if "failed" in r_c:
+                study["alternatives"][cand] = {"failed": r_c["failed"]}
                 continue
-            setattr(aircraft, attr, cand)
-            try:
-                r_c = _solve_nlp(aircraft, mission)
-                delta = r_c["objective_value"] - champion["objective_value"]
-                study["alternatives"][cand] = {
-                    **{k: r_c[k] for k in ("objective_value", "V_ms", "auw_kg")},
-                    "delta_objective": delta,
-                }
-                if sign * delta > 0:
-                    champion = r_c
-                    study["adopted"] = cand
-                else:
-                    setattr(aircraft, attr, study["adopted"])
-            except RuntimeError as e:
-                study["alternatives"][cand] = {"failed": str(e)[:120]}
-                setattr(aircraft, attr, study["adopted"])
+            delta = r_c["objective_value"] - champion["objective_value"]
+            study["alternatives"][cand] = {
+                **{k: r_c[k] for k in ("objective_value", "V_ms", "auw_kg")},
+                "delta_objective": delta,
+            }
+            if sign * delta > 0:
+                champion = r_c
+                study["adopted"] = cand
+                setattr(aircraft, attr, cand)
         discrete_studies[attr] = study
 
     # winglet study (MODEL_DETAILS 3.6): paired on/off re-optimization at the
@@ -425,9 +514,26 @@ def optimize(
     if getattr(aircraft, "winglet", False):
         winglet_study = {}
         r_on = champion  # the winglet-bearing solve, kept for the VLM check
-        aircraft.winglet = False
-        try:
-            r_off = _solve_nlp(aircraft, mission)
+        prev_cant = getattr(aircraft, "tip_dihedral_max_deg", 20.0)
+
+        def _wl_prep(key):
+            aircraft.winglet = False
+            if key == "continuous_cant":
+                aircraft.tip_dihedral_max_deg = 88.0
+
+        def _wl_restore():
+            aircraft.winglet = True
+            aircraft.tip_dihedral_max_deg = prev_cant
+
+        wr = _solve_many(
+            aircraft, mission, [("off", {}), ("continuous_cant", {})], parallel,
+            prep=_wl_prep, restore=_wl_restore,
+        )
+
+        r_off = wr["off"]
+        if "failed" in r_off:
+            winglet_study["off"] = {"failed": r_off["failed"]}
+        else:
             winglet_study["off"] = {
                 **{k: r_off[k] for k in ("objective_value", "V_ms", "auw_kg")},
                 "span": r_off["dv"]["span"],
@@ -443,10 +549,6 @@ def optimize(
                 winglet_rejected = True
                 champion = r_off
             winglet_study["winglet_rejected"] = winglet_rejected
-        except RuntimeError as e:
-            winglet_study["off"] = {"failed": str(e)[:120]}
-        finally:
-            aircraft.winglet = True
 
         champ_plane_on = aircraft.geometry(r_on["dv"])
         aircraft.winglet = False
@@ -462,10 +564,10 @@ def optimize(
         except Exception as e:  # numeric cross-check must never kill the run
             winglet_study["vlm_check"] = {"failed": str(e)[:120]}
 
-        prev_cant = getattr(aircraft, "tip_dihedral_max_deg", 20.0)
-        aircraft.winglet, aircraft.tip_dihedral_max_deg = False, 88.0
-        try:
-            r_cant = _solve_nlp(aircraft, mission)
+        r_cant = wr["continuous_cant"]
+        if "failed" in r_cant:
+            winglet_study["continuous_cant"] = {"failed": r_cant["failed"]}
+        else:
             winglet_study["continuous_cant"] = {
                 "objective_value": r_cant["objective_value"],
                 "tip_dihedral_deg": r_cant["dv"].get("dihedral_tip"),
@@ -474,10 +576,6 @@ def optimize(
                 "caveat": "Schrenk stall stations include the canted region — "
                 "indicative only; the spar-fit constraint also binds high cant",
             }
-        except RuntimeError as e:
-            winglet_study["continuous_cant"] = {"failed": str(e)[:120]}
-        finally:
-            aircraft.winglet, aircraft.tip_dihedral_max_deg = True, prev_cant
 
     # numeric re-evaluation of the champion through the full M1 pipeline
     # (winglet-free when the study rejected it — champion is the off-solve then)

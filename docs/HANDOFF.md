@@ -21,9 +21,16 @@ mission. New features enter as framework hooks + aircraft-declared data.
 
 ## 2. Environment hazards (each one has already burned a session)
 
-- **RAM:** one NLP solve peaks ~13 GB of WSL's 15 GB. NEVER run two heavy
-  jobs (NLP solve, pytest suite) concurrently — the WSL OOM killer takes the
-  whole session down. One heavy background job at a time.
+- **RAM:** one NLP solve peaks ~13 GB. Under the default 15 GB WSL
+  allotment, NEVER run two heavy jobs (NLP solve, pytest suite)
+  concurrently — the WSL OOM killer takes the whole session down.
+  **2026-07-24:** `C:\Users\M0obo\.wslconfig` now grants WSL 26 GB +
+  10 GB swap (host has 31.4 GB) — it takes effect only after
+  `wsl --shutdown` from Windows (which kills any running session/solve, so
+  do it between runs). Once active, `planeopt optimize --parallel 2` runs
+  battery solves 2-wide (~halves wall time; solver is single-core, 1 of 16,
+  so CPU is never the limit — RAM is). Verify the allotment with `free -g`
+  before using `--parallel 2`; at 15 GB it WILL OOM.
 - **uv lock:** `uv run` hangs silently (futex on `.venv/.lock`) when two uv
   invocations overlap on this drvfs mount. Launch background runs with
   `.venv/bin/planeopt` / `.venv/bin/python` directly; while ANY background

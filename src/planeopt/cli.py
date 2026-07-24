@@ -66,13 +66,18 @@ def optimize(
     runs_dir: Path = typer.Option(Path("runs"), help="Root directory for run artifacts"),
     multistart: int = typer.Option(3, help="Number of NLP starts (1 = nominal only)"),
     flatness: bool = typer.Option(True, help="Span flatness sweep (re-optimized)"),
+    parallel: int = typer.Option(
+        1,
+        help="Concurrent NLP solves per batch. Each solve peaks ~13 GB — "
+        "2 needs the 26 GB WSL allotment (HANDOFF section 2).",
+    ),
 ):
     """Optimize AIRCRAFT for MISSION (M2: wing + cruise state); write run artifacts."""
     ac, ac_file = load_aircraft(aircraft)
     ms, ms_file = load_mission(mission)
     result, run_dir = solve.optimize(
         ac, ms, runs_dir, input_files=[ac_file, ms_file],
-        multistart=multistart, flatness=flatness,
+        multistart=multistart, flatness=flatness, parallel=parallel,
     )
     champ = result.performance["optimization"]["champion"]
     typer.echo(f"status: {result.status}")
