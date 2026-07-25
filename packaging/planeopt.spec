@@ -97,7 +97,10 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
+# Two executables over one Analysis: the console CLI, and a windowed launcher
+# that opens the GUI when double-clicked (entry.py keys off its name). Sharing
+# the Analysis means one dependency scan and one copy of the ~500 MB payload.
+exe_cli = EXE(
     pyz,
     a.scripts,
     [],
@@ -109,8 +112,21 @@ exe = EXE(
     console=True,
 )
 
+exe_gui = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="planeopt-gui",
+    debug=False,
+    strip=False,
+    upx=False,
+    console=False,  # no console window flashing up behind the app
+)
+
 coll = COLLECT(
-    exe,
+    exe_cli,
+    exe_gui,
     a.binaries,
     a.datas,
     strip=False,

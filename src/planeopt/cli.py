@@ -29,6 +29,8 @@ def _setup_logging(quiet: bool = False) -> None:
     """
     logger = logging.getLogger("planeopt")
     logger.setLevel(logging.WARNING if quiet else logging.INFO)
+    if sys.stderr is None:
+        return  # windowed build: no console to write to, and emitting would fail
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", "%H:%M:%S"))
@@ -191,16 +193,18 @@ def objectives():
 
 @app.command()
 def gui(
-    runs_dir: Path = typer.Option(Path("runs"), help="Root directory for run artifacts"),
-    aircraft_dir: Path = typer.Option(Path("aircraft"), help="Directory of aircraft packages"),
-    missions_dir: Path = typer.Option(Path("missions"), help="Directory of mission modules"),
+    project_dir: Path = typer.Option(
+        None, "--project", "-p",
+        help="Folder holding aircraft/ and missions/. Default: the last one used, "
+        "else the working directory, else the folder the executable lives in.",
+    ),
 ):
     """Open the desktop app (M5): browse and compare runs, queue new ones."""
     from .gui import launch
 
     _setup_logging()
     try:
-        raise typer.Exit(launch(runs_dir, aircraft_dir, missions_dir))
+        raise typer.Exit(launch(project_dir))
     except RuntimeError as e:  # PySide6 missing — a plain message, not a traceback
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
@@ -234,6 +238,17 @@ def info():
         typer.echo(f"casadi plugins  UNAVAILABLE ({type(e).__name__}: {e})")
     typer.echo(f"CASADIPATH      {os.environ.get('CASADIPATH', '(unset)')}")
     typer.echo(f"runs default    {(Path('runs')).resolve()}")
+
+    # Where the GUI would look if opened right now. This is the first thing to
+    # check when a packaged app comes up with an empty run list.
+    from .gui.workspace import resolve as resolve_workspace
+
+    project = resolve_workspace()
+    typer.echo(
+        f"project folder  {project.root}"
+        f" ({len(project.aircraft_packages())} aircraft,"
+        f" {len(project.missions())} missions)"
+    )
 
     try:
         import cadquery  # noqa: F401

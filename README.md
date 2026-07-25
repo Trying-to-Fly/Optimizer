@@ -34,8 +34,13 @@ it. A single NLP solve takes minutes and peaks near 13 GB of RAM, and a full
 
 ## Packaged build
 
-`packaging/build_windows.ps1` freezes the CLI into `dist/planeopt/planeopt.exe`
-(PyInstaller, onedir). See `packaging/README.md` for what the bundle contains
+`packaging/build_windows.ps1` freezes the app into `dist/planeopt/`
+(PyInstaller, onedir), producing two executables: `planeopt.exe` (the console
+CLI) and **`planeopt-gui.exe` — double-click this one** to open the desktop
+app. The sample `aircraft/` and `missions/` are staged beside them, so a
+double-click opens onto a working project; use Run ▸ Open project folder…
+(Ctrl+O) to point it elsewhere, and `planeopt info` to see which folder it
+resolved. See `packaging/README.md` for what the bundle contains
 and its two deliberate limitations: no `--parallel > 1` (Windows has no fork)
 and no STEP import (the `cad` extra is ~900 MB). Aircraft and mission inputs
 are Python modules in a packaged build too — a form-driven input path is M5.

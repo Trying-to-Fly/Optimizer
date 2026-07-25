@@ -10,11 +10,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -35,6 +36,7 @@ from .jobs import Job, JobState
 from .newrun import NewRunDialog
 from .runner import RunQueue
 from .views import MONO_FAMILIES, CompareView, DetailView
+from .workspace import Workspace, resolve
 
 _STATE_MARK = {
     JobState.QUEUED: "·",
@@ -104,12 +106,15 @@ QSplitter::handle { background: #1c1c1f; }
 """
 
 
+SETTINGS_ORG = "planeopt"
+SETTINGS_APP = "planeopt"
+WORKSPACE_KEY = "workspace"
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, runs_dir: Path, aircraft_dir: Path, missions_dir: Path) -> None:
+    def __init__(self, workspace: Workspace) -> None:
         super().__init__()
-        self.runs_dir = runs_dir
-        self.aircraft_dir = aircraft_dir
-        self.missions_dir = missions_dir
+        self.workspace = workspace
         self.summaries: list[runindex.RunSummary] = []
 
         self.setWindowTitle(f"planeopt {__version__}")
@@ -130,7 +135,6 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
         self.reload()
-        self.statusBar().showMessage(f"runs: {runs_dir}")
 
     # --- construction ------------------------------------------------------
 
@@ -158,10 +162,10 @@ class MainWindow(QMainWindow):
         self.run_tree.itemSelectionChanged.connect(self._on_selection)
         layout.addWidget(self.run_tree, 1)
 
-        new_run = QPushButton("New run…")
-        new_run.setObjectName("primary")
-        new_run.clicked.connect(self.new_run)
-        layout.addWidget(new_run)
+        self.new_run_button = QPushButton("New run…")
+        self.new_run_button.setObjectName("primary")
+        self.new_run_button.clicked.connect(self.new_run)
+        layout.addWidget(self.new_run_button)
 
         queue_label = QLabel("Queue")
         queue_label.setStyleSheet("font-size:13px; font-weight:600; margin-top:6px;")
@@ -224,6 +228,11 @@ class MainWindow(QMainWindow):
         new_action.triggered.connect(self.new_run)
         run_menu.addAction(new_action)
 
+        open_action = QAction("&Open project folder…", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.choose_workspace)
+        run_menu.addAction(open_action)
+
         refresh_action = QAction("&Refresh runs", self)
         refresh_action.setShortcut("F5")
         refresh_action.triggered.connect(self.reload)
@@ -237,9 +246,23 @@ class MainWindow(QMainWindow):
 
     # --- runs --------------------------------------------------------------
 
+    def set_workspace(self, workspace: Workspace, remember: bool = True) -> None:
+        self.workspace = workspace
+        if remember:
+            QSettings(SETTINGS_ORG, SETTINGS_APP).setValue(WORKSPACE_KEY, str(workspace.root))
+        self.reload()
+
+    def choose_workspace(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Choose a project folder (the one containing aircraft/ and missions/)",
+            str(self.workspace.root),
+        )
+        if chosen:
+            self.set_workspace(Workspace(Path(chosen)))
+
     def reload(self) -> None:
         selected = {i.data(0, Qt.UserRole) for i in self.run_tree.selectedItems()}
-        self.summaries = runindex.scan(self.runs_dir)
+        self.summaries = runindex.scan(self.workspace.runs_dir)
         self.run_tree.clear()
         for summary in self.summaries:
             item = QTreeWidgetItem(
@@ -260,7 +283,32 @@ class MainWindow(QMainWindow):
         for column in range(3):
             self.run_tree.resizeColumnToContents(column)
         self.runs_label.setText(f"Runs ({len(self.summaries)})")
+        self._update_workspace_state()
         self._on_selection()
+
+    def _update_workspace_state(self) -> None:
+        """Say plainly where we are looking, and disable what cannot work.
+
+        A packaged app launched from the wrong folder finds nothing; showing an
+        empty list with a live New-run button just moves the confusion later.
+        """
+        usable = self.workspace.is_usable
+        aircraft = self.workspace.aircraft_packages()
+        self.new_run_button.setEnabled(bool(aircraft))
+        if not usable:
+            self.statusBar().showMessage(
+                f"No aircraft/ or missions/ in {self.workspace.root} — "
+                "use Run ▸ Open project folder…"
+            )
+        elif not aircraft:
+            self.statusBar().showMessage(
+                f"{self.workspace.root} — no aircraft definitions found in aircraft/"
+            )
+        else:
+            self.statusBar().showMessage(
+                f"{self.workspace.root} — {len(aircraft)} aircraft, "
+                f"{len(self.workspace.missions())} missions"
+            )
 
     def _selected_summaries(self) -> list[runindex.RunSummary]:
         paths = {i.data(0, Qt.UserRole) for i in self.run_tree.selectedItems()}
@@ -283,7 +331,7 @@ class MainWindow(QMainWindow):
     # --- queue -------------------------------------------------------------
 
     def new_run(self) -> None:
-        dialog = NewRunDialog(self.aircraft_dir, self.missions_dir, self.runs_dir, self)
+        dialog = NewRunDialog(self.workspace, self)
         if dialog.exec() != NewRunDialog.Accepted:
             return
         try:
@@ -368,10 +416,20 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def run_app(runs_dir: Path, aircraft_dir: Path, missions_dir: Path) -> int:
+def run_app(workspace: Workspace | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("planeopt")
+    app.setApplicationName(SETTINGS_APP)
+    app.setOrganizationName(SETTINGS_ORG)
     app.setStyleSheet(STYLE)
-    window = MainWindow(runs_dir, aircraft_dir, missions_dir)
+
+    if workspace is None:
+        remembered = QSettings(SETTINGS_ORG, SETTINGS_APP).value(WORKSPACE_KEY)
+        workspace = resolve(remembered=Path(remembered) if remembered else None)
+
+    window = MainWindow(workspace)
     window.show()
+    # Ask once, on screen, rather than opening an inexplicably empty window —
+    # this is the normal state for a freshly double-clicked .exe.
+    if not workspace.is_usable:
+        window.choose_workspace()
     return app.exec()

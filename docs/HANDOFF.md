@@ -22,6 +22,21 @@ first slice = run browser + mission form, sequential queue.
   WebEngine/3D/Charts for nothing. `planeopt info` reports whether it resolved.
 - Verified end to end in WSLg: queued an evaluation, streamed progress, the
   run landed in the list and auto-selected (91.5 min).
+- **Packaged-app usability (found by the user trying to open the exe):** a
+  console exe cannot be double-clicked into a GUI — Windows opens a console,
+  Typer says "Missing command", the window vanishes, and it reads as "does not
+  launch". The bundle now ships **two** executables from one Analysis
+  (`entry.py` opens the GUI when the running exe's name ends in `-gui`):
+  `planeopt.exe` (console CLI) and `planeopt-gui.exe` (windowed). Windowed
+  builds have `sys.stderr is None`, so `_setup_logging` skips the handler.
+- **Workspace resolution** (`gui/workspace.py`): the GUI used relative
+  `aircraft/`/`missions/`/`runs/`, which are meaningless for a double-clicked
+  exe — it opened empty and **New run… crashed with FileNotFoundError**. Order
+  is now `--project` → remembered (QSettings) → cwd → the executable's folder;
+  the build stages `aircraft/` and `missions/` beside the binaries so a
+  double-click lands on a working project. `planeopt info` prints the resolved
+  folder — ask for that line first if a packaged run list is empty. Verified
+  from `C:\Windows`: resolves to `dist\planeopt`, 1 aircraft, 1 mission.
 
 
 Orientation for a fresh agent picking up this project. Read this, then

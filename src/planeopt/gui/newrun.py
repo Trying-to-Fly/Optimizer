@@ -34,6 +34,7 @@ from ..mission import OBJECTIVES
 from ..types import MissionSpec
 from . import missionfile
 from .jobs import Job
+from .workspace import Workspace
 
 
 FIELD_WIDTH = 150  # every value field the same width, so the column reads as a column
@@ -50,19 +51,13 @@ def _spin(minimum: float, maximum: float, step: float, decimals: int, suffix: st
 
 
 class NewRunDialog(QDialog):
-    def __init__(
-        self,
-        aircraft_dir: Path,
-        missions_dir: Path,
-        runs_dir: Path,
-        parent=None,
-    ) -> None:
+    def __init__(self, workspace: Workspace, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New run")
         self.setMinimumWidth(520)
-        self._aircraft_dir = aircraft_dir
-        self._missions_dir = missions_dir
-        self._runs_dir = runs_dir
+        self._workspace = workspace
+        self._missions_dir = workspace.missions_dir
+        self._runs_dir = workspace.runs_dir
 
         layout = QVBoxLayout(self)
         layout.setSpacing(14)
@@ -71,7 +66,9 @@ class NewRunDialog(QDialog):
         aircraft_box = QGroupBox("Aircraft")
         aircraft_form = QFormLayout(aircraft_box)
         self.aircraft = QComboBox()
-        for path in sorted(p for p in aircraft_dir.iterdir() if (p / "aircraft.py").is_file()):
+        # workspace.aircraft_packages() tolerates a missing directory: a packaged
+        # app is routinely pointed at a folder that has none yet.
+        for path in workspace.aircraft_packages():
             self.aircraft.addItem(path.name, path)
         aircraft_form.addRow("Definition", self.aircraft)
         note = QLabel(
@@ -94,7 +91,7 @@ class NewRunDialog(QDialog):
         self.preset = QComboBox()
         self.preset.setFixedWidth(FIELD_WIDTH * 2)
         self.preset.addItem("(new mission)", None)
-        for path in sorted(missions_dir.glob("*.py")):
+        for path in workspace.missions():
             self.preset.addItem(path.stem, path)
         self.preset.currentIndexChanged.connect(self._load_preset)
         preset_row.addWidget(self.preset, 1)

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from planeopt.gui import jobs, missionfile, runindex
+from planeopt.gui.workspace import Workspace, resolve
 from planeopt.types import MissionSpec
 
 REPO = Path(__file__).resolve().parent.parent
@@ -172,3 +173,61 @@ def test_run_dir_is_recovered_from_the_child_output(tmp_path):
 
 def test_run_dir_is_none_when_the_child_printed_nothing_useful(tmp_path):
     assert jobs.parse_run_dir("boom\n", tmp_path) is None
+
+
+# --- workspace ----------------------------------------------------------
+# A double-clicked .exe starts in whatever directory Explorer chose, so "where
+# do aircraft/ and missions/ live" cannot be assumed the way the CLI assumes it.
+
+
+def _project(root: Path) -> Path:
+    (root / "aircraft" / "sample").mkdir(parents=True)
+    (root / "aircraft" / "sample" / "aircraft.py").write_text("AIRCRAFT = None", encoding="utf-8")
+    (root / "missions").mkdir()
+    (root / "missions" / "m.py").write_text("MISSION = None", encoding="utf-8")
+    return root
+
+
+def test_a_folder_with_aircraft_is_usable(tmp_path):
+    workspace = Workspace(_project(tmp_path))
+    assert workspace.is_usable
+    assert [p.name for p in workspace.aircraft_packages()] == ["sample"]
+    assert [p.name for p in workspace.missions()] == ["m.py"]
+
+
+def test_an_empty_folder_is_not_usable_and_lists_nothing(tmp_path):
+    workspace = Workspace(tmp_path / "nowhere")
+    assert not workspace.is_usable
+    # Must not raise: this is the state of a freshly double-clicked executable.
+    assert workspace.aircraft_packages() == []
+    assert workspace.missions() == []
+
+
+def test_a_directory_without_aircraft_py_is_not_an_aircraft(tmp_path):
+    (tmp_path / "aircraft" / "notes").mkdir(parents=True)
+    assert Workspace(tmp_path).aircraft_packages() == []
+
+
+def test_explicit_choice_wins_over_everything(tmp_path):
+    explicit = _project(tmp_path / "explicit")
+    remembered = _project(tmp_path / "remembered")
+    assert resolve(explicit=explicit, remembered=remembered).root == explicit
+
+
+def test_a_remembered_project_wins_over_the_working_directory(tmp_path, monkeypatch):
+    remembered = _project(tmp_path / "remembered")
+    monkeypatch.chdir(_project(tmp_path / "cwd"))
+    assert resolve(remembered=remembered).root == remembered
+
+
+def test_an_unusable_remembered_project_falls_through_to_the_cwd(tmp_path, monkeypatch):
+    cwd = _project(tmp_path / "cwd")
+    monkeypatch.chdir(cwd)
+    assert resolve(remembered=tmp_path / "deleted-since").root == cwd
+
+
+def test_resolve_still_returns_something_when_nothing_qualifies(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # empty: no aircraft/, no missions/
+    workspace = resolve()
+    assert not workspace.is_usable  # the UI asks the user rather than dying
+    assert workspace.root == tmp_path

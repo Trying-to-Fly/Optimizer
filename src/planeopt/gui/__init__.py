@@ -16,10 +16,15 @@ INSTALL_HINT = (
 )
 
 
-def launch(runs_dir: Path, aircraft_dir: Path, missions_dir: Path) -> int:
-    """Start the desktop app. Returns the Qt exit code."""
+def launch(project_dir: Path | None = None) -> int:
+    """Start the desktop app. Returns the Qt exit code.
+
+    project_dir=None lets the app work out where to look (remembered choice,
+    working directory, then the folder the .exe lives in) and ask if it cannot.
+    """
     try:
         from .window import run_app
+        from .workspace import Workspace
     except ImportError as e:  # PySide6 absent
         raise RuntimeError(f"{INSTALL_HINT}\n\n({e})") from e
-    return run_app(runs_dir=runs_dir, aircraft_dir=aircraft_dir, missions_dir=missions_dir)
+    return run_app(Workspace(project_dir) if project_dir else None)

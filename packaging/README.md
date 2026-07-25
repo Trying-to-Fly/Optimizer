@@ -13,9 +13,31 @@ wheels, never share a directory), installs the package non-editable, freezes
 `packaging/planeopt.spec`, and smoke-tests the result with `--version` and
 `info`.
 
-Ship the whole `dist/planeopt/` directory. `planeopt.exe` will not run pulled
-out of it: onedir keeps the ~500 MB of CasADi/SciPy/AeroSandbox payload beside
-the binary instead of unpacking it to a temp directory on every launch.
+Ship the whole `dist/planeopt/` directory. Neither executable runs pulled out
+of it: onedir keeps the ~500 MB of CasADi/SciPy/AeroSandbox payload beside the
+binaries instead of unpacking it to a temp directory on every launch.
+
+## Two executables, and why
+
+| File | Kind | Use |
+|---|---|---|
+| `planeopt.exe` | console | the CLI — `run`, `optimize`, `info`, `report`, … |
+| `planeopt-gui.exe` | windowed | **double-click this** to open the desktop app |
+
+They are built from the same `entry.py` over the same Analysis; the script
+opens the GUI when the running executable's name ends in `-gui`. Two binaries
+because a console program cannot be double-clicked into a GUI: Windows opens a
+console, Typer reports a missing command, and the window vanishes — which reads
+exactly like "the app doesn't launch". The windowed build also has no console,
+so `sys.stderr` is `None` and the logging handler is skipped there.
+
+The build stages `aircraft/` and `missions/` beside the executables. A
+double-clicked app starts in whatever directory Explorer chose, so without a
+project sitting next to the binary it would open onto nothing. Resolution order
+is: `--project`, then the last folder chosen in the app (remembered via
+QSettings), then the working directory, then the executable's own folder.
+`planeopt info` prints which one won — ask for that line first when someone
+reports an empty run list.
 
 The desktop GUI ships inside the bundle (`planeopt gui`), so the build installs
 `.[gui]`. Only the Core/Gui/Widgets Qt stack is kept — the spec excludes QML,

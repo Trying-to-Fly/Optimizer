@@ -40,7 +40,18 @@ try {
     & $vpy -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging\planeopt.spec
     if ($LASTEXITCODE -ne 0) { throw "pyinstaller failed" }
 
+    # Ship the sample project beside the executables. Without it a double-clicked
+    # planeopt-gui.exe opens onto an empty folder and has nothing to run.
+    Write-Host "==> staging the sample project"
+    foreach ($dir in @("aircraft", "missions")) {
+        Copy-Item (Join-Path $repo $dir) (Join-Path $repo "dist\planeopt\$dir") -Recurse -Force
+    }
+    Get-ChildItem (Join-Path $repo "dist\planeopt") -Recurse -Directory -Filter "__pycache__" |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
     $exe = Join-Path $repo "dist\planeopt\planeopt.exe"
+    $guiExe = Join-Path $repo "dist\planeopt\planeopt-gui.exe"
+    if (-not (Test-Path $guiExe)) { throw "planeopt-gui.exe was not built" }
     Write-Host "==> smoke test: startup"
     & $exe --version
     & $exe info
