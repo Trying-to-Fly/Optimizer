@@ -3,7 +3,15 @@ the sequential path (NLP itself is stubbed — these are plumbing tests)."""
 
 from types import SimpleNamespace
 
+import pytest
+
 from planeopt import solve
+
+# Concurrency rides fork, so the width>1 tests are POSIX-only; the sequential
+# path (the only one Windows uses) stays covered everywhere.
+needs_fork = pytest.mark.skipif(
+    not solve.parallel_available(), reason="platform has no fork start method"
+)
 
 
 def _fake_nlp_factory():
@@ -15,6 +23,7 @@ def _fake_nlp_factory():
     return fake
 
 
+@needs_fork
 def test_parallel_matches_sequential(monkeypatch):
     monkeypatch.setattr(solve, "_solve_nlp", _fake_nlp_factory())
     jobs = [
@@ -40,7 +49,8 @@ def test_prep_snapshot_reaches_each_job(monkeypatch):
 
     monkeypatch.setattr(solve, "_solve_nlp", fake)
     jobs = [("red", {}), ("blue", {}), ("green", {})]
-    for width in (1, 2):
+    widths = (1, 2) if solve.parallel_available() else (1,)
+    for width in widths:
         res = solve._solve_many(
             aircraft, None, jobs, parallel=width,
             prep=lambda key: setattr(aircraft, "mode", key),
@@ -53,4 +63,21 @@ def test_prep_snapshot_reaches_each_job(monkeypatch):
 
 
 def test_empty_batch_is_a_noop():
-    assert solve._solve_many(None, None, [], parallel=2) == {}
+    width = 2 if solve.parallel_available() else 1
+    assert solve._solve_many(None, None, [], parallel=width) == {}
+
+
+def test_width_one_never_needs_fork(monkeypatch):
+    """Sequential is the portable path — it must not consult fork at all."""
+    monkeypatch.setattr(solve, "parallel_available", lambda: False)
+    monkeypatch.setattr(solve, "_solve_nlp", _fake_nlp_factory())
+    solve.check_parallel(1)
+    assert solve._solve_many(None, None, [("a", {})], parallel=1)["a"]["objective_value"] == 1.0
+
+
+def test_width_above_one_is_rejected_without_fork(monkeypatch):
+    """On Windows the failure must be an explanation, not a spawn/pickle traceback."""
+    monkeypatch.setattr(solve, "parallel_available", lambda: False)
+    with pytest.raises(RuntimeError) as e:
+        solve.check_parallel(2)
+    assert "fork" in str(e.value) and "parallel=1" in str(e.value)

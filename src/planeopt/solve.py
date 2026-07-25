@@ -10,6 +10,8 @@ M2 replaces the sweep with the NLP.
 from __future__ import annotations
 
 import datetime
+import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +21,12 @@ from .mission import OBJECTIVES
 from .report import assemble, figures
 from .report import html as report_html
 from .types import AircraftDefinition, MissionSpec, RunResult
+
+# Progress goes through logging, never print: the library stays silent by default
+# (tests, GUI), and each front end attaches the handler it wants. A single solve
+# is 5-6 minutes and a full battery runs for hours, so a client that shows nothing
+# is indistinguishable from a hang.
+log = logging.getLogger("planeopt")
 
 G = 9.81
 M1_STATUS = "M1: fixed-design evaluation (Phase 1 gate pipeline) — no optimizer"
@@ -33,6 +41,11 @@ def run(
     dv: dict | None = None,
 ) -> tuple[RunResult, Path]:
     objective = OBJECTIVES[mission.objective]
+    log.info(
+        "evaluating %s / %s over %d speed points",
+        getattr(aircraft, "name", type(aircraft).__name__), mission.name,
+        len(np.arange(*v_sweep)),
+    )
     pt = aircraft.powertrain()
     bodies = aircraft.parasite_bodies(dv)
     pitch_control = getattr(aircraft, "pitch_control_name", "ruddervator")
@@ -50,6 +63,7 @@ def run(
             t = aero.trim(airplane, float(V), weight_n, x_cg, bodies, control_name=pitch_control)
             p = propulsion.solve(float(V), t["drag_n"], pt)
         except (RuntimeError, ValueError) as e:
+            log.debug("V = %.1f m/s infeasible: %s", float(V), e)
             sweep.append({"V_ms": float(V), "infeasible": str(e)})
             continue
         point = {**t, **p}
@@ -82,6 +96,22 @@ def run(
         and (defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3)
     ]
     candidates = legal if legal else feasible
+    if not candidates:
+        # Every point failed to trim or to close the propulsion chain. Report the
+        # distinct causes: bare "max() iterable argument is empty" tells the user
+        # nothing, and this is exactly where a broken install surfaces.
+        reasons: dict[str, list[float]] = {}
+        for s in sweep:
+            reasons.setdefault(s.get("infeasible", "unknown"), []).append(s["V_ms"])
+        detail = "; ".join(
+            f"{reason} [V = {', '.join(f'{v:.1f}' for v in speeds[:3])}"
+            f"{', ...' if len(speeds) > 3 else ''} m/s]"
+            for reason, speeds in reasons.items()
+        )
+        raise RuntimeError(
+            f"no feasible operating point anywhere in the {len(sweep)}-point speed "
+            f"sweep, so there is nothing to report. Causes: {detail}"
+        )
     sign = 1 if objective.direction == "maximize" else -1
     best = max(candidates, key=lambda s: sign * s.get("objective_value", -np.inf))
     # evaluate dCm/dCL at the trim alpha — LiftingLine's derivative is
@@ -150,6 +180,7 @@ def run(
     )
 
     run_dir = assemble.write_run_dir(result, runs_root, input_files or [])
+    log.info("writing artifacts to %s", run_dir)
     figures.power_curves(sweep, mission, objective, run_dir / "figures")
     figures.stall_spanwise(stall, run_dir / "figures")
     planes = {"current": airplane}
@@ -170,7 +201,7 @@ def run(
             )
     figures.three_view(viz_plane, run_dir / "figures")
     figures.interactive_3d(viz_plane, run_dir)
-    (run_dir / "report.html").write_text(report_html.render(result, run_dir))
+    (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
     return result, run_dir
 
 
@@ -318,7 +349,43 @@ def _solve_worker(conn, aircraft, mission, kw):  # pragma: no cover — child pr
     conn.close()
 
 
-def _solve_many(aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None) -> dict:
+def parallel_available() -> bool:
+    """Whether concurrent solves are possible on this platform.
+
+    Workers inherit the aircraft/mission objects across the fork instead of
+    pickling them — those objects carry bound methods and CasADi state and are
+    not picklable, so `spawn` (the only start method on Windows) cannot serve
+    them. Concurrency is therefore POSIX-only; every other feature is portable.
+    """
+    import multiprocessing as mp
+
+    return "fork" in mp.get_all_start_methods()
+
+
+def check_parallel(parallel: int) -> None:
+    """Reject an impossible width up front, not after the first batch."""
+    if parallel > 1 and not parallel_available():
+        raise RuntimeError(
+            f"parallel={parallel} needs the 'fork' start method, which this platform "
+            "(Windows) does not have — the aircraft definition cannot be pickled for "
+            "a spawned worker. Run with parallel=1; solves then run one at a time."
+        )
+
+
+def _log_result(label: str, key, done: int, total: int, result: dict, t0: float) -> None:
+    mins = (time.monotonic() - t0) / 60.0
+    if "failed" in result:
+        log.info("  %s [%d/%d] %s: FAILED — %s (%.1f min)",
+                 label, done, total, key, result["failed"], mins)
+    else:
+        log.info("  %s [%d/%d] %s: objective %.4g (%.1f min)",
+                 label, done, total, key, result["objective_value"], mins)
+
+
+def _solve_many(
+    aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None,
+    label: str = "solve",
+) -> dict:
     """Run independent _solve_nlp jobs, `parallel` at a time.
 
     jobs: [(key, kwargs)] -> {key: result | {"failed": ...}}. prep(key)/restore()
@@ -327,9 +394,14 @@ def _solve_many(aircraft, mission, jobs, parallel: int = 1, prep=None, restore=N
     child snapshots them at launch. parallel=1 is the historical in-process
     path and the only safe mode under a ~15 GB WSL cap (each solve peaks
     ~13 GB — HANDOFF section 2); 2-wide needs the 26 GB .wslconfig active.
-    A job failure never kills the batch.
+    A job failure never kills the batch. `label` names the batch in the
+    progress log.
     """
+    check_parallel(parallel)
     results = {}
+    t0 = time.monotonic()
+    total = len(jobs)
+    log.info("%s: %d solve(s), %d-wide", label, total, max(1, parallel))
     if parallel <= 1:
         for key, kw in jobs:
             if prep is not None:
@@ -341,6 +413,7 @@ def _solve_many(aircraft, mission, jobs, parallel: int = 1, prep=None, restore=N
             finally:
                 if restore is not None:
                     restore()
+            _log_result(label, key, len(results), total, results[key], t0)
         return results
 
     import multiprocessing as mp
@@ -369,6 +442,7 @@ def _solve_many(aircraft, mission, jobs, parallel: int = 1, prep=None, restore=N
                 results[key] = {"failed": "worker died before reporting (OOM?)"}
             proc.join()
             rx.close()
+            _log_result(label, key, len(results), total, results[key], t0)
     return results
 
 
@@ -389,6 +463,13 @@ def optimize(
     alternatives, winglet pair). 1 = sequential (default; required under the
     15 GB WSL cap). Cross-batch order is unchanged, so study semantics are
     identical at any width."""
+    check_parallel(parallel)
+    t_start = time.monotonic()
+    log.info(
+        "optimize: %s / %s — objective %s. Each NLP solve takes minutes and peaks "
+        "near 13 GB; a full battery runs for hours.",
+        getattr(aircraft, "name", type(aircraft).__name__), mission.name, mission.objective,
+    )
     rng = np.random.default_rng(0)
     jobs = [("nominal", {})]
     for i in range(multistart - 1):
@@ -405,7 +486,7 @@ def optimize(
     # the +20 g shadow-price bump is independent of the champion, so it rides
     # the same batch; its delta is computed afterwards
     jobs.append(("mass_bump", {"extra_mass_kg": 0.020}))
-    first = _solve_many(aircraft, mission, jobs, parallel)
+    first = _solve_many(aircraft, mission, jobs, parallel, label="multistart")
     starts, results = [], []
     for key, _ in jobs:
         if key == "mass_bump":
@@ -433,7 +514,8 @@ def optimize(
     if flatness:
         spans = [float(s) for s in np.linspace(1.5, span_cap, 6)]
         fr = _solve_many(
-            aircraft, mission, [(s, {"fixed": {"span": s}}) for s in spans], parallel
+            aircraft, mission, [(s, {"fixed": {"span": s}}) for s in spans], parallel,
+            label="flatness sweep",
         )
         flat = [
             {
@@ -453,7 +535,10 @@ def optimize(
         ("chain_eta_x1.10", {"eta_scale": 1.10}),
     ]
     battery = {}
-    for label, r in _solve_many(aircraft, mission, battery_jobs, parallel).items():
+    battery_results = _solve_many(
+        aircraft, mission, battery_jobs, parallel, label="re-solve battery"
+    )
+    for label, r in battery_results.items():
         if "failed" in r:
             battery[label] = {"failed": r["failed"]}
         else:
@@ -488,6 +573,7 @@ def optimize(
             aircraft, mission, [(c, {}) for c in cands], parallel,
             prep=lambda c, a=attr: setattr(aircraft, a, c),
             restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
+            label=f"study {attr}",
         )
         for cand in cands:
             r_c = res[cand]
@@ -527,7 +613,7 @@ def optimize(
 
         wr = _solve_many(
             aircraft, mission, [("off", {}), ("continuous_cant", {})], parallel,
-            prep=_wl_prep, restore=_wl_restore,
+            prep=_wl_prep, restore=_wl_restore, label="winglet study",
         )
 
         r_off = wr["off"]
@@ -579,6 +665,7 @@ def optimize(
 
     # numeric re-evaluation of the champion through the full M1 pipeline
     # (winglet-free when the study rejected it — champion is the off-solve then)
+    log.info("re-evaluating the champion numerically and writing artifacts")
     if winglet_rejected:
         aircraft.winglet = False
     try:
@@ -632,9 +719,14 @@ def optimize(
     )
     figures.flatness_plot(flat, champion, run_dir / "figures")
     (run_dir / "run.json").write_text(
-        __import__("json").dumps(__import__("dataclasses").asdict(result), indent=2, default=str)
+        __import__("json").dumps(__import__("dataclasses").asdict(result), indent=2, default=str),
+        encoding="utf-8",
     )
-    (run_dir / "report.html").write_text(report_html.render(result, run_dir))
+    (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
+    log.info(
+        "done in %.1f min — champion objective %.4g, artifacts in %s",
+        (time.monotonic() - t_start) / 60.0, champion["objective_value"], run_dir,
+    )
     return result, run_dir
 
 

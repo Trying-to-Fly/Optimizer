@@ -5,15 +5,22 @@ Contract: (V, required thrust T, PowertrainConfig) -> P_elec + diagnostics
 evaluators compose it.
 
 M1 implementation (numeric, fixed-design evaluation): prop from the fitted APC
-proxy table (data/props/*.json, built by tools/ingest_props.py) with the folding
-derate applied to shaft power; motor equivalent circuit via AeroSandbox's
+proxy table (planeopt/data/props/*.json, built by tools/ingest_props.py) with the
+folding derate applied to shaft power; motor equivalent circuit via AeroSandbox's
 motor_electric_performance; ESC as constant efficiency. The M2 optimizer replaces
 the root-solve with an Opti variable + thrust-match equality (same physics).
+
+Proxy tables are package data, so they resolve identically from a source tree, an
+installed wheel, and a frozen (PyInstaller) build. `PLANEOPT_PROPS_DIR` prepends a
+user directory to the search path — that is how an end user adds their own prop
+without touching the install.
 """
 
 from __future__ import annotations
 
 import json
+import os
+from importlib.resources import files
 from pathlib import Path
 
 import numpy as np
@@ -22,14 +29,42 @@ from scipy.optimize import brentq
 
 from .types import PowertrainConfig
 
-PROPS_DIR = Path(__file__).parent.parent.parent / "data" / "props"
+BUILTIN_PROPS_DIR = Path(str(files("planeopt") / "data" / "props"))
+PROPS_DIR_ENV = "PLANEOPT_PROPS_DIR"
+
+
+def props_search_path() -> list[Path]:
+    """User override directory (if set) first, then the tables shipped with the app."""
+    override = os.environ.get(PROPS_DIR_ENV)
+    return ([Path(override)] if override else []) + [BUILTIN_PROPS_DIR]
+
+
+def available_props() -> list[str]:
+    """Proxy-table keys resolvable right now, nearest override first."""
+    keys: list[str] = []
+    for d in props_search_path():
+        if d.is_dir():
+            keys += [p.stem for p in sorted(d.glob("*.json")) if p.stem not in keys]
+    return keys
+
+
+def find_prop_table(key: str) -> Path:
+    for d in props_search_path():
+        candidate = d / f"{key}.json"
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(
+        f"No proxy table {key!r}. Searched {[str(d) for d in props_search_path()]}; "
+        f"available: {available_props() or '(none)'}. Build one with "
+        f"tools/ingest_props.py, or point {PROPS_DIR_ENV} at a directory holding it."
+    )
 
 
 class PropTable:
     """Smooth CT(J)/CP(J) fits of an APC proxy table."""
 
     def __init__(self, key: str):
-        meta = json.loads((PROPS_DIR / f"{key}.json").read_text())
+        meta = json.loads(find_prop_table(key).read_text(encoding="utf-8"))
         self.key = key
         self.ct_coeffs = np.array(meta["ct_coeffs"])
         self.cp_coeffs = np.array(meta["cp_coeffs"])

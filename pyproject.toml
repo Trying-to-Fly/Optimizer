@@ -3,6 +3,8 @@ name = "planeopt"
 version = "0.1.0"
 description = "General-purpose small-aircraft MDO: co-optimize geometry, mass, and trim for a mission-declared objective (AeroSandbox-based)"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "MoZ200701", email = "mzhou07011@gmail.com" }
 ]
@@ -21,7 +23,7 @@ cad = [
 ]
 
 [project.scripts]
-planeopt = "planeopt.cli:app"
+planeopt = "planeopt.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]

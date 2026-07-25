@@ -22,8 +22,12 @@ def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -
     run_dir = runs_root / f"{stamp}-{slug}"
     (run_dir / "figures").mkdir(parents=True, exist_ok=False)
 
+    # encoding is explicit everywhere artifacts are written: Python falls back to
+    # the locale encoding otherwise, and the reports carry non-Latin-1 characters
+    # (eta, Delta, arrows) that cp1252 cannot represent — on Windows that is a
+    # crash at the very end of a multi-hour run.
     (run_dir / "run.json").write_text(
-        json.dumps(dataclasses.asdict(result), indent=2, default=str)
+        json.dumps(dataclasses.asdict(result), indent=2, default=str), encoding="utf-8"
     )
 
     inputs_dir = run_dir / "inputs"
@@ -35,6 +39,6 @@ def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -
 
 
 def load(run_dir: Path) -> RunResult:
-    data = json.loads((run_dir / "run.json").read_text())
+    data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     data["constraints"] = data.get("constraints") or {}
     return RunResult(**data)

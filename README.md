@@ -14,6 +14,7 @@ The docs are the spec, in reading order:
 
 ```sh
 uv run pytest                  # test suite
+uv run planeopt info           # install report: version, packaged data, capabilities
 uv run planeopt objectives     # list the objective library
 uv run planeopt run missions/endurance_sample.py -a aircraft/vtail_sample
 ```
@@ -22,27 +23,43 @@ Runs write self-contained artifact directories under `runs/` (run.json +
 report.html + an interactive 3D model (`interactive_3d.html`, rotatable in any
 browser) + inputs snapshot).
 
+Long commands print progress to stderr as each solve lands; `--quiet` silences
+it. A single NLP solve takes minutes and peaks near 13 GB of RAM, and a full
+`optimize` battery runs for hours.
+
+## Packaged build
+
+`packaging/build_windows.ps1` freezes the CLI into `dist/planeopt/planeopt.exe`
+(PyInstaller, onedir). See `packaging/README.md` for what the bundle contains
+and its two deliberate limitations: no `--parallel > 1` (Windows has no fork)
+and no STEP import (the `cad` extra is ~900 MB). Aircraft and mission inputs
+are Python modules in a packaged build too — a form-driven input path is M5.
+
 ## Status
 
-**M3 (full-vehicle optimization)** — milestones M0-M3 complete:
+**M4.8 complete** — the champion battery co-optimizes wing, fuselage, tail, and
+motor mount; see `docs/FINDINGS.md` §10 for the current champion and
+`docs/HANDOFF.md` for state and next work. Milestones M0-M3 established:
 
 - M1: fixed-design evaluation (LiftingLine trim, APC-proxy propulsion, printed-mass
   model); validated against real-aircraft bands in `docs/VALIDATION_ANCHORS.md`
 - M2: wing NLP (span/chord/taper/cruise state) with multi-start, shadow prices,
   span-flatness sweep
-- M3: full vehicle — pitch trim (explicit ruddervator), static-margin window,
+- M3: full vehicle — pitch trim (declared pitch control), static-margin window,
   gust margin, continuous spar sizing, ballast/battery-position balance,
-  tail arm + tail scale
-- M4.5: projected-span manufacturing cap (2.2 m on the sample) + parametric
-  winglet (separate surface, length/cant/chords/toe), with a winglet on/off
-  study, VLM induced-drag cross-check, and continuous-cant check in the
-  champion battery (`docs/MODEL_DETAILS.md` section 3.6)
+  free tail arm
+- M4.5-M4.8: projected-span cap + parametric winglet with an on/off study and
+  VLM cross-check; parametric fuselage loft with an emergent boom; tail types;
+  the wing dihedral-curve family; motor mount as a priced discrete option.
+  Discrete architecture choices are enumerated and priced by studies, never
+  assumed (`docs/MODEL_DETAILS.md`, `docs/FINDINGS.md`)
 
 ```sh
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
 ```
 
-Next: **M4** decision engine (airfoil outer loop, re-solve battery, epsilon-constraint
-Pareto sweeps) — see `docs/EXECUTION_PLAN.md` section 6. Construction-profile and
-propulsion constants remain uncalibrated: rankings are trustworthy, absolute
-minutes are optimistic (see `docs/VALIDATION_ANCHORS.md`).
+Next: the imported-fuselage NLP mode for a user-supplied .STEP, then **M5**
+(GUI) — see `docs/HANDOFF.md` section 5. Construction-profile and propulsion
+constants remain uncalibrated: rankings and active constraint sets are
+trustworthy, absolute minutes are optimistic (see
+`docs/VALIDATION_ANCHORS.md`).

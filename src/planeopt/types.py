@@ -75,7 +75,7 @@ class PropConfig:
     name: str
     diameter_m: float
     pitch_m: float
-    proxy_table: str  # key into data/props/ (APC proxy, MODEL_DETAILS.md section 2.1)
+    proxy_table: str  # planeopt/data/props key, or PLANEOPT_PROPS_DIR (MODEL_DETAILS section 2.1)
     folding_derate: float = 1.0
 
 

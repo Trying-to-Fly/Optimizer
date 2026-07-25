@@ -21,7 +21,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-DATA = Path(__file__).parent.parent / "data" / "props"
+REPO = Path(__file__).parent.parent
+SOURCE = REPO / "data" / "props"  # raw APC .dat tables + fit-quality plots (repo material)
+FITS = REPO / "src" / "planeopt" / "data" / "props"  # fitted coefficients (shipped package data)
 RPM_RANGE = (3000, 10000)  # cruise-relevant for 1-2.5 kg class on 3-4S
 CT_DEG, CP_DEG = 3, 3
 
@@ -68,7 +70,7 @@ def fit_prop(dat_file: Path, key: str) -> dict:
         "cp_rms": float(np.sqrt(np.mean((cp_fit - Cp[m]) ** 2))),
         "n_points": int(m.sum()),
     }
-    (DATA / f"{key}.json").write_text(json.dumps(meta, indent=2))
+    (FITS / f"{key}.json").write_text(json.dumps(meta, indent=2))
 
     jj = np.linspace(0, j_max, 100)
     fig, ax = plt.subplots(1, 2, figsize=(9, 3.2))
@@ -79,14 +81,15 @@ def fit_prop(dat_file: Path, key: str) -> dict:
     ax[1].plot(jj, np.polyval(cp_c, jj), "r-")
     ax[1].set(xlabel="J", ylabel="Cp")
     fig.tight_layout()
-    fig.savefig(DATA / f"{key}_fit.png", dpi=110)
+    fig.savefig(SOURCE / f"{key}_fit.png", dpi=110)
     plt.close(fig)
     return meta
 
 
 def main():
-    m55 = fit_prop(DATA / "PER3_11x55E.dat", "apc_11x55e")
-    m7 = fit_prop(DATA / "PER3_11x7E.dat", "apc_11x7e")
+    FITS.mkdir(parents=True, exist_ok=True)
+    m55 = fit_prop(SOURCE / "PER3_11x55E.dat", "apc_11x55e")
+    m7 = fit_prop(SOURCE / "PER3_11x7E.dat", "apc_11x7e")
 
     w = (6.0 - 5.5) / (7.0 - 5.5)
     blend = {
@@ -97,7 +100,7 @@ def main():
         "cp_coeffs": ((1 - w) * np.array(m55["cp_coeffs"]) + w * np.array(m7["cp_coeffs"])).tolist(),
         "note": "proxy for Aeronaut CAM 11x6 folding; folding derate applied separately",
     }
-    (DATA / "apc_11x6_blend.json").write_text(json.dumps(blend, indent=2))
+    (FITS / "apc_11x6_blend.json").write_text(json.dumps(blend, indent=2))
     for k, m in [("apc_11x55e", m55), ("apc_11x7e", m7)]:
         print(f"{k}: {m['n_points']} pts, J<= {m['j_range'][1]:.2f}, "
               f"Ct rms {m['ct_rms']:.4f}, Cp rms {m['cp_rms']:.4f}")

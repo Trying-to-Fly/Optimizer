@@ -1,4 +1,4 @@
-# HANDOFF — Plane Optimizer (updated 2026-07-24, end of fifth session)
+# HANDOFF — Plane Optimizer (updated 2026-07-25, end of seventh session)
 
 Orientation for a fresh agent picking up this project. Read this, then
 `EXECUTION_PLAN.md` (milestones), `MODEL_DETAILS.md` (per-module equations —
@@ -57,6 +57,55 @@ choices (tail type, topology) stay discrete, and even those get priced by
 studies rather than assumed.
 
 ## 4. State as of this handoff
+
+**Seventh session (2026-07-25) — packaging: the app builds and runs as a
+Windows .exe.** No modeling changed; this session made the app distributable.
+
+- **Distribution bug (was live, not hypothetical):** prop tables were resolved
+  by repo-root path, so they were absent from any wheel or frozen build — the
+  first `PropTable(...)` call would have failed for every installed user. They
+  are now package data in `src/planeopt/data/props/` resolved via
+  `importlib.resources`, with `PLANEOPT_PROPS_DIR` prepending a user directory
+  (that is how an end user adds their own prop). `data/props/` keeps the raw
+  APC `.dat` tables and fit plots as source material.
+  **Rule:** anything read at run time lives under `src/planeopt/`;
+  `tests/test_packaging.py` guards it.
+- **Windows portability, all three found by running the thing:**
+  `--parallel > 1` is rejected up front (`solve.check_parallel`) because
+  workers inherit the aircraft across a fork and Windows has none; every
+  artifact write now names UTF-8 explicitly (the report carries eta/Delta/arrow,
+  which cp1252 cannot encode — it crashed at the *final* write of a run, and
+  `tests/test_packaging.py` now fails any unencoded text I/O); and
+  `cli.main` reconfigures stdout/stderr to UTF-8.
+- **CasADi in a bundle — two traps, both documented in `packaging/README.md`:**
+  (1) PyInstaller hoists `_casadi.pyd` to the bundle root while `collect_all`
+  files the 97 DLLs under `casadi/`, so the spec places them at the root by
+  hand; (2) plugin loading (`libcasadi_nlpsol_ipopt`, `..._interpolant_bspline`)
+  needs the search path set through `casadi.GlobalOptions.setCasadiPath` —
+  **the CASADIPATH env var does not work when set from Python on Windows**,
+  because libcasadi's C runtime keeps its own copy of the environment made at
+  process start (setting it in the shell before launch *does* work, which makes
+  this maddening to diagnose). The fix lives in `planeopt/__init__.py` so it
+  holds for the future GUI too. Symptom if it regresses: every sweep point
+  infeasible.
+- **Progress + diagnostics:** solves log through the `planeopt` logger (a
+  battery used to print nothing for hours); `--quiet` suppresses. New
+  `planeopt info` (install report — ask for it first in any bug report) and
+  `--version`. An all-infeasible sweep now raises naming the causes instead of
+  `max() iterable argument is empty`.
+- **Verified end to end:** `dist/planeopt/planeopt.exe` (428 MB onedir, built
+  by Windows Python 3.13 via `packaging/build_windows.ps1`) completes
+  `planeopt run` on the sample and writes report.html + interactive_3d.html +
+  figures — **numerically identical to the WSL run (91.5 min at 10.5 m/s)**.
+  The build script's smoke test runs a full evaluation on purpose: startup
+  success proves nothing, since both CasADi traps pass `--version` happily.
+- **Not in the exe:** `--parallel > 1`, and STEP import (the `cad` extra is
+  ~900 MB and is excluded; `planeopt info` says so). Aircraft and mission
+  inputs are still user-authored Python modules even in the packaged build —
+  form/GUI input is M5 and is the real gate on "general use".
+- Hazard learned: `uv sync` without `--extra cad` silently *prunes* cadquery
+  and skips the STEP test. Use `UV_HTTP_TIMEOUT=600 uv sync --extra cad`.
+  `.venv-win/` is the Windows build venv and must never be shared with `.venv`.
 
 **Sixth session (2026-07-24) — M4.8 done.** Committed and pushed:
 
@@ -180,6 +229,11 @@ DONE — see §4. Remaining, roughly in order of readiness:
   deserves a declared handling rationale in DESIGN docs.
 - Optional warm-start flag (`--warm-start <run dir>` reading champion dv as
   inits) — only worth it for speed; multistart agreement is already perfect.
+- Release polish, if the .exe is to go to anyone outside: no LICENSE file
+  exists yet (a user decision); the binary is unsigned, so Windows SmartScreen
+  will warn on first run; and no `optimize` battery has been run inside the
+  frozen build (the smoke test covers `run`, i.e. the M1 pipeline and IPOPT —
+  a full battery is hours and was not re-run for packaging alone).
 - Queued far-field: XFOIL spot-check AG35 vs SD7037 (FINDINGS §6), user
   slicing parts → `tools/fit_profile.py` mass calibration, M5 GUI.
 

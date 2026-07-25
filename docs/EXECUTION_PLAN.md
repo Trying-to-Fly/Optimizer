@@ -46,6 +46,7 @@ plane-optimizer/
                        #   ε-constraint sweeps, re-solve battery
     report/            # champion report: RunResult → run.json → report.html
       assemble.py  html.py  templates/report.html.j2
+    data/props/        # fitted CT/CP coefficients — package data, ships with the app
     cli.py             # thin: parse args → library calls → print run dir
   aircraft/            # each aircraft = a package: definition + its construction profiles
     vtail_sample/
@@ -53,11 +54,16 @@ plane-optimizer/
       lwpla_a1.py      # construction profile (calibration constants live here)
   missions/
     endurance_sample.py
-  data/props/          # APC performance tables + fitted CT/CP coefficients per prop
+  data/props/          # raw APC performance tables + fit-quality plots (source material)
+  packaging/           # PyInstaller spec + Windows build script (.exe release)
   tools/               # offline scripts: prop-data ingest, slicer-calibration fitting
   tests/
   runs/                # gitignored; one directory per run
 ```
+
+**Distribution rule:** anything read at run time lives under `src/planeopt/`.
+A path resolved relative to the repo root works in a checkout and vanishes in a
+wheel or a frozen build — `tests/test_packaging.py` guards the invariant.
 
 ## 3. Architecture rules (the GUI-later insurance)
 
@@ -102,9 +108,11 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
 
 ## 5. Data pipelines (offline, in `tools/`)
 
-- **Prop ingest:** parse APC published performance files → per-prop CSV + smooth
-  CT(J)/CP(J) fit coefficients into `data/props/`; the fit quality plot is part of
-  the tool's output (MODEL_DETAILS §2.1).
+- **Prop ingest:** parse APC published performance files from `data/props/` →
+  smooth CT(J)/CP(J) fit coefficients into `src/planeopt/data/props/` (shipped
+  package data); the fit quality plot stays beside the raw tables (MODEL_DETAILS
+  §2.1). At run time `PLANEOPT_PROPS_DIR` prepends a user directory to the
+  search path, so an end user adds a prop without touching the install.
 - **Construction-profile fitting:** takes slicer results for the 2–3 scaled sections
   (MODEL_DETAILS §1.4), regresses `k_skin`/`k_rib`/`k_joint`, and writes/updates the
   profile module with fitted values + fit metadata.

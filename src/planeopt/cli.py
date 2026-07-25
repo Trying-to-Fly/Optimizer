@@ -7,16 +7,48 @@ The future GUI is a second thin client over the same calls and artifacts.
 from __future__ import annotations
 
 import importlib.util
+import logging
+import os
 import sys
 from pathlib import Path
 
 import typer
 
-from . import solve
+from . import __version__, solve
 from .report import assemble, html
 from .types import AircraftDefinition, MissionSpec
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
+
+
+def _setup_logging(quiet: bool = False) -> None:
+    """Attach the console handler to planeopt's logger only.
+
+    Scoped to our logger on purpose: root-level config would drag in AeroSandbox
+    and matplotlib chatter and bury the progress lines.
+    """
+    logger = logging.getLogger("planeopt")
+    logger.setLevel(logging.WARNING if quiet else logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", "%H:%M:%S"))
+        logger.addHandler(handler)
+
+
+def _version_callback(value: bool):
+    if value:
+        typer.echo(f"planeopt {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the version and exit.",
+    ),
+):
+    """General-purpose small-aircraft MDO — see `planeopt info` for the install report."""
 
 
 def _load_attr(py_file: Path, attr: str):
@@ -50,8 +82,10 @@ def run(
     mission: Path = typer.Argument(..., help="Mission module, e.g. missions/endurance_sample.py"),
     aircraft: Path = typer.Option(..., "--aircraft", "-a", help="Aircraft package dir or aircraft.py"),
     runs_dir: Path = typer.Option(Path("runs"), help="Root directory for run artifacts"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress output"),
 ):
     """Evaluate/optimize AIRCRAFT for MISSION; write a run artifact directory."""
+    _setup_logging(quiet)
     ac, ac_file = load_aircraft(aircraft)
     ms, ms_file = load_mission(mission)
     result, run_dir = solve.run(ac, ms, runs_dir, input_files=[ac_file, ms_file])
@@ -69,10 +103,16 @@ def optimize(
     parallel: int = typer.Option(
         1,
         help="Concurrent NLP solves per batch. Each solve peaks ~13 GB — "
-        "2 needs the 26 GB WSL allotment (HANDOFF section 2).",
+        "2 needs the 26 GB WSL allotment (HANDOFF section 2). POSIX only.",
     ),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress output"),
 ):
     """Optimize AIRCRAFT for MISSION (M2: wing + cruise state); write run artifacts."""
+    _setup_logging(quiet)
+    try:
+        solve.check_parallel(parallel)
+    except RuntimeError as e:  # fail in a second, not after the first batch
+        raise typer.BadParameter(str(e), param_hint="--parallel")
     ac, ac_file = load_aircraft(aircraft)
     ms, ms_file = load_mission(mission)
     result, run_dir = solve.optimize(
@@ -128,7 +168,7 @@ def brief(
     ac, _ = load_aircraft(aircraft)
     result = assemble.load(run_dir)
     out = run_dir / "design_brief.md"
-    out.write_text(brief_mod.render(result, ac))
+    out.write_text(brief_mod.render(result, ac), encoding="utf-8")
     typer.echo(out)
 
 
@@ -136,7 +176,7 @@ def brief(
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
     result = assemble.load(run_dir)
-    (run_dir / "report.html").write_text(html.render(result, run_dir))
+    (run_dir / "report.html").write_text(html.render(result, run_dir), encoding="utf-8")
     typer.echo(run_dir / "report.html")
 
 
@@ -149,5 +189,61 @@ def objectives():
         typer.echo(f"{o.name:15s} {o.direction:8s} [{o.units}] wind={o.wind_mode:10s} {o.description}")
 
 
-if __name__ == "__main__":
+@app.command()
+def info():
+    """Install report: version, packaged data, and platform capabilities.
+
+    First thing to ask for in a bug report from a packaged build — it shows
+    whether the bundled data actually resolved.
+    """
+    from . import propulsion
+
+    frozen = getattr(sys, "frozen", False)
+    typer.echo(f"planeopt        {__version__}")
+    typer.echo(f"python          {sys.version.split()[0]} ({sys.platform})")
+    typer.echo(f"install         {'frozen bundle' if frozen else 'source/wheel'}")
+    typer.echo(f"package         {Path(__file__).parent}")
+    typer.echo(f"prop tables     {', '.join(propulsion.available_props()) or 'NONE FOUND'}")
+    for d in propulsion.props_search_path():
+        typer.echo(f"  search        {d} {'' if d.is_dir() else '(missing)'}")
+    typer.echo(f"parallel solves {'available' if solve.parallel_available() else 'unavailable (no fork)'}")
+    # Where CasADi will look for its solver plugins — the single most useful
+    # line when a packaged build reports every point as infeasible.
+    try:
+        import casadi
+
+        typer.echo(f"casadi plugins  {casadi.GlobalOptions.getCasadiPath()}")
+    except Exception as e:  # noqa: BLE001 — diagnostics must never fail
+        typer.echo(f"casadi plugins  UNAVAILABLE ({type(e).__name__}: {e})")
+    typer.echo(f"CASADIPATH      {os.environ.get('CASADIPATH', '(unset)')}")
+    typer.echo(f"runs default    {(Path('runs')).resolve()}")
+
+    try:
+        import cadquery  # noqa: F401
+
+        cad = "available"
+    except Exception:
+        cad = "not installed (STEP import disabled)"
+    typer.echo(f"cad extra       {cad}")
+
+
+def main() -> None:
+    """Console-script / frozen-bundle entry point.
+
+    freeze_support must run before anything else: in a frozen build every
+    worker process re-executes this binary, and without it a child would
+    re-enter the CLI instead of the worker.
+    """
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+    # The status strings and report contain em dashes and Greek letters; a
+    # Windows console defaulting to cp1252 renders them as mojibake or raises.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     app()
+
+
+if __name__ == "__main__":
+    main()
