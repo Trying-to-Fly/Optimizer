@@ -21,6 +21,13 @@ dependencies = [
 cad = [
     "cadquery>=2.4",
 ]
+# Desktop GUI (M5). Opt-in so a CLI-only or headless install stays light.
+# pyside6-essentials, not the pyside6 meta-package: we need Core/Gui/Widgets
+# only, and the addons (WebEngine, 3D, Charts, Multimedia) are hundreds of MB
+# that would land in the .exe for nothing — reports open in the system browser.
+gui = [
+    "pyside6-essentials>=6.8",
+]
 
 [project.scripts]
 planeopt = "planeopt.cli:main"

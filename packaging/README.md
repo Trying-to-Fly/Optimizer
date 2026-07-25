@@ -17,6 +17,13 @@ Ship the whole `dist/planeopt/` directory. `planeopt.exe` will not run pulled
 out of it: onedir keeps the ~500 MB of CasADi/SciPy/AeroSandbox payload beside
 the binary instead of unpacking it to a temp directory on every launch.
 
+The desktop GUI ships inside the bundle (`planeopt gui`), so the build installs
+`.[gui]`. Only the Core/Gui/Widgets Qt stack is kept — the spec excludes QML,
+3D, media, WebEngine and the rest, which this app never loads. The GUI cannot
+be launched from a headless build script, so the smoke test asserts on
+`planeopt info` reporting `gui extra available` instead; that at least fails
+loudly if PySide6 stops being bundled.
+
 ## What the bundle contains
 
 `collect_all` is applied to the five packages that read data files at runtime —
@@ -59,11 +66,11 @@ and the report writer together.
 - **No STEP import.** The `cad` extra (OCP + VTK + cadquery) is ~900 MB and is
   excluded; `planeopt info` reports it as unavailable. STEP round-trip stays a
   source-install feature.
-- **Aircraft and mission inputs are still Python modules.** The exe executes a
-  user-authored `aircraft.py` / mission `.py` (see `aircraft/vtail_sample/`).
-  Those files import `aerosandbox` and `planeopt.types` from inside the bundle,
-  which works, but writing one means writing Python. A form-driven or GUI input
-  path is the M5 milestone, not this release.
+- **Aircraft definitions are still Python modules.** The exe executes a
+  user-authored `aircraft.py` (see `aircraft/vtail_sample/`). Those files import
+  `aerosandbox` and `planeopt.types` from inside the bundle, which works, but
+  writing one means writing Python. The GUI edits the *mission* as a form and
+  picks an aircraft; a form over the aircraft itself is M5.2.
 
 ## Runtime expectations to state to any user
 

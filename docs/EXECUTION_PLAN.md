@@ -69,8 +69,10 @@ wheel or a frozen build — `tests/test_packaging.py` guards the invariant.
 
 1. **Library-first.** Every capability is a plain function/class returning dataclasses.
    The CLI contains zero logic — it parses arguments, calls the library, prints the
-   run directory path. A future local web UI (e.g. FastAPI + static frontend) becomes
-   a second thin client over the same library and the same run artifacts.
+   run directory path. The M5 desktop GUI (`planeopt.gui`, PySide6) is the second
+   thin client this bought: it reads the same run artifacts and launches runs as
+   subprocesses of the same CLI, so it owns no solver path of its own. Its Qt-free
+   modules (`runindex`, `missionfile`, `jobs`) hold the logic and are tested headless.
 2. **Runs are artifacts.** Every run writes `runs/<stamp>-<name>/` containing:
    `run.json` (full machine-readable result: design vector, constraint activity,
    shadow prices, re-solve battery, diagnostics), `report.html` (self-contained,
@@ -130,7 +132,8 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
 | **M4.6 — fuselage loft** | Parametric superellipse pod loft (lengths + cross-section vars, loft's own integrals feed drag/Munk/mass), symbolic packaging constraints from declared component envelopes, pod-boom vs integrated topology study in the champion battery (MODEL_DETAILS §7) | `dv=None` fixture keeps the frozen M1 numbers; defaults reproduce the spec pod; topology adopted only if its full re-optimization wins |
 | **M4.7 — tail + wing family** | Generic declared discrete-study loop (`discrete_options`); tail types (V / conventional / T) with per-dimension variables (`tail_scale` retired), declared pitch-control name, derived throw-limit policy, vertical-tail-volume floor, T-tail mount mass (MODEL_DETAILS §8); wing dihedral curve family replacing per-panel dihedrals, straight-spar fit constraint (§9) | Fast per-type tests (geometry contract, mass mapping, Vv math, symbolics); one champion run prices tail types and validates the wing-saddle + curve constraints |
 | **M4.8 — span 2.0 + motor mount** | Projected-span cap lowered to 2.0 m; pusher/puller as declared discrete candidates — exact motor-mass placement plus declared installation factors (pusher prop-in-wake derate, puller pod-scrubbing drag; MODEL_DETAILS §2.4), study ordered first (biggest CG lever) | Champion battery prices the mount at the 2.0 m cap; rankings comparable within-run (absolute minutes drop ~5% vs pre-derate runs) |
-| **M5 — GUI (later)** | Local web UI: launch runs, browse `runs/`, compare champions | Reads run.json only — no library changes |
+| **M5.1 — desktop GUI** | Native desktop app (PySide6, `planeopt gui`): browse `runs/`, run detail, multi-run compare, a form over the mission, and a sequential run queue with live progress and cancel. Web UI was the original sketch; a desktop app was chosen instead (user decision 2026-07-25) | Reads run.json only for browsing; runs execute as subprocesses of the same CLI, so the GUI adds no solver path of its own |
+| **M5.2 — aircraft input (later)** | Form over the aircraft's *declaration* surface (hardware, span cap, tail type, bounds, discrete options). Needs a declarative data layer beneath `aircraft.py`, which is the real gate on non-programmer use — see §3 rule 3 | The sample aircraft round-trips through the data layer with identical champion numbers |
 
 Each milestone is independently useful, matching the concept doc's "stop whenever the
 payoff stops" posture.

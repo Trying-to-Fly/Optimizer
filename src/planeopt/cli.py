@@ -190,6 +190,23 @@ def objectives():
 
 
 @app.command()
+def gui(
+    runs_dir: Path = typer.Option(Path("runs"), help="Root directory for run artifacts"),
+    aircraft_dir: Path = typer.Option(Path("aircraft"), help="Directory of aircraft packages"),
+    missions_dir: Path = typer.Option(Path("missions"), help="Directory of mission modules"),
+):
+    """Open the desktop app (M5): browse and compare runs, queue new ones."""
+    from .gui import launch
+
+    _setup_logging()
+    try:
+        raise typer.Exit(launch(runs_dir, aircraft_dir, missions_dir))
+    except RuntimeError as e:  # PySide6 missing — a plain message, not a traceback
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
 def info():
     """Install report: version, packaged data, and platform capabilities.
 
@@ -225,6 +242,14 @@ def info():
     except Exception:
         cad = "not installed (STEP import disabled)"
     typer.echo(f"cad extra       {cad}")
+
+    try:
+        from PySide6 import QtWidgets  # noqa: F401
+
+        gui_state = "available (planeopt gui)"
+    except Exception:
+        gui_state = "not installed (uv sync --extra gui)"
+    typer.echo(f"gui extra       {gui_state}")
 
 
 def main() -> None:

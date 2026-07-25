@@ -1,5 +1,29 @@
 # HANDOFF — Plane Optimizer (updated 2026-07-25, end of seventh session)
 
+**M5.1 desktop GUI — done (seventh session, same day as packaging).** User
+decisions: a native PySide6 desktop app (not the web UI the plan sketched),
+first slice = run browser + mission form, sequential queue.
+
+- `planeopt gui` opens it; `src/planeopt/gui/` holds it. The Qt-free modules
+  (`runindex`, `missionfile`, `jobs`) carry the logic and are tested headless
+  (`tests/test_gui.py`, 16 tests) — widget layout is verified by running the
+  app, not by asserting on pixels.
+- Browsing reads run.json only. Runs execute as **subprocesses of the same
+  CLI** (`python -m planeopt ...`, or the exe itself when frozen): a 13 GB
+  solve that the OOM killer takes kills one job, not the GUI, and cancel is a
+  kill rather than a cooperative interrupt.
+- The mission is a real form because MissionSpec is pure data; it round-trips
+  through actual `missions/*.py` files so runs stay reproducible and the
+  `inputs/` snapshot keeps working. **The aircraft is a picker, not an
+  editor** — see M5.2 in EXECUTION_PLAN §6 for what a real aircraft form
+  would require.
+- PySide6 is the optional `gui` extra (`uv sync --extra gui`), and
+  `pyside6-essentials` deliberately — the `pyside6` meta-package drags in
+  WebEngine/3D/Charts for nothing. `planeopt info` reports whether it resolved.
+- Verified end to end in WSLg: queued an evaluation, streamed progress, the
+  run landed in the list and auto-selected (91.5 min).
+
+
 Orientation for a fresh agent picking up this project. Read this, then
 `EXECUTION_PLAN.md` (milestones), `MODEL_DETAILS.md` (per-module equations —
 §7 fuselage, §8 tail, §9 wing dihedral family), and `FINDINGS.md` (§9 is the

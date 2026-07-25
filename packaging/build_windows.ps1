@@ -31,7 +31,8 @@ try {
         & $vpy -m pip install --upgrade pip --quiet
         # No --editable: the frozen build must consume the package exactly as a
         # user would install it, which is what proves the package data travels.
-        & $vpy -m pip install . pyinstaller
+        # .[gui] — the desktop app ships in the bundle; the cad extra does not.
+        & $vpy -m pip install ".[gui]" pyinstaller
         if ($LASTEXITCODE -ne 0) { throw "dependency install failed" }
     }
 
@@ -52,9 +53,16 @@ try {
     $smoke = Join-Path $env:TEMP "planeopt-smoke"
     & $exe run missions\endurance_sample.py -a aircraft\vtail_sample --runs-dir $smoke
     if ($LASTEXITCODE -ne 0) { throw "the built exe cannot complete a run" }
-    $report = Get-ChildItem $smoke -Recurse -Filter report.html | Select-Object -First 1
+    $report = Get-ChildItem $smoke -Recurse -Filter report.html |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $report) { throw "the run produced no report.html" }
     Write-Host "    report: $($report.FullName)"
+
+    # The GUI cannot be launched headlessly here, but its absence from the
+    # bundle must not pass silently — `info` reports what actually imported.
+    if (-not (& $exe info | Select-String -Quiet "gui extra       available")) {
+        throw "the bundle has no working GUI (planeopt info says it is unavailable)"
+    }
 
     $size = "{0:N0} MB" -f ((Get-ChildItem (Join-Path $repo "dist\planeopt") -Recurse |
         Measure-Object -Property Length -Sum).Sum / 1MB)

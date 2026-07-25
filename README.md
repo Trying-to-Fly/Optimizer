@@ -17,7 +17,12 @@ uv run pytest                  # test suite
 uv run planeopt info           # install report: version, packaged data, capabilities
 uv run planeopt objectives     # list the objective library
 uv run planeopt run missions/endurance_sample.py -a aircraft/vtail_sample
+uv run planeopt gui            # desktop app (needs: uv sync --extra gui)
 ```
+
+The GUI (M5) browses and compares past runs, edits the mission as a form, and
+queues runs with live progress — it reads the same artifacts and shells out to
+the same CLI, so anything it does can be done from the command line too.
 
 Runs write self-contained artifact directories under `runs/` (run.json +
 report.html + an interactive 3D model (`interactive_3d.html`, rotatable in any
@@ -58,8 +63,12 @@ motor mount; see `docs/FINDINGS.md` §10 for the current champion and
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
 ```
 
-Next: the imported-fuselage NLP mode for a user-supplied .STEP, then **M5**
-(GUI) — see `docs/HANDOFF.md` section 5. Construction-profile and propulsion
+**M5.1 (desktop GUI)** is in: run browser, detail and compare views, mission
+form, and a sequential run queue. Aircraft definitions remain Python modules —
+a form over them is M5.2 and is the real gate on non-programmer use.
+
+Next: the imported-fuselage NLP mode for a user-supplied .STEP — see
+`docs/HANDOFF.md` section 5. Construction-profile and propulsion
 constants remain uncalibrated: rankings and active constraint sets are
 trustworthy, absolute minutes are optimistic (see
 `docs/VALIDATION_ANCHORS.md`).
