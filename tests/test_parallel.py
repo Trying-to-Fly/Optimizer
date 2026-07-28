@@ -34,7 +34,14 @@ def test_parallel_matches_sequential(monkeypatch):
     ]
     seq = solve._solve_many(None, None, jobs, parallel=1)
     par = solve._solve_many(None, None, jobs, parallel=2)
-    assert seq == par
+    # peak_rss_gb is a MEASUREMENT of the run, not part of its result: the
+    # sequential path reads a batch-wide high-water mark and a forked worker
+    # reads its own, so the two legitimately differ. Everything the solve
+    # actually produced must be identical at any width.
+    strip = lambda d: {k: {kk: vv for kk, vv in v.items() if kk != "peak_rss_gb"}
+                       for k, v in d.items()}
+    assert strip(seq) == strip(par)
+    assert all("peak_rss_gb" in r for r in par.values())
     assert par["b"]["objective_value"] == 2.0
     assert "failed" in par["c"] and "boom" in par["c"]["failed"]
 

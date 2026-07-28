@@ -625,57 +625,159 @@ out to Vv = 0.034, and 0.02–0.04 is class practice.
 
 ---
 
-## 9. Wing dihedral — one curve family (architecture v3)
+## 9. Wing planform and dihedral (architecture v4)
 
-The v2 wing carried four independent panel dihedrals (d0–d3). Retired
-2026-07-23 (user decision): the piecewise breaks complicated spar holes (a
-joiner block at every break), and the M4.6 champion showed the dihedral
-*distribution* is a flat direction — the polyhedral middle ground paid build
-complexity for nothing.
+Reworked 2026-07-26 (user decision). Two changes that deliberately pull in
+opposite directions, each for its own reason:
 
-### 9.1 The family
+- **Planform becomes smooth.** v2/v3's three independent chord ratios
+  (`r1`–`r3`) sat on three *equal-width* panels. The ratios looked like
+  freedom, but the widths were never optimizable at all — the breaks were an
+  arbitrary discretization wearing a design vector's clothes. Chord is now one
+  two-parameter curve (§9.1), and stations become a fidelity choice.
+- **Dihedral may become piecewise.** The v3 smooth curve (§9.2) is retained as
+  the incumbent, but a **two-panel** form (§9.3) is now a candidate beside it,
+  priced by a study. The curve family provably cannot express the one shape
+  that matters at a binding span cap: flat inboard with a hard-canted tip.
 
-Local dihedral is one smooth two-parameter family over arc fraction
-η ∈ [0, 1] from root to tip:
+The user's constraint on the rework was that a **plain straight wing must stay
+reachable**. It does, exactly — see the named members below.
+
+### 9.1 Planform — one superellipse family
+
+Chord over arc fraction η ∈ [0, 1] from root to tip:
+
+    c(η) = c_root · [ λ + (1 − λ)·(1 − η^a)^(1/a) ]
+
+Two variables, `taper` (λ) and `fullness` (a), replace three. Its named
+members are **exact**, not approximations — which is what makes "let the
+optimizer choose the planform" honest rather than a shape lottery:
+
+| parameters | planform |
+| --- | --- |
+| λ = 1 (any a) | constant chord — a **rectangular wing** |
+| a = 1 | **straight taper** — the classic trapezoid |
+| a = 2, λ = 0 | a true **ellipse** |
+| a > 2 | chord held out mid-span, dropped near the tip |
+
+`fullness` is bounded [1, 4] and `taper` [0.35, 1.0], so the family spans
+rectangular through elliptical to held-chord, and cannot invert.
+
+**Leading-edge convention is a variable, not a decision.** The user asked for
+straight-LE, straight-TE and straight-quarter-chord to all be available to the
+optimizer. Rather than enumerate three discrete cases, one variable spans them
+as interior points:
+
+    x_le(η) = le_shear · (c_root − c(η))            le_shear ∈ [0, 1]
+
+`le_shear = 0` is a straight LE (all chord change on the TE), `0.25` a straight
+quarter-chord line, `1` a straight TE — and anything between is valid.
+
+**Endpoint rule (CasADi).** `c(0) = c_root` and `c(1) = λ·c_root` hold for
+every `a`, so both are returned analytically and never evaluated through the
+symbolic power. Evaluating them would form `0^(1/a)` and `log 0`, whose
+derivative with respect to `a` is NaN — which does not fail loudly, it poisons
+the entire Jacobian. This is the same hazard as §9.2's `η^q` at η = 0.
+`tests/test_wingcurve.py` pins it, and a 384-corner sweep of the variable
+bounds confirms a NaN-free, Inf-free Jacobian in both dihedral forms.
+
+**Aerodynamic centre.** Once the LE can shear, the wing AC no longer sits
+0.25·c_mean behind the root LE, so the tail is now placed off the **true
+area-weighted quarter-chord AC**, computed exactly from the trapezoidal panels
+(`geometry.mac_and_ac`). Straight-TE moves the AC ~22 mm aft of straight-LE on
+the sample wing: without this the tail would have collected moment arm the boom
+length never paid for. `c_ref` is unchanged (still the mean chord, a
+symbolic-safe MAC proxy) so static-margin numbers stay comparable with M4.x —
+a known inconsistency, documented rather than silently fixed.
+
+### 9.2 Dihedral form A — the smooth curve (v3 incumbent)
+
+Unchanged from v3:
 
     δ(η) = dihedral_tip · η^d_exp        d_exp ∈ [0, 2]
 
-`d_exp = 0` is **exactly a single simple dihedral angle**; `d_exp > 0` is a
-**fully curved wing** — flat at the root (which the wing-saddle wants),
-curvature building outboard, gull-like at high exponent. The optimizer picks
-the shape inside one continuous family; nothing discrete, nothing arbitrary.
-Panels still place by arc length (`span` = material span, `b_ref` =
-projected span), with δ sampled at each panel's midpoint (midpoint rule) via
-a helper shared between geometry and constraints, so the two cannot drift.
-The projected-span cap, the sin·cos effective-dihedral floor (§3.6), and the
-Schrenk stations all consume the sampled panels unchanged. The dv=None
-fixture keeps the frozen v1.2 spec panels (flat center + 3° outer) forever.
+`d_exp = 0` is exactly a single simple dihedral angle; `d_exp > 0` is a fully
+curved wing, flat at the root (which the wing saddle wants) with curvature
+building outboard. δ is sampled at each panel's midpoint.
 
-### 9.2 Straight-spar fit — buildability as geometry
-
-Build standard: both tube spars stay **straight** (center + outer runs,
-§1.3) — no segment joiners, spar holes drillable in a straight line. The
-curve's sag across each spar's run must leave room for the tube inside the
-usable section depth:
+Its build standard is the **straight spar**: the curve sags away from any
+straight line drawn through it, so each spar run must carry that sag plus its
+own diameter inside the usable section depth,
 
     sag(η) + spar_OD ≤ SPAR_DEPTH_FRACTION · t/c · c(η)
 
-checked at the run midpoint (center spar) and the interior panel breaks
-(outer spar), with curve height from the small-angle integral
-`z(η) = semi · δ_tip[rad] · η^(q+1)/(q+1)` (documented approximation, ≤ 11%
-high at the 20° tip-angle cap; the family is convex so these stations bound
-the sag). **[sample]** depth fraction 0.70 of the airfoil's max thickness.
-A wing that cannot pass a sufficiently sized straight spar is *unbuildable*,
-so this is a hard geometry constraint, not a priced penalty — same posture
-as the packaging floors (§7.2). At `d_exp = 0` the sag is identically zero:
-simple dihedral always fits. Honest caveat: segmented multi-joint spars
-could follow stronger curves; that escape is deliberately unmodeled (it is
-the complexity this rework removed), so "curve rejected, spar-fit binding"
-means rejected *under the two-straight-spar build standard*. The v2
-per-break joiner mass (16 g) is deleted; the root/center-outer joiner block
-mass stays.
+with curve height from the small-angle integral `z(η) = semi·δ_tip[rad]·
+η^(q+1)/(q+1)` (≤ 11% high at the 20° tip cap; the family is convex, so the
+checked stations bound the sag). At `d_exp = 0` sag is identically zero:
+simple dihedral always fits. **[sample]** depth fraction 0.70.
 
-The continuous-cant winglet cross-check (§3.6) now frees `dihedral_tip` to
-~88° instead of a last-panel angle; the spar-fit constraint binds high cant,
-which is a true statement about straight-spar buildability — the check
-remains indicative-only.
+### 9.3 Dihedral form B — two panels (`polyhedral2`)
+
+One break, at the station the wing is jointed at anyway:
+
+    δ(η) = dihedral_inner   for η < eta_break
+           dihedral_outer   for η ≥ eta_break
+
+`dihedral_inner` keeps the ordinary 20° cap. **`dihedral_outer` is free to
+60°** — the point of the form. Panels place by *arc* length, so `span` is
+material span and front-view width is Σ w·cos δ; canting the outer panel
+therefore **spends projected span**, the quantity the manufacturing cap is
+written against. At 55° cant a 2.0 m wing projects 1.744 m.
+
+**Why this is not just "more dihedral freedom".** The v3 curve is monotone and
+capped at 20° at the tip, so it cannot represent *flat inboard, steeply canted
+outboard*. At a binding projected-span cap that shape is not a dihedral
+distribution at all — it is a **blended winglet made of wing**: lifting area
+outside the capped width, with no separate-surface junction and a continuous
+chord. LiftingLine sees the nonplanar induced benefit (§3.6). The bolted-on
+explicit winglet has been rejected twice (−0.50 and −0.96 min, FINDINGS §8/§9);
+a blended tip is a different object and had never been priced.
+
+**What it costs, so the study is honest:**
+
+- **One spar joint per side.** Each panel is planar, so a straight spar fits
+  each *with zero sag* — the §9.2 sag constraint is replaced by the ordinary
+  fit check at each run's thinnest (outboard) station. The kink is carried by a
+  joiner block instead: `DIHEDRAL_JOINER_KG` = 16 g per side, the same figure
+  v2 charged at every break and v3 deleted along with them.
+- **Projected span**, as above.
+- **Roll-moment arm is now the projected y** of each panel centroid, not its
+  arc distance. v3 used arc distance, where the two barely differ at 4°; at 60°
+  it would hand a canted panel twice the arm it actually has, letting it game
+  the lateral floor. This is a correction the new freedom *requires*.
+
+**Cant ceiling of 60° is a MODEL limit, not a structural one.** Past roughly
+that angle a Schrenk station on a near-vertical panel stops meaning anything
+the critical-section stall method (§3.4) can use, and the wing would be
+optimized against a stall model that cannot see it. Raising the cap requires
+fixing that model first — the same caveat that keeps the continuous-cant
+winglet cross-check indicative-only.
+
+### 9.4 Shared structure
+
+Both forms read one shared panel list (`_wing`), so geometry, constraints and
+the mass model cannot drift apart. Stations come from `geometry.station_grid`:
+`WING_STATIONS_INNER` + `WING_STATIONS_OUTER` (2 + 2), with a station landing
+**exactly on the break** — so which panels are inboard is an index question and
+nothing ever compares against a design-variable *value*. Outer stations are
+sine-clustered toward the tip, where a superellipse does all its curving.
+
+Station count is a **fidelity knob that costs RAM**: each station becomes an
+`asb.WingXSec` that LiftingLine subdivides again, and one solve already peaks
+near 13 GB (§`memory.py`). v4 is deliberately held at four panels / five
+stations, so it buys a smooth planform, a free joint station and an optional
+kink **without growing the CasADi graph at all**.
+
+`eta_break` belongs to the wing, not to either dihedral form: a built wing is
+jointed somewhere regardless, and it inherits the freedom v3 carried as
+`center_width`. The forms differ in exactly one thing — whether the dihedral is
+allowed to change across that joint — which is what makes the study a clean
+comparison.
+
+**Expect the distribution to stay a flat direction.** v3's champion converged
+to `d_exp = 0` with spar-fit *inactive*: the optimizer sees no benefit from
+dihedral at all (LL has no lateral DOF), so dihedral is driven purely by the
+lateral-stability floor, which a uniform angle meets most cheaply. A mild
+two-panel polyhedral should therefore land on the same uniform answer. The
+result worth watching is the **hard-canted** one, where the mechanism is
+induced drag at the span cap rather than dihedral distribution.

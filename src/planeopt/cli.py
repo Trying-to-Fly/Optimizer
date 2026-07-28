@@ -107,6 +107,14 @@ def optimize(
         help="Concurrent NLP solves per batch. Each solve peaks ~13 GB — "
         "2 needs the 26 GB WSL allotment (HANDOFF section 2). POSIX only.",
     ),
+    memory_budget_gb: float = typer.Option(
+        None,
+        "--memory-budget-gb",
+        help="RAM to dedicate to this run; the width is derived from it and from "
+        "the per-solve peak previous runs measured. Does not speed up one solve "
+        "(single-core, memory-bound) — it decides how many run at once. "
+        "Ignored when --parallel is given explicitly.",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress output"),
 ):
     """Optimize AIRCRAFT for MISSION (M2: wing + cruise state); write run artifacts."""
@@ -120,6 +128,7 @@ def optimize(
     result, run_dir = solve.optimize(
         ac, ms, runs_dir, input_files=[ac_file, ms_file],
         multistart=multistart, flatness=flatness, parallel=parallel,
+        memory_budget_gb=memory_budget_gb,
     )
     champ = result.performance["optimization"]["champion"]
     typer.echo(f"status: {result.status}")
@@ -228,6 +237,32 @@ def info():
     for d in propulsion.props_search_path():
         typer.echo(f"  search        {d} {'' if d.is_dir() else '(missing)'}")
     typer.echo(f"parallel solves {'available' if solve.parallel_available() else 'unavailable (no fork)'}")
+
+    # RAM is the binding resource for this app, so the install report says what
+    # this machine has and what a solve on it has actually cost.
+    from . import memory as memory_mod
+
+    total_gb, avail_gb = memory_mod.machine_ram()
+    swap = memory_mod.swap_gb()
+    measured = memory_mod.observed_peak_gb(Path("runs"))
+    if total_gb:
+        typer.echo(
+            f"memory          {avail_gb:.1f} GB free of {total_gb:.1f} GB"
+            + (f" (+{swap:.0f} GB swap)" if swap else "")
+        )
+    else:
+        typer.echo("memory          (unavailable on this platform)")
+    per = measured or memory_mod.DEFAULT_PER_SOLVE_GB
+    typer.echo(
+        f"peak per solve  {per:.1f} GB "
+        f"({'measured from runs/' if measured else 'assumed — no run has measured one yet'})"
+    )
+    if total_gb:
+        # What --memory-budget-gb would do at the largest budget this machine
+        # can back, i.e. the most concurrency available here.
+        budget = max(0.0, total_gb + swap - memory_mod.RESERVE_GB)
+        width, why = memory_mod.plan_parallel(budget, per_solve_gb=measured)
+        typer.echo(f"  max budget    {budget:.0f} GB -> {width} concurrent solve(s) [{why}]")
     # Where CasADi will look for its solver plugins — the single most useful
     # line when a packaged build reports every point as infeasible.
     try:

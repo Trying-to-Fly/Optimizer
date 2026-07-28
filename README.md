@@ -32,6 +32,15 @@ Long commands print progress to stderr as each solve lands; `--quiet` silences
 it. A single NLP solve takes minutes and peaks near 13 GB of RAM, and a full
 `optimize` battery runs for hours.
 
+RAM is what limits this app, not CPU — a solve uses one core and a lot of
+memory. `--memory-budget-gb N` (or "Dedicate memory" in the GUI) says how much
+of the machine the app may have, and independent solves within a batch then run
+side by side, which is where the wall-clock saving comes from. It does not make
+any single solve faster. Runs record their measured peak, so the estimate
+improves as you use it; `planeopt info` reports RAM, the measured peak, and the
+most concurrency this machine can support. POSIX only — Windows cannot fork,
+and says so rather than ignoring the setting.
+
 ## Packaged build
 
 `packaging/build_windows.ps1` freezes the app into `dist/planeopt/`
@@ -63,6 +72,12 @@ motor mount; see `docs/FINDINGS.md` §10 for the current champion and
   the wing dihedral-curve family; motor mount as a priced discrete option.
   Discrete architecture choices are enumerated and priced by studies, never
   assumed (`docs/MODEL_DETAILS.md`, `docs/FINDINGS.md`)
+- Wing v4: the planform is one smooth superellipse curve (a rectangular wing
+  and a straight taper are exact members of it) with the leading-edge
+  convention — straight LE, straight quarter-chord or straight TE — chosen by
+  the optimizer as a continuous variable; the dihedral may take a single
+  hard-cantable break, priced against the smooth curve by a study
+  (`docs/MODEL_DETAILS.md` §9)
 
 ```sh
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample

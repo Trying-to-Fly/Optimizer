@@ -16,9 +16,9 @@ from pathlib import Path
 
 import numpy as np
 
-from . import aero, geometry, massmodel, propulsion
+from . import aero, geometry, massmodel, memory, propulsion
 from .mission import OBJECTIVES
-from .report import assemble, figures
+from .report import assemble, figures, geometry_export
 from .report import html as report_html
 from .types import AircraftDefinition, MissionSpec, RunResult
 
@@ -37,10 +37,17 @@ def run(
     mission: MissionSpec,
     runs_root: Path = Path("runs"),
     input_files: list[Path] | None = None,
-    v_sweep: tuple[float, float, float] = (8.0, 17.0, 0.5),
+    v_sweep: tuple[float, float, float] | None = None,
     dv: dict | None = None,
+    trim_guess: tuple[float, float] | None = None,
 ) -> tuple[RunResult, Path]:
     objective = OBJECTIVES[mission.objective]
+    # The sweep window is the aircraft's speed envelope, so the aircraft may
+    # declare it. A loiter plane and a speed plane do not overlap much: sweeping
+    # 8-17 m/s over an airframe that stalls at 12.4 yields three usable points
+    # and an empty power curve.
+    if v_sweep is None:
+        v_sweep = getattr(aircraft, "speed_sweep_ms", (8.0, 17.0, 0.5))
     log.info(
         "evaluating %s / %s over %d speed points",
         getattr(aircraft, "name", type(aircraft).__name__), mission.name,
@@ -57,10 +64,21 @@ def run(
     weight_n = auw * G
 
     # --- speed sweep: trim + power at each V ---
+    # Continuation: each point seeds the next. Trim is a stiff root-find, and a
+    # fixed starting guess only works while the sweep stays near it — marching
+    # the solution along the sweep is what makes a wide speed range converge.
     sweep = []
+    # Start from the caller's operating point when there is one — re-evaluating an
+    # optimizer champion should begin where the optimizer left off, not at a
+    # generic loiter guess several tens of degrees away.
+    guess = trim_guess
     for V in np.arange(*v_sweep):
         try:
-            t = aero.trim(airplane, float(V), weight_n, x_cg, bodies, control_name=pitch_control)
+            t = aero.trim(
+                airplane, float(V), weight_n, x_cg, bodies,
+                control_name=pitch_control, guess=guess,
+            )
+            guess = (t["alpha_deg"], t["deflection_deg"])
             p = propulsion.solve(float(V), t["drag_n"], pt)
         except (RuntimeError, ValueError) as e:
             log.debug("V = %.1f m/s infeasible: %s", float(V), e)
@@ -201,6 +219,10 @@ def run(
             )
     figures.three_view(viz_plane, run_dir / "figures")
     figures.interactive_3d(viz_plane, run_dir)
+    # Buildable geometry: the loft definition and the placed 3D curves. A report
+    # tells you whether the design is good; these tell you how to cut it, and
+    # they come from the same airplane object that was analysed.
+    geometry_export.write(airplane, run_dir)
     (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
     return result, run_dir
 
@@ -233,10 +255,22 @@ def _solve_nlp(
     opti = asb.Opti()
     dv = aircraft.design_variables(opti, inits)
     bodies = aircraft.parasite_bodies(dv)  # may be symbolic (fuselage loft)
-    V = opti.variable(init_guess=(inits or {}).get("V", 11.0), lower_bound=6.0, upper_bound=25.0)
-    alpha = opti.variable(init_guess=4.0, lower_bound=-2.0, upper_bound=10.0)
-    defl = opti.variable(init_guess=0.0, lower_bound=-15.0, upper_bound=15.0)
-    n = opti.variable(init_guess=65.0, lower_bound=20.0, upper_bound=200.0)
+    # Operating-point box bounds. These are numerical brackets, not physics —
+    # the physics is in the constraints below — but a bracket sized for a loiter
+    # plane silently caps a speed design (V at 25 m/s, elevator at 15 deg). The
+    # aircraft may therefore declare its own envelope; the defaults are the
+    # values every M0-M4.8 run used, so declared-free aircraft are unaffected.
+    envelope = getattr(aircraft, "operating_bounds", None) or {}
+    v_lo, v_hi = envelope.get("V_ms", (6.0, 25.0))
+    a_lo, a_hi = envelope.get("alpha_deg", (-2.0, 10.0))
+    d_lo, d_hi = envelope.get("deflection_deg", (-15.0, 15.0))
+    n_lo, n_hi = envelope.get("prop_rev_s", (20.0, 200.0))
+    V = opti.variable(
+        init_guess=(inits or {}).get("V", 11.0), lower_bound=v_lo, upper_bound=v_hi
+    )
+    alpha = opti.variable(init_guess=4.0, lower_bound=a_lo, upper_bound=a_hi)
+    defl = opti.variable(init_guess=0.0, lower_bound=d_lo, upper_bound=d_hi)
+    n = opti.variable(init_guess=65.0, lower_bound=n_lo, upper_bound=n_hi)
 
     for k, val in (fixed or {}).items():
         opti.subject_to(dv[k] == val)
@@ -318,6 +352,27 @@ def _solve_nlp(
     aircraft.geometry_constraints(opti, dv, V, deflection_deg=defl)
     aircraft.structure_constraints(opti, dv, weight_n)
 
+    # --- powertrain envelope (MODEL_DETAILS section 2.5) ---
+    # Real limits, not preferences: the motor cannot be fed more than the pack
+    # holds (terminal voltage <= pack voltage IS throttle <= 100%), and current
+    # must stay inside the rating this objective is allowed to use. Both are
+    # slack by orders of magnitude at a loiter point and both bind on a speed
+    # objective — without them "maximize speed" is bounded only by where the
+    # prop fit runs out, which is an artefact rather than an airplane.
+    opti.subject_to(pr["voltage"] <= pt.battery.v_nominal)
+    current_cap = (
+        pt.motor.max_current_a
+        if objective.current_limit == "burst"
+        else pt.esc_continuous_current_a
+    )
+    opti.subject_to(pr["current_a"] <= current_cap)
+    # Declared placard speed: flutter and divergence are beyond this model, so a
+    # speed objective is capped by a number the aircraft declares rather than by
+    # a prediction the model cannot make (MODEL_DETAILS section 2.5).
+    placard = getattr(aircraft, "placard_speed_ms", None)
+    if placard is not None:
+        opti.subject_to(V <= float(placard))
+
     p_bus_eff = pr["p_bus_w"] / eta_scale  # eta_scale: chain-efficiency re-solves
     obj_expr = objective.evaluator(V, p_bus_eff, mission, pt)
     opti.minimize(-obj_expr if objective.direction == "maximize" else obj_expr)
@@ -334,6 +389,11 @@ def _solve_nlp(
         "x_cg_m": float(sol(x_cg)),
         "static_margin": float(sol(sm)),
         "P_elec_w": float(sol(p_bus_eff)),
+        "motor_voltage": float(sol(pr["voltage"])),
+        "motor_current_a": float(sol(pr["current_a"])),
+        "throttle_frac": float(sol(pr["voltage"])) / pt.battery.v_nominal,
+        "current_cap_a": current_cap,
+        "placard_speed_ms": float(placard) if placard is not None else None,
         "drag_n": float(sol(drag)),
         "J": float(sol(pr["J"])),
         "clmax_ab_used": clmax_ab,
@@ -345,6 +405,10 @@ def _solve_worker(conn, aircraft, mission, kw):  # pragma: no cover — child pr
         r = _solve_nlp(aircraft, mission, **kw)
     except Exception as e:
         r = {"failed": str(e)[:120]}
+    # A forked worker is the only place a genuine per-solve peak can be read:
+    # this process did exactly one solve, so its high-water mark IS that solve's.
+    # It is what the next run's memory budget divides by (memory.py).
+    r["peak_rss_gb"] = memory.peak_rss_gb()
     conn.send(r)
     conn.close()
 
@@ -374,12 +438,14 @@ def check_parallel(parallel: int) -> None:
 
 def _log_result(label: str, key, done: int, total: int, result: dict, t0: float) -> None:
     mins = (time.monotonic() - t0) / 60.0
+    peak = result.get("peak_rss_gb") or 0.0
+    ram = f", peak {peak:.1f} GB" if peak else ""
     if "failed" in result:
-        log.info("  %s [%d/%d] %s: FAILED — %s (%.1f min)",
-                 label, done, total, key, result["failed"], mins)
+        log.info("  %s [%d/%d] %s: FAILED — %s (%.1f min%s)",
+                 label, done, total, key, result["failed"], mins, ram)
     else:
-        log.info("  %s [%d/%d] %s: objective %.4g (%.1f min)",
-                 label, done, total, key, result["objective_value"], mins)
+        log.info("  %s [%d/%d] %s: objective %.4g (%.1f min%s)",
+                 label, done, total, key, result["objective_value"], mins, ram)
 
 
 def _solve_many(
@@ -413,6 +479,10 @@ def _solve_many(
             finally:
                 if restore is not None:
                     restore()
+            # In-process, the high-water mark spans the whole batch rather than
+            # this one solve — an over-estimate of a single peak, which is the
+            # safe direction for a number that later sizes a parallel width.
+            results[key]["peak_rss_gb"] = memory.peak_rss_gb()
             _log_result(label, key, len(results), total, results[key], t0)
         return results
 
@@ -454,6 +524,7 @@ def optimize(
     multistart: int = 3,
     flatness: bool = True,
     parallel: int = 1,
+    memory_budget_gb: float | None = None,
 ) -> tuple[RunResult, Path]:
     """M2 entry point: multi-start NLP -> champion -> shadow price -> flatness
     sweep -> numeric re-evaluation of the champion through the M1 pipeline.
@@ -462,13 +533,30 @@ def optimize(
     batch (multistart+bump, flatness, re-solve battery, discrete-study
     alternatives, winglet pair). 1 = sequential (default; required under the
     15 GB WSL cap). Cross-batch order is unchanged, so study semantics are
-    identical at any width."""
+    identical at any width.
+
+    memory_budget_gb: how much RAM the user is willing to dedicate. It does not
+    make a solve faster — a solve is single-core and memory-bound — it decides
+    how many fit side by side, so it is just a friendlier way to say `parallel`
+    (memory.py). Divided by the per-solve peak this aircraft has actually been
+    measured at, so the arithmetic gets better the more you run. An explicit
+    `parallel` wins, since it is the more specific instruction."""
+    if memory_budget_gb is not None and parallel <= 1:
+        per = memory.observed_peak_gb(runs_root)
+        parallel, why = memory.plan_parallel(memory_budget_gb, per_solve_gb=per)
+        log.info(
+            "memory budget %.0f GB: %s%s",
+            memory_budget_gb, why,
+            "" if per else f" (no measured peak yet — assuming {memory.DEFAULT_PER_SOLVE_GB:.0f} GB)",
+        )
     check_parallel(parallel)
     t_start = time.monotonic()
+    total_gb, avail_gb = memory.machine_ram()
     log.info(
         "optimize: %s / %s — objective %s. Each NLP solve takes minutes and peaks "
-        "near 13 GB; a full battery runs for hours.",
+        "near %.0f GB; a full battery runs for hours. RAM: %.1f GB free of %.1f GB.",
         getattr(aircraft, "name", type(aircraft).__name__), mission.name, mission.objective,
+        memory.observed_peak_gb(runs_root) or memory.DEFAULT_PER_SOLVE_GB, avail_gb, total_gb,
     )
     rng = np.random.default_rng(0)
     jobs = [("nominal", {})]
@@ -668,34 +756,64 @@ def optimize(
     log.info("re-evaluating the champion numerically and writing artifacts")
     if winglet_rejected:
         aircraft.winglet = False
+    reeval_error = None
     try:
         result, run_dir = run(
-            aircraft, mission, runs_root, input_files, dv=champion["dv"]
+            aircraft, mission, runs_root, input_files, dv=champion["dv"],
+            trim_guess=(champion["alpha_deg"], champion["deflection_deg"]),
         )
         # tripped-polar dual evaluation at the champion point (MODEL_DETAILS 3.2)
         best = result.performance["best"]
         champ_plane = aircraft.geometry(champion["dv"])
+    except Exception as e:  # noqa: BLE001
+        # The re-evaluation is a *reporting* step: it re-runs the champion through
+        # the numeric M1 pipeline for cross-checking. Losing it costs the check,
+        # not the optimization — and an optimization is hours of solving. Write
+        # everything the NLP found, flagged, instead of discarding the run.
+        reeval_error = f"{type(e).__name__}: {e}"
+        log.warning("champion re-evaluation failed; writing NLP results without it — %s",
+                    reeval_error)
+        best = champ_plane = None
+        result = RunResult(
+            aircraft=getattr(aircraft, "name", type(aircraft).__name__),
+            mission=mission.name,
+            objective=mission.objective,
+            status=M2_STATUS,
+            created=datetime.datetime.now().isoformat(timespec="seconds"),
+            performance={"objective_units": OBJECTIVES[mission.objective].units},
+        )
+        run_dir = assemble.write_run_dir(result, runs_root, input_files or [])
     finally:
         if winglet_rejected:
             aircraft.winglet = True
         for attr, val in discrete_originals.items():
             setattr(aircraft, attr, val)
     result.status = M2_STATUS
-    trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
-    q = 0.5 * 1.225 * best["V_ms"] ** 2
-    drag_tripped = best["drag_n"] + q * champ_plane.s_ref * trip["dcd_total"]
-    try:
-        pr_trip = propulsion.solve(best["V_ms"], drag_tripped, aircraft.powertrain())
-        obj_trip = OBJECTIVES[mission.objective].evaluator(
-            best["V_ms"], pr_trip["P_elec_w"], mission, aircraft.powertrain()
+    if reeval_error is not None:
+        result.diagnostics["champion_reeval_failed"] = reeval_error
+        result.notes.append(
+            "Champion re-evaluation through the numeric M1 pipeline FAILED — the "
+            "design vector and study results below are the optimizer's, "
+            "un-cross-checked. Treat them as provisional."
         )
-    except ValueError:
-        obj_trip = None
-    tripped = {
-        "dcd_total": trip["dcd_total"],
-        "objective_tripped": obj_trip,
-        "delta": (obj_trip - best.get("objective_value")) if obj_trip else None,
-    }
+
+    tripped = None
+    if best is not None:
+        trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
+        q = 0.5 * 1.225 * best["V_ms"] ** 2
+        drag_tripped = best["drag_n"] + q * champ_plane.s_ref * trip["dcd_total"]
+        try:
+            pr_trip = propulsion.solve(best["V_ms"], drag_tripped, aircraft.powertrain())
+            obj_trip = OBJECTIVES[mission.objective].evaluator(
+                best["V_ms"], pr_trip["P_elec_w"], mission, aircraft.powertrain()
+            )
+        except ValueError:
+            obj_trip = None
+        tripped = {
+            "dcd_total": trip["dcd_total"],
+            "objective_tripped": obj_trip,
+            "delta": (obj_trip - best.get("objective_value")) if obj_trip else None,
+        }
 
     result.performance["optimization"] = {
         "champion": champion,
@@ -710,19 +828,37 @@ def optimize(
         "multistart_objective_spread": spread,
         "shadow_price_obj_per_gram": shadow_per_g,
         "flatness_span": flat,
-        "nlp_vs_reeval_gap": champion["objective_value"]
-        - result.performance["best"].get("objective_value", float("nan")),
+        "nlp_vs_reeval_gap": (
+            champion["objective_value"]
+            - result.performance["best"].get("objective_value", float("nan"))
+            if best is not None
+            else None
+        ),
     }
     result.notes.append(
         "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar "
         "stress/deflection sizing, ballast cap, battery-position balance."
     )
+    # Measured per-solve peak, so the NEXT run's memory budget divides by data
+    # rather than by the folklore 13 GB. Children cover the forked (parallel)
+    # path, self covers the in-process one; whichever ran, the other reads 0.
+    result.diagnostics["peak_rss_gb"] = round(
+        max(memory.peak_rss_gb(children=True), memory.peak_rss_gb()), 2
+    )
+    result.diagnostics["parallel_width"] = parallel
+    if memory_budget_gb is not None:
+        result.diagnostics["memory_budget_gb"] = memory_budget_gb
     figures.flatness_plot(flat, champion, run_dir / "figures")
+    # run.json is the machine-readable truth and is written first: rendering the
+    # HTML must never be what loses a completed optimization.
     (run_dir / "run.json").write_text(
         __import__("json").dumps(__import__("dataclasses").asdict(result), indent=2, default=str),
         encoding="utf-8",
     )
-    (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
+    try:
+        (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        log.warning("report.html could not be rendered (run.json is intact): %s", e)
     log.info(
         "done in %.1f min — champion objective %.4g, artifacts in %s",
         (time.monotonic() - t_start) / 60.0, champion["objective_value"], run_dir,

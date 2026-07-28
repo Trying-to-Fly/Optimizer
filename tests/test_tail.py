@@ -40,12 +40,20 @@ def test_parametric_vtail_defaults_match_spec_panel(sample_aircraft):
 
 def test_tail_ac_sits_at_tail_arm(sample_aircraft):
     """AC placement: root LE + sweep offset + 0.25 MAC = wing AC + tail_arm,
-    so sweep cannot buy free moment arm."""
+    so sweep cannot buy free moment arm.
+
+    The wing reference is its TRUE area-weighted quarter-chord AC (v4): with a
+    sheared planform the AC no longer sits 0.25 c_mean behind the root LE, and
+    the old proxy would have handed the tail tens of millimetres of unpaid arm.
+    """
+    from planeopt import geometry as geom
+
     d = dict(sample_aircraft.DV_DEFAULTS) | {"t_sweep": 20.0}
     airplane = sample_aircraft.geometry(d)
-    wing, vt = airplane.wings[0], airplane.wings[1]
-    c_mean = float(wing.area() / wing.span())
-    ac_expected = 0.390 + 0.25 * c_mean + d["tail_arm"]
+    vt = airplane.wings[1]
+    w = sample_aircraft._wing(d)
+    _, x_ac_local = geom.mac_and_ac(w["widths"], w["chords"], w["le_x"])
+    ac_expected = 0.390 + x_ac_local + d["tail_arm"]
     lam = d["t_taper"]
     semi = d["t_span"] / 2
     mac = (2 / 3) * d["t_c_root"] * (1 + lam + lam**2) / (1 + lam)

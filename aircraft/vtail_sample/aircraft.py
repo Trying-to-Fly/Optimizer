@@ -15,6 +15,7 @@ from __future__ import annotations
 import aerosandbox as asb
 import aerosandbox.numpy as np
 
+from planeopt import geometry
 from planeopt.types import (
     BatteryConfig,
     ConstructionProfile,
@@ -35,6 +36,17 @@ from lwpla_a1 import (  # construction profiles
 WING_X_LE = 0.390  # wing root LE station
 TAIL_ARM = 0.700  # wing AC -> tail AC
 
+# The frozen v1.2 spec wing, for the dv=None validation fixture ONLY: constant
+# 700 mm centre section then three 183.3 mm panels at 3 deg, chords 220 -> 150.
+# Written out as literals rather than derived from DV_DEFAULTS because it is
+# spec data, not a design vector — the architecture around it has been
+# reparameterized three times (v2 panel ratios -> v3 dihedral curve -> v4
+# superellipse) and this fixture must reproduce the same M1 numbers through all
+# of them (MODEL_DETAILS section 9, validation continuity).
+SPEC_WING_PANELS = [(0.350, 0.0), (0.550 / 3, 3.0), (0.550 / 3, 3.0), (0.550 / 3, 3.0)]
+SPEC_WING_CHORDS = [0.220, 0.220, 196.667 / 1000, 173.333 / 1000, 0.150]
+SPEC_WING_TWISTS = [0.0, 0.0, -2.0 / 3, -4.0 / 3, -2.0]
+
 
 class VTailSample:
     name = "vtail_sample_v1.6"
@@ -43,6 +55,22 @@ class VTailSample:
     # (2.2 -> 2.0 by user decision 2026-07-24, sixth session)
     winglet = True  # tip winglet as a separate asb.Wing (parametric designs only)
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
+    # Outer-panel cant ceiling for the two-panel dihedral form. 60 deg is a
+    # MODEL limit, not a structural one: past it a Schrenk station on a
+    # near-vertical panel stops meaning anything the critical-section stall
+    # method can use (MODEL_DETAILS 3.4), so the wing would be optimized
+    # against a stall model that cannot see it. Raise only with that model.
+    outer_cant_max_deg = 60.0
+    # Stations per region (fidelity, not design — geometry.station_grid). Kept
+    # at 2+2 so the wing still presents four asb sections and the CasADi graph,
+    # solve time and ~13 GB peak are unchanged from v3.
+    WING_STATIONS_INNER = 2
+    WING_STATIONS_OUTER = 2
+    # Mass of one spar joiner block at a dihedral break, per side. v2 carried
+    # this at every one of its three breaks and v3 deleted it with them; the
+    # two-panel form has exactly one, and the study only prices honestly if the
+    # kink pays for the joint it needs.
+    DIHEDRAL_JOINER_KG = 0.016
     # usable fraction of the section's max thickness for a spar hole (skin +
     # liner clearance) — feeds the straight-spar fit constraint (section 9)
     SPAR_DEPTH_FRACTION = 0.70
@@ -62,9 +90,21 @@ class VTailSample:
     # under the adopted mount.
     discrete_options = {
         "motor_mount": ["puller", "pusher"],
+        # Prop freed (user decision 2026-07-27): pitch is a real, cheap,
+        # buy-it-and-bolt-it-on decision, so it is priced rather than declared.
+        # Judged straight after the mount because the mount's installation
+        # derate composes into the prop's (see PROP_CANDIDATES).
+        "prop_choice": ["cam_11x6", "cam_11x55", "cam_11x7"],
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],
+        # Wing dihedral form (section 9). Discrete because the two are not
+        # points of one family: "curve" is smooth and demands a straight spar
+        # through it, "polyhedral2" has a kink and therefore a spar joint. That
+        # is a build decision with a mass and a part count, so the study prices
+        # it rather than assuming it — same posture as tail type and topology.
+        "wing_dihedral_form": ["curve", "polyhedral2"],
     }
+    wing_dihedral_form = "curve"  # v3 incumbent; polyhedral2 re-priced every run
 
     # --- motor-mount installation effects (MODEL_DETAILS 2.4) — declared
     # uncalibrated ballparks the study prices, adjustable data not code.
@@ -76,6 +116,27 @@ class VTailSample:
         "pusher": {"prop_eta_derate": 0.95, "pod_drag_factor": 1.00},
         "puller": {"prop_eta_derate": 1.00, "pod_drag_factor": 1.10},
     }
+
+    # --- prop candidates (MODEL_DETAILS 2.1) — the study's declared shortlist.
+    # All three are the same 11 in folding CAM-class blade at different
+    # PITCHES, so the study isolates the one thing actually being chosen. Held
+    # deliberately to one family: same diameter (so the 190 g motor_prop point
+    # mass stays honest and ground clearance does not silently change) and the
+    # same 0.95 folding knockdown, which composes with the mount's installation
+    # derate exactly as before. The APC tables are rigid-blade proxies for
+    # folding blades — the same modelling posture the incumbent 11x6 already
+    # used, so no candidate is advantaged by a better data source than another.
+    PROP_CANDIDATES = {
+        "cam_11x55": {"name": "aeronaut_cam_11x5.5_folding",
+                      "pitch_in": 5.5, "proxy_table": "apc_11x55e"},
+        "cam_11x6": {"name": "aeronaut_cam_11x6_folding",
+                     "pitch_in": 6.0, "proxy_table": "apc_11x6_blend"},
+        "cam_11x7": {"name": "aeronaut_cam_11x7_folding",
+                     "pitch_in": 7.0, "proxy_table": "apc_11x7e"},
+    }
+    prop_choice = "cam_11x6"  # spec incumbent; the study re-prices it every run
+    PROP_DIAMETER_M = 0.2794  # 11 in — common to every candidate
+    PROP_FOLDING_DERATE = 0.95  # folding blades cost ~5% of shaft power
 
     # --- tail policy + directional floor (MODEL_DETAILS section 8) ---
     TAIL_THROW_TE_M = 0.012  # available +/- TE throw at low rates (linkage geometry)
@@ -99,19 +160,39 @@ class VTailSample:
         "fc_gps": {"length": 0.060},
     }
 
-    # Architecture v3 (dihedral curve, user decision 2026-07-23): the piecewise
-    # per-panel dihedral (v2's d0-d3) is retired — it complicated spar holes
-    # (a joiner at every break) and the champion showed the distribution to be
-    # a flat direction anyway. Local dihedral is now one smooth family,
-    # delta(eta) = dihedral_tip * eta^d_exp (eta = arc fraction from root):
-    # d_exp = 0 is a single simple dihedral angle, d_exp > 0 a fully curved
-    # wing (flat at the root, curvature building outboard). Chord ratios
-    # r1-r3 keep the planform freedom.
+    # Architecture v4 (user decision 2026-07-26). Two independent changes that
+    # pull in opposite directions, each for its own reason:
+    #
+    # PLANFORM goes smooth. The three independent chord ratios (v2/v3's r1-r3)
+    # and the equal-width panels they sat on are retired: they were an arbitrary
+    # discretization masquerading as design freedom, and the widths were never
+    # optimizable at all. Chord is now one two-parameter superellipse family
+    # (MODEL_DETAILS section 9.1) — with a rectangular wing and a straight taper
+    # as EXACT members, not approximations — and the leading-edge convention is
+    # a third variable spanning straight-LE through straight-quarter-chord to
+    # straight-TE, so the optimizer chooses it rather than inheriting it.
+    #
+    # DIHEDRAL may go piecewise. The v3 curve delta(eta) = dihedral_tip*eta^d_exp
+    # is retained as the incumbent, but a two-panel form (one break, free break
+    # station, hard-cantable outer panel) is now a priced candidate beside it:
+    # the curve family cannot express a flat inner wing with a steeply canted
+    # tip, which at a binding projected-span cap is a blended winglet rather
+    # than a dihedral distribution. See wing_dihedral_form below.
     DV_DEFAULTS = {
-        # wing planform
-        "span": 1.8, "c_root": 0.22, "center_width": 0.700,
-        "r1": 196.667 / 220, "r2": 173.333 / 196.667, "r3": 150 / 173.333,
-        "dihedral_tip": 3.0, "d_exp": 0.5,  # dihedral curve (section 9)
+        # wing planform — superellipse chord curve (section 9.1)
+        "span": 1.8, "c_root": 0.22,
+        "taper": 150 / 220,  # tip/root ratio; 1.0 = rectangular
+        "fullness": 1.0,  # 1 = straight taper, 2 = ellipse, >2 = fuller tip
+        "le_shear": 0.0,  # 0 = straight LE, 0.25 = straight c/4, 1 = straight TE
+        "dihedral_tip": 3.0, "d_exp": 0.5,  # dihedral CURVE form (section 9.2)
+        # Wing joint station. 0.3889 = the spec's 700 mm carry-through over the
+        # 1.8 m span — i.e. exactly what v3 expressed as center_width = 0.700.
+        # Keeping the default here is what holds the spar mass (and so AUW, and
+        # so every M1 number) continuous across the v3 -> v4 reparameterization;
+        # a rounder-looking default silently moved it by 6 g.
+        "eta_break": 0.700 / 1.8,
+        # dihedral POLYHEDRAL2 form (section 9.3): the two panel angles
+        "dihedral_inner": 3.0, "dihedral_outer": 3.0,
         "washout_tip": -2.0,
         # winglet (consumed only when self.winglet; lengths m, angles deg,
         # wl_cr is winglet-root chord as a fraction of the wing tip chord)
@@ -151,22 +232,63 @@ class VTailSample:
         c_cs = d["cs_frac"] * d["t_c_root"] * (1 + d["t_taper"]) / 2
         return (180 / np.pi) * self.TRIM_THROW_FRACTION * self.TAIL_THROW_TE_M / c_cs
 
-    @staticmethod
-    def _wing_panels(d: dict) -> list:
-        """[(width, local dihedral deg)] for the four arc-length panels per
-        side, sampling the dihedral curve delta(eta) = dihedral_tip * eta^d_exp
-        at each panel's midpoint (midpoint rule for the arc integral).
-        Geometry and constraints share this — they cannot drift apart.
-        Symbolic-safe: eta > 0 always (center_width floor), power via exp/log."""
+    def _wing(self, d: dict) -> dict:
+        """The whole semi-span wing as one dict, shared by geometry, constraints
+        and the mass model so they cannot drift apart (the v3 rule, widened).
+
+        Keys: `etas` (arc-fraction stations, root 0 -> tip 1), `chords`, `le_x`
+        (streamwise LE offset), `widths` and `dihedrals` per panel, plus the
+        running `ys`/`zs` placement, `areas`, and the arc/projected centroid of
+        each panel. Symbolic-safe throughout: the only branching is on
+        self.wing_dihedral_form, a plain string.
+
+        Panels are placed by ARC length — `span` is material span and the
+        front-view width falls out of each panel's cos(dihedral) — which is what
+        makes the projected-span cap exact at high cant (section 9.3).
+        """
         semi = d["span"] / 2
-        cw2 = d["center_width"] / 2
-        w3 = (semi - cw2) / 3
-        panels, s = [], 0
-        for w in (cw2, w3, w3, w3):
-            eta_mid = (s + w / 2) / semi
-            panels.append((w, d["dihedral_tip"] * eta_mid ** d["d_exp"]))
-            s = s + w
-        return panels
+        curve = self.wing_dihedral_form == "curve"
+        # The joint station exists in both forms (spar break, panel break); only
+        # the two-panel form additionally changes dihedral across it.
+        eta_break = d["eta_break"]
+        etas = geometry.station_grid(
+            eta_break, self.WING_STATIONS_INNER, self.WING_STATIONS_OUTER
+        )
+        chords = geometry.superellipse_chords(etas, d["c_root"], d["taper"], d["fullness"])
+        le_x = geometry.le_offsets(chords, d["le_shear"])
+
+        widths = [(etas[k + 1] - etas[k]) * semi for k in range(len(etas) - 1)]
+        if curve:
+            # sample delta(eta) = dihedral_tip * eta^d_exp at each panel midpoint
+            # (midpoint rule for the arc integral). eta_mid > 0 always.
+            dihedrals = [
+                d["dihedral_tip"] * ((etas[k] + etas[k + 1]) / 2) ** d["d_exp"]
+                for k in range(len(widths))
+            ]
+        else:
+            # piecewise constant, exactly two values. The grid puts a station ON
+            # the break, so which panels are inboard is an INDEX question — no
+            # comparison against a design-variable value anywhere.
+            n_in = self.WING_STATIONS_INNER
+            dihedrals = [d["dihedral_inner"]] * n_in + [d["dihedral_outer"]] * (
+                len(widths) - n_in
+            )
+
+        ys, zs = [0.0], [0.0]
+        for w, ang in zip(widths, dihedrals):
+            ys.append(ys[-1] + w * np.cosd(ang))
+            zs.append(zs[-1] + w * np.sind(ang))
+        areas = geometry.panel_areas(widths, chords)
+        # Roll-moment arm for the lateral floor is the PROJECTED y of the panel
+        # centroid, not its arc distance: a canted panel's restoring moment acts
+        # on its front-view arm. v3 used arc distance, which barely differed at
+        # 4 deg but would hand a 60 deg outer panel a 2x arm it does not have.
+        y_centroids = [(ys[k] + ys[k + 1]) / 2 for k in range(len(widths))]
+        return {
+            "etas": etas, "chords": chords, "le_x": le_x, "widths": widths,
+            "dihedrals": dihedrals, "ys": ys, "zs": zs, "areas": areas,
+            "y_centroids": y_centroids, "semi": semi, "eta_break": eta_break,
+        }
 
     def _wing_curve_z(self, d: dict, eta):
         """Analytic curve height z(eta) via the small-angle integral
@@ -194,11 +316,22 @@ class VTailSample:
         i = self.DV_DEFAULTS | (inits or {})
         bounds = {
             "span": (1.5, self.span_cap_m), "c_root": (0.16, 0.245),
-            "center_width": (0.10, 1.20),
-            "r1": (0.55, 1.0), "r2": (0.55, 1.0), "r3": (0.55, 1.0),
-            # dihedral curve: tip-angle cap matches the old per-panel cap; the
-            # exponent spans simple dihedral (0) to a strongly tip-loaded curve
-            "dihedral_tip": (0.0, self.tip_dihedral_max_deg), "d_exp": (0.0, 2.0),
+            # superellipse chord curve (section 9.1). taper = 1.0 is a
+            # rectangular wing and fullness = 1.0 a straight taper, so both stay
+            # exactly reachable rather than merely approachable; the upper
+            # fullness bound of 4 is well past an ellipse (2) and into
+            # held-chord planforms.
+            "taper": (0.35, 1.0), "fullness": (1.0, 4.0),
+            # LE convention as a continuous variable: 0 straight LE, 0.25
+            # straight quarter-chord, 1 straight TE (section 9.1).
+            "le_shear": (0.0, 1.0),
+            # Where the wing is JOINTED: end of the carry-through spar, start of
+            # the outer spar, and the one station a panel break may sit at. It
+            # exists in both dihedral forms — a built wing is jointed somewhere
+            # regardless — and inherits the freedom v3 carried as center_width.
+            # The forms differ in exactly one thing: whether the dihedral is
+            # allowed to CHANGE here (section 9.3).
+            "eta_break": (0.25, 0.85),
             "washout_tip": (-4.0, 0.0),
             # tail_arm drives overall aircraft length + boom length — genuinely
             # wide bounds so total length is an optimization outcome
@@ -216,6 +349,23 @@ class VTailSample:
             "pod_nose": (0.030, 0.25), "pod_bay": (0.20, 0.55),
             "pod_xs": (0.75, 1.30), "pod_bay_end": (0.40, 0.62),
         }
+        # Dihedral form decides which angles exist at all — the same pattern as
+        # tail_type below. Declaring the unused ones anyway would leave the NLP
+        # with variables no constraint touches.
+        if self.wing_dihedral_form == "curve":
+            # tip-angle cap matches the old per-panel cap; the exponent spans
+            # simple dihedral (0) to a strongly tip-loaded curve
+            bounds |= {
+                "dihedral_tip": (0.0, self.tip_dihedral_max_deg), "d_exp": (0.0, 2.0),
+            }
+        else:
+            # Two panels, breaking at the joint the wing already has. The inner
+            # panel keeps the ordinary dihedral cap; only the outer one may cant
+            # hard, which is the whole point of the form.
+            bounds |= {
+                "dihedral_inner": (0.0, self.tip_dihedral_max_deg),
+                "dihedral_outer": (0.0, self.outer_cant_max_deg),
+            }
         if self.fuselage_topology == "pod_boom":
             # integrated topology derives its cone length from tail_arm instead
             bounds["pod_tail"] = (0.10, 0.45)
@@ -283,18 +433,17 @@ class VTailSample:
 
     def geometry_constraints(self, opti, dv, V, deflection_deg=None) -> None:
         """Aircraft-specific manufacturing/geometry/throw constraints (symbolic-safe)."""
-        c_tip = dv["c_root"] * dv["r1"] * dv["r2"] * dv["r3"]
+        w = self._wing(dv)
+        c_tip = w["chords"][-1]
         # tip Reynolds floor (project rule; MODEL_DETAILS section 4)
         opti.subject_to(1.225 * V * c_tip / 1.81e-5 >= 90e3)
-        # A1 print bed: chord already bounded by c_root upper bound (245 mm)
-        # outer panels must exist
-        opti.subject_to(dv["span"] >= dv["center_width"] + 0.20)
+        # A1 print bed: chord already bounded by c_root upper bound (245 mm).
+        # (v3's "outer panels must exist" constraint is gone with center_width —
+        # the break station's own bounds guarantee both regions are non-empty.)
         # manufacturing span cap on PROJECTED span: the dv "span" is material
         # (arc) span; front-view width comes from each panel's cos(dihedral),
         # plus the winglet's y-projection when present
-        wing_panels = self._wing_panels(dv)  # [(width, local dihedral)] — v3 curve
-        w3 = wing_panels[1][0]
-        proj_semi = sum(w * np.cosd(delta) for w, delta in wing_panels)
+        proj_semi = w["ys"][-1]
         proj_span = 2 * proj_semi
         if self.winglet:
             proj_span = proj_span + 2 * dv["wl_len"] * np.cosd(dv["wl_cant"])
@@ -303,7 +452,7 @@ class VTailSample:
             c_wl_mean = c_tip * dv["wl_cr"] * (1 + dv["wl_taper"]) / 2
             opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 >= 60e3)
             # winglet stays shorter than the last wing panel (buildable socket)
-            opti.subject_to(dv["wl_len"] <= w3)
+            opti.subject_to(dv["wl_len"] <= w["widths"][-1])
         opti.subject_to(proj_span <= self.span_cap_m)
         # lateral-stability proxy: roll-moment-weighted dihedral floor. Dihedral's
         # restoring moment scales with panel area x spanwise arm, so the weight is
@@ -311,17 +460,7 @@ class VTailSample:
         # piling dihedral inboard where it buys no roll stiffness. (The optimizer
         # cannot see dihedral's benefit at all — LL has no lateral DOF — so this
         # floor is the only thing keeping the wing from going flat.)
-        cw2 = dv["center_width"] / 2
-        outer3 = (dv["span"] / 2 - cw2) / 3
-        c0, c1 = dv["c_root"], dv["c_root"] * dv["r1"]
-        c2, c3 = c1 * dv["r2"], c1 * dv["r2"] * dv["r3"]
-        d0, d1, d2, d3 = (delta for _, delta in wing_panels)  # sampled curve
-        panels = [
-            (cw2 * c0, cw2 / 2, d0),
-            (outer3 * (c0 + c1) / 2, cw2 + 0.5 * outer3, d1),
-            (outer3 * (c1 + c2) / 2, cw2 + 1.5 * outer3, d2),
-            (outer3 * (c2 + c3) / 2, cw2 + 2.5 * outer3, d3),
-        ]
+        panels = list(zip(w["areas"], w["y_centroids"], w["dihedrals"]))
         w_sum = sum(a * y for a, y, _ in panels)
         # credit per panel is sin*cos, not the raw angle: the restoring moment
         # needs both a sideflow AoA (sin) and a vertical force component (cos),
@@ -332,36 +471,50 @@ class VTailSample:
         eff_dihedral = sum(a * y * credit(d) for a, y, d in panels) / w_sum
         opti.subject_to(eff_dihedral >= self.min_effective_dihedral_deg)
 
-        # --- straight-spar fit (section 9, user decision 2026-07-23): both
-        # tube spars stay STRAIGHT (the build standard — no segment joiners);
-        # the dihedral curve's sag across each spar's run must leave room for
-        # the tube inside the usable section depth, so spar holes are always
-        # drillable in a straight line. A design that cannot pass a
-        # sufficiently sized straight spar is unbuildable, hence a hard
-        # geometry constraint, not a priced penalty. At d_exp = 0 the sag is
-        # identically zero: simple dihedral always fits. ---
-        semi = dv["span"] / 2
+        # --- spar fit: the tube must fit inside the section it runs through ---
+        # Build standard (unchanged): both tube spars are STRAIGHT, so spar
+        # holes are drillable in a straight line. What differs between the two
+        # dihedral forms is whether the wing bends AROUND that straight spar.
+        # A design that cannot pass a sufficiently sized spar is unbuildable, so
+        # this is a hard geometry constraint, not a priced penalty.
+        eta_b = w["eta_break"]
         tc = asb.Airfoil(self.wing_airfoil).max_thickness()  # numeric (discrete outer loop)
         depth = lambda c: self.SPAR_DEPTH_FRACTION * tc * c
+        # chord at a station, from the same curve the geometry uses
+        c_at = lambda e: geometry.superellipse_chords(
+            [0.0, e, 1.0], dv["c_root"], dv["taper"], dv["fullness"]
+        )[1]
+        c_root_dv = w["chords"][0]
 
-        def sag(eta_a, eta_b, eta_x):
-            # vertical deviation of the (convex) analytic curve below the
-            # straight chord between the spar's ends, at station eta_x.
-            # eta arguments must stay > 0: CasADi's symbolic-exponent power is
-            # exp(q ln eta), whose q-derivative is NaN at eta = 0.
-            za, zb = self._wing_curve_z(dv, eta_a), self._wing_curve_z(dv, eta_b)
-            chord_z = za + (zb - za) * (eta_x - eta_a) / (eta_b - eta_a)
-            return chord_z - self._wing_curve_z(dv, eta_x)
+        if self.wing_dihedral_form == "curve":
+            # The curve sags away from every straight line drawn through it, so
+            # each spar run has to carry that sag plus its own diameter. At
+            # d_exp = 0 the sag is identically zero: simple dihedral always fits.
+            def sag(eta_a, eta_bb, eta_x):
+                # vertical deviation of the (convex) analytic curve below the
+                # straight chord between the spar's ends, at station eta_x.
+                # eta arguments must stay > 0: CasADi's symbolic-exponent power
+                # is exp(q ln eta), whose q-derivative is NaN at eta = 0.
+                za, zb = self._wing_curve_z(dv, eta_a), self._wing_curve_z(dv, eta_bb)
+                chord_z = za + (zb - za) * (eta_x - eta_a) / (eta_bb - eta_a)
+                return chord_z - self._wing_curve_z(dv, eta_x)
 
-        eta_c = cw2 / semi  # center spar: root -> center edge; z(0) = 0 exactly
-        sag_center = self._wing_curve_z(dv, eta_c) / 2 - self._wing_curve_z(dv, eta_c / 2)
-        opti.subject_to(sag_center + dv["spar_od_center"] <= depth(c0))
-        eta_o = (cw2 + 0.85 * 3 * outer3) / semi  # outer spar end (structures run)
-        for eta_x, c_x in [
-            ((cw2 + outer3) / semi, c1),  # interior panel breaks: deepest
-            ((cw2 + 2 * outer3) / semi, c2),  # sag meets shrinking chord
-        ]:
-            opti.subject_to(sag(eta_c, eta_o, eta_x) + dv["spar_od_outer"] <= depth(c_x))
+            sag_center = self._wing_curve_z(dv, eta_b) / 2 - self._wing_curve_z(dv, eta_b / 2)
+            opti.subject_to(sag_center + dv["spar_od_center"] <= depth(c_root_dv))
+            eta_o = eta_b + 0.85 * (1 - eta_b)  # outer spar end (structures run)
+            for frac in (0.35, 0.7):  # sag deepest inboard, chord thinnest outboard
+                eta_x = eta_b + frac * (eta_o - eta_b)
+                opti.subject_to(sag(eta_b, eta_o, eta_x) + dv["spar_od_outer"] <= depth(c_at(eta_x)))
+        else:
+            # Two straight panels: each spar runs inside a PLANAR panel, so the
+            # sag against its own run is identically zero and the kink is carried
+            # by a joiner block instead (DIHEDRAL_JOINER_KG, charged in
+            # structure_extras). What remains is the ordinary fit check — the
+            # tube must clear the section depth at the thinnest station of its
+            # run, which is that run's outboard end.
+            opti.subject_to(dv["spar_od_center"] <= depth(c_at(eta_b)))
+            eta_o = eta_b + 0.85 * (1 - eta_b)
+            opti.subject_to(dv["spar_od_outer"] <= depth(c_at(eta_o)))
 
         # --- tail (MODEL_DETAILS section 8) ---
         t_c_mean = dv["t_c_root"] * (1 + dv["t_taper"]) / 2
@@ -429,19 +582,20 @@ class VTailSample:
         from planeopt import structures
 
         n_lim = 5.0
-        semi = dv["span"] / 2
-        cw2 = dv["center_width"] / 2
+        w = self._wing(dv)
+        semi = w["semi"]
+        inner = w["eta_break"] * semi  # carry-through / inner spar run
         m_center = structures.semispan_root_moment(weight_n, n_lim, semi)
         structures.spar_constraints(
-            opti, dv["spar_od_center"], dv["spar_wall_center"], cw2, m_center
+            opti, dv["spar_od_center"], dv["spar_wall_center"], inner, m_center
         )
-        # outer segment: lift outboard of the first joint (area fraction approx),
-        # centroid arm 0.424 x outer length
-        outer = semi - cw2
-        c1 = dv["c_root"] * dv["r1"]
-        c3 = c1 * dv["r2"] * dv["r3"]
-        s_half = cw2 * dv["c_root"] + outer * (dv["c_root"] + c3) / 2
-        f_outer = (outer * (dv["c_root"] + c3) / 2) / s_half
+        # outer segment: lift outboard of the joint (area fraction), centroid arm
+        # 0.424 x outer length. Areas come from the panel list, so the split
+        # follows the break station instead of assuming equal thirds.
+        outer = semi - inner
+        n_in = self.WING_STATIONS_INNER
+        s_half = sum(w["areas"])
+        f_outer = sum(w["areas"][n_in:]) / s_half
         m_outer = n_lim * (weight_n / 2) * f_outer * 0.424 * outer
         structures.spar_constraints(
             opti, dv["spar_od_outer"], dv["spar_wall_outer"], 0.85 * outer, m_outer
@@ -459,44 +613,31 @@ class VTailSample:
         if dv is None:
             dv = {}
         dv = self.DV_DEFAULTS | dv
-        span, c_root = dv["span"], dv["c_root"]
-        cw2 = dv["center_width"] / 2
-        outer3 = (span / 2 - cw2) / 3  # three equal-width outer panels per side
-
-        # chords at the panel breaks (straight LE: all taper from the TE)
-        chords = [
-            c_root,
-            c_root,
-            c_root * dv["r1"],
-            c_root * dv["r1"] * dv["r2"],
-            c_root * dv["r1"] * dv["r2"] * dv["r3"],
-        ]
-        # arc-length panels: "span" is material span along the panels; y/z come
-        # from each panel's local dihedral, so projected span = sum(w*cos d) —
-        # exact at high cant (continuous-cant study). Parametric designs sample
-        # the v3 dihedral CURVE (section 9); the dv=None fixture keeps the
-        # frozen v1.2 spec panels (flat center, 3 deg outer) forever.
+        # Parametric designs ride the v4 wing (superellipse chord curve, chosen
+        # LE convention, curve or two-panel dihedral — section 9). The dv=None
+        # fixture keeps the frozen v1.2 spec wing forever.
         if parametric:
-            placements = self._wing_panels(dv)
+            w = self._wing(dv)
+            chords, le_x, ys, zs = w["chords"], w["le_x"], w["ys"], w["zs"]
+            # washout linear in arc fraction, zero at the root
+            twists = [dv["washout_tip"] * eta for eta in w["etas"]]
         else:
-            placements = [(cw2, 0.0), (outer3, 3.0), (outer3, 3.0), (outer3, 3.0)]
-        ys, zs = [0.0], [0.0]
-        for width, ang in placements:
-            ys.append(ys[-1] + width * np.cosd(ang))
-            zs.append(zs[-1] + width * np.sind(ang))
-        # washout: 0 across the center panel, linear to washout_tip at the tip
-        twists = [0.0, 0.0]
-        for k in (1, 2, 3):
-            twists.append(dv["washout_tip"] * k / 3)
+            chords, twists = SPEC_WING_CHORDS, SPEC_WING_TWISTS
+            le_x = [0.0] * len(chords)  # spec wing: straight LE
+            ys, zs = [0.0], [0.0]
+            for width, ang in SPEC_WING_PANELS:
+                ys.append(ys[-1] + width * np.cosd(ang))
+                zs.append(zs[-1] + width * np.sind(ang))
 
         wing = asb.Wing(
             name="wing",
             symmetric=True,
             xsecs=[
                 asb.WingXSec(
-                    xyz_le=[0, ys[k], zs[k]], chord=chords[k], twist=twists[k], airfoil=wing_af
+                    xyz_le=[le_x[k], ys[k], zs[k]], chord=chords[k],
+                    twist=twists[k], airfoil=wing_af,
                 )
-                for k in range(5)
+                for k in range(len(chords))
             ],
         ).translate([WING_X_LE, 0, 0])
 
@@ -507,10 +648,12 @@ class VTailSample:
         # (verified against VLM, MODEL_DETAILS 3.6).
         winglet = None
         if self.winglet and parametric:
-            wl_cr = chords[4] * dv["wl_cr"]
+            c_tip = chords[-1]
+            wl_cr = c_tip * dv["wl_cr"]
             wl_ct = wl_cr * dv["wl_taper"]
-            # root TE flush with the wing-tip TE; tip raked back 25% of length
-            x0 = WING_X_LE + chords[4] - wl_cr
+            # root TE flush with the wing-tip TE (which the LE shear has moved),
+            # tip raked back 25% of length
+            x0 = WING_X_LE + le_x[-1] + c_tip - wl_cr
             dy = dv["wl_len"] * np.cosd(dv["wl_cant"])
             dz = dv["wl_len"] * np.sind(dv["wl_cant"])
             winglet = asb.Wing(
@@ -518,11 +661,11 @@ class VTailSample:
                 symmetric=True,
                 xsecs=[
                     asb.WingXSec(
-                        xyz_le=[x0, ys[4], zs[4]], chord=wl_cr,
+                        xyz_le=[x0, ys[-1], zs[-1]], chord=wl_cr,
                         twist=dv["wl_toe"], airfoil=wing_af,
                     ),
                     asb.WingXSec(
-                        xyz_le=[x0 + 0.25 * dv["wl_len"], ys[4] + dy, zs[4] + dz],
+                        xyz_le=[x0 + 0.25 * dv["wl_len"], ys[-1] + dy, zs[-1] + dz],
                         chord=wl_ct, twist=dv["wl_toe"], airfoil=wing_af,
                     ),
                 ],
@@ -530,7 +673,13 @@ class VTailSample:
 
         c_mean = wing.area() / wing.span()
         if parametric:
-            tails = self._tail_wings(dv, c_mean)
+            # Tail placed off the wing's TRUE quarter-chord AC, computed from the
+            # panels themselves. With a straight LE the old 0.25*c_mean proxy was
+            # close; once le_shear can sweep the planform the AC moves aft with
+            # it, and a tail hung off the root LE would collect moment arm the
+            # boom never pays for (section 9.1).
+            _, x_ac_local = geometry.mac_and_ac(w["widths"], chords, le_x)
+            tails = self._tail_wings(dv, WING_X_LE + x_ac_local)
         else:
             # frozen v1.2 spec V-tail (dv=None fixture — validation continuity;
             # keeps the pre-section-8 root-LE formula, so M1 numbers never move)
@@ -561,19 +710,19 @@ class VTailSample:
             c_ref=wing.area() / wing.span(),  # mean chord (symbolic-safe MAC proxy)
             # projected (front-view y) span: the manufacturing-capped quantity,
             # and the b the y-based Schrenk stations are consistent with
-            b_ref=2 * ys[4],
+            b_ref=2 * ys[-1],
         )
 
-    def _tail_wings(self, d: dict, c_mean_wing) -> list:
+    def _tail_wings(self, d: dict, x_ac_wing) -> list:
         """Tail surfaces for the current tail_type (MODEL_DETAILS section 8).
 
         Per-dimension variables (tail_scale retired). The pitch surface's AC is
-        placed exactly tail_arm behind the wing AC including the sweep offset —
-        sweeping the tail shifts its root LE forward, so sweep cannot buy free
-        moment arm against the boom-length accounting. Symbolic-safe: branches
-        only on self.tail_type (a plain string), never on dv values."""
+        placed exactly tail_arm behind the WING's AC (`x_ac_wing`, an absolute
+        station) including the tail's own sweep offset — so neither surface can
+        buy moment arm the boom-length accounting does not pay for. Symbolic-safe:
+        branches only on self.tail_type (a plain string), never on dv values."""
         naca0009 = asb.Airfoil("naca0009")
-        ac_x = WING_X_LE + 0.25 * c_mean_wing + d["tail_arm"]
+        ac_x = x_ac_wing + d["tail_arm"]
         semi = d["t_span"] / 2
         c_r, c_t = d["t_c_root"], d["t_c_root"] * d["t_taper"]
         mac, s_mac = self._trapezoid(d["t_c_root"], d["t_taper"], semi)
@@ -672,14 +821,20 @@ class VTailSample:
         from planeopt import structures
 
         d = self.DV_DEFAULTS | (dv or {})
-        outer = d["span"] / 2 - d["center_width"] / 2
+        w = self._wing(d)
+        inner = w["eta_break"] * w["semi"]  # carry-through half-length
+        outer = w["semi"] - inner
         spar_mass = (
-            structures.tube_mass(d["spar_od_center"], d["spar_wall_center"], d["center_width"])
+            structures.tube_mass(d["spar_od_center"], d["spar_wall_center"], 2 * inner)
             + 2 * structures.tube_mass(d["spar_od_outer"], d["spar_wall_outer"], 0.85 * outer)
             + 0.035  # root V-joint + center-outer joiner blocks + pins
-            # (v2's per-break polyhedral joiners are gone — the v3 curve has no
-            # interior dihedral breaks; print-section joints live in k_joint)
         )
+        if self.wing_dihedral_form != "curve":
+            # One spar joint per side, where the two panels meet at an angle.
+            # This is the price of the kink: the v3 curve bought its smoothness
+            # by having no interior dihedral break, and the two-panel form only
+            # earns its place in the study if it carries the joint it needs.
+            spar_mass = spar_mass + 2 * self.DIHEDRAL_JOINER_KG
         x_spar = WING_X_LE + 0.30 * d["c_root"]
         extras = [PointMass("wing_spars_joiners", spar_mass, x_spar)]
 
@@ -807,6 +962,7 @@ class VTailSample:
         return brief
 
     def powertrain(self) -> PowertrainConfig:
+        prop = self.PROP_CANDIDATES[self.prop_choice]
         return PowertrainConfig(
             motor=MotorConfig(
                 name="D3548-900kv",
@@ -817,13 +973,16 @@ class VTailSample:
                 max_current_a=55,
             ),
             prop=PropConfig(
-                name="aeronaut_cam_11x6_folding",
-                diameter_m=0.2794,
-                pitch_m=0.1524,
-                proxy_table="apc_11x6_blend",  # pitch-blended 11x5.5E/11x7E (tools/ingest_props.py)
+                name=prop["name"],
+                diameter_m=self.PROP_DIAMETER_M,
+                pitch_m=prop["pitch_in"] * 0.0254,
+                proxy_table=prop["proxy_table"],
                 # folding knockdown x declared mount installation derate
                 # (pusher-in-wake, MODEL_DETAILS 2.4) — composed multiplicatively
-                folding_derate=0.95 * self.MOUNT_EFFECTS[self.motor_mount]["prop_eta_derate"],
+                folding_derate=(
+                    self.PROP_FOLDING_DERATE
+                    * self.MOUNT_EFFECTS[self.motor_mount]["prop_eta_derate"]
+                ),
             ),
             battery=BatteryConfig(capacity_ah=4.0, v_nominal=14.8, usable_fraction=0.80),
             esc_efficiency=0.95,

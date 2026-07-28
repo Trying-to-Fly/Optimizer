@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
 from ..mission import OBJECTIVES
 from ..types import MissionSpec
 from . import missionfile
+from planeopt import memory
+
 from .jobs import Job
 from .workspace import Workspace
 
@@ -172,15 +174,37 @@ class NewRunDialog(QDialog):
         options.addWidget(self.flatness)
         options.addStretch(1)
         mode_layout.addLayout(options)
+
+        # --- memory budget ---
+        # RAM, not CPU, is what limits this app: a solve is single-core and peaks
+        # near 13 GB, so the budget does not make one solve faster — it decides
+        # how many independent solves in a batch run side by side. The dial is
+        # therefore phrased as memory (what the user actually owns) rather than
+        # as a worker count (an implementation detail they would have to convert).
+        mem_row = QHBoxLayout()
+        self.memory_enabled = QCheckBox("Dedicate memory")
+        mem_row.addWidget(self.memory_enabled)
+        total_gb, _ = memory.machine_ram()
+        ceiling = max(8.0, total_gb + memory.swap_gb() - memory.RESERVE_GB)
+        self.memory_budget = _spin(4.0, round(ceiling), 1.0, 0, " GB")
+        # narrower than the mission fields: this row lives in the Mode box, whose
+        # controls are compact, and a 150 px box for "26 GB" reads as a gap
+        self.memory_budget.setFixedWidth(90)
+        self.memory_budget.setValue(min(round(ceiling), 26.0))
+        mem_row.addWidget(self.memory_budget)
+        mem_row.addStretch(1)
+        mode_layout.addLayout(mem_row)
+
+        self.memory_note = QLabel()
+        self.memory_note.setStyleSheet("color:#9a9aa0; font-size:11px;")
+        self.memory_note.setWordWrap(True)
+        self.memory_note.setFrameShape(QFrame.NoFrame)
+        mode_layout.addWidget(self.memory_note)
+
+        self.memory_enabled.toggled.connect(self._update_mode)
+        self.memory_budget.valueChanged.connect(self._update_memory_note)
         self.mode_optimize.toggled.connect(self._update_mode)
         layout.addWidget(mode_box)
-
-        warning = QLabel(
-            "A solve peaks near 13 GB of memory. Runs execute one at a time."
-        )
-        warning.setStyleSheet("color:#9a9aa0; font-size:11px;")
-        warning.setFrameShape(QFrame.NoFrame)
-        layout.addWidget(warning)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Queue run")
@@ -207,8 +231,40 @@ class NewRunDialog(QDialog):
         )
 
     def _update_mode(self) -> None:
+        optimizing = self.mode_optimize.isChecked()
         for widget in (self.multistart, self.flatness):
-            widget.setEnabled(self.mode_optimize.isChecked())
+            widget.setEnabled(optimizing)
+        # Concurrency only exists inside an optimize battery — an evaluation is
+        # a single pass, so offering to spread it over memory would be a lie.
+        self.memory_enabled.setEnabled(optimizing)
+        self.memory_budget.setEnabled(optimizing and self.memory_enabled.isChecked())
+        self._update_memory_note()
+
+    def _update_memory_note(self) -> None:
+        total_gb, avail_gb = memory.machine_ram()
+        measured = memory.observed_peak_gb(self._runs_dir)
+        per = measured or memory.DEFAULT_PER_SOLVE_GB
+        source = "measured" if measured else "estimated"
+        have = f"{avail_gb:.0f} GB free of {total_gb:.0f} GB" if total_gb else "memory unknown"
+
+        if not (self.mode_optimize.isChecked() and self.memory_enabled.isChecked()):
+            self.memory_note.setText(
+                f"{have}. A solve peaks near {per:.0f} GB ({source}) and uses one core; "
+                "runs execute one at a time."
+            )
+            return
+        # The full reason string is for the run log; the dialog gets the number
+        # and, only when it applies, the one caveat that changes what the user
+        # should do.
+        budget = self.memory_budget.value()
+        width, _ = memory.plan_parallel(budget, per_solve_gb=measured)
+        plural = "" if width == 1 else "s"
+        text = f"{have}. {width} concurrent solve{plural} at ~{per:.0f} GB each ({source})."
+        if not memory.parallel_supported():
+            text += " This platform cannot run solves concurrently, so the budget has no effect."
+        elif avail_gb and budget > avail_gb - memory.RESERVE_GB:
+            text += " More than is free right now — this relies on swap."
+        self.memory_note.setText(text)
 
     def _load_preset(self) -> None:
         path = self.preset.currentData()
@@ -285,4 +341,9 @@ class NewRunDialog(QDialog):
             optimize=self.mode_optimize.isChecked(),
             multistart=self.multistart.value(),
             flatness=self.flatness.isChecked(),
+            memory_budget_gb=(
+                self.memory_budget.value()
+                if self.mode_optimize.isChecked() and self.memory_enabled.isChecked()
+                else None
+            ),
         )

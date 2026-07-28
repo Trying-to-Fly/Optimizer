@@ -7,6 +7,15 @@ constraint set, not the absolute minutes** (see VALIDATION_ANCHORS.md).
 Generated 2026-07-23, M3/M4 runs. Updated same day after the SM fix
 (Munk fuselage term + regression derivative) and the span-cap raise to 3.0 m.
 
+> **Stale geometry warning (2026-07-26).** Every champion below predates wing
+> architecture **v4** (MODEL_DETAILS §9). Findings phrased in terms of `r1`–`r3`
+> chord ratios, `center_width` or four equal-width panels describe a
+> parameterization that no longer exists; `d_exp`/`dihedral_tip` still do, but
+> now as one of two candidate dihedral forms. The *conclusions* (V-tail, boom,
+> puller, no winglet, simple dihedral, active constraint sets) have not been
+> re-tested under v4 — no optimize battery has been run on it yet. Treat the
+> geometry description as historical and the rankings as pending re-confirmation.
+
 ## 1. The champion (architecture v2: generalized planform + critical-section stall)
 
 **Span 2.84 m, and the flatness sweep now shows a true interior peak** (90 → 101 →
@@ -307,3 +316,4 @@ Caveats and flags:
 - The declared baseline in the aircraft file remains `pusher` (spec
   layout); the study adopts puller per run either way. Flip the default
   only if the user calls the puller adopted for good.
+

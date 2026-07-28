@@ -102,6 +102,19 @@ def solve(V: float, thrust_req: float, pt: PowertrainConfig, rho: float = 1.225)
     n_max = 250.0
     if thrust_residual(n_max) < 0:
         raise ValueError(f"thrust {thrust_req:.1f} N unreachable at V={V:.1f}")
+    if thrust_residual(n_min) > 0:
+        # The prop already makes more thrust than the airframe needs at the
+        # slowest rpm the fitted table covers, so level flight would sit at
+        # J > j_max — off the end of the data. This is a prop/airframe mismatch
+        # (too fine a prop for a clean, fast design), not a solver failure, and
+        # it deserves to say so rather than surface as a bracketing error.
+        raise ValueError(
+            f"prop {prop.key} is too fine for this design at V={V:.1f}: it makes "
+            f"more than the required {thrust_req:.2f} N at the lowest in-table "
+            f"speed ({n_min*60:.0f} rpm, J={prop.j_max:.3f}). Level flight lies "
+            f"beyond the fitted advance-ratio range — fit a coarser-pitch or "
+            f"smaller-diameter prop (tools/ingest_props.py)"
+        )
     n = brentq(thrust_residual, n_min, n_max, xtol=1e-6)
 
     J = V / (n * D)

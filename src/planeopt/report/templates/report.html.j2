@@ -85,8 +85,43 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 
 <h2>Geometry</h2>
 <table>
-{% for k, v in r.geometry.items() %}<tr><th>{{ k }}</th><td>{% if v is number %}{{ "%.3f"|format(v) }}{% else %}{{ v }}{% endif %}</td></tr>{% endfor %}
+{% for k, v in r.geometry.items() %}{% if v is not mapping %}<tr><th>{{ k }}</th><td>{% if v is integer %}{{ v }}{% elif v is number %}{{ "%.3f"|format(v) }}{% else %}{{ v }}{% endif %}</td></tr>{% endif %}{% endfor %}
 </table>
+
+{% if r.geometry.get("surfaces") %}
+<h3>Surfaces</h3>
+<table>
+<tr><th>surface</th><th>airfoil</th><th>span (m)</th><th>area (m²)</th><th>root chord (mm)</th><th>tip chord (mm)</th></tr>
+{% for name, s in r.geometry["surfaces"].items() %}
+<tr><td>{{ name }}</td><td>{{ s.get("airfoil", "—") }}</td>
+<td>{{ "%.3f"|format(s["span_m"]) }}</td><td>{{ "%.4f"|format(s["area_m2"]) }}</td>
+<td>{{ "%.0f"|format(s["root_chord_m"]*1000) }}</td><td>{{ "%.0f"|format(s["tip_chord_m"]*1000) }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+
+{% if stations %}
+<h3>Build stations <span style="font-weight:400;color:#9a9aa0;font-size:12px;">— loft definition, metres, +x aft / +y starboard / +z up</span></h3>
+<table>
+<tr><th>surface</th><th>st</th><th>airfoil</th><th>chord (mm)</th><th>twist°</th>
+<th>LE x</th><th>LE y</th><th>LE z</th><th>TE x</th></tr>
+{% for s in stations %}
+<tr><td>{{ s.surface }}</td><td>{{ s.station }}</td><td>{{ s.airfoil }}</td>
+<td>{{ "%.1f"|format(s.chord_m*1000) }}</td><td>{{ "%.2f"|format(s.twist_deg) }}</td>
+<td>{{ "%.4f"|format(s.x_le_m) }}</td><td>{{ "%.4f"|format(s.y_le_m) }}</td>
+<td>{{ "%.4f"|format(s.z_le_m) }}</td><td>{{ "%.4f"|format(s.x_te_m) }}</td></tr>
+{% endfor %}
+</table>
+<p style="color:#9a9aa0;font-size:12px;">Symmetric surfaces list the starboard half only — mirror about y&nbsp;=&nbsp;0.
+Full 3D section outlines are in <code>geometry/sections_3d.csv</code>; see <code>geometry/README.txt</code>.</p>
+{% endif %}
+
+{% if r.geometry.get("winglet") %}
+<h3>Winglet</h3>
+<table>
+{% for k, v in r.geometry["winglet"].items() %}<tr><th>{{ k }}</th><td>{% if v is integer %}{{ v }}{% elif v is number %}{{ "%.3f"|format(v) }}{% else %}{{ v }}{% endif %}</td></tr>{% endfor %}
+</table>
+{% endif %}
 
 <h2>Masses</h2>
 {% if r.masses.get("auw_kg") %}

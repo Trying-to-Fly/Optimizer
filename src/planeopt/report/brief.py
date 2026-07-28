@@ -55,6 +55,23 @@ def render(result: types.RunResult, aircraft) -> str:
             "",
         ]
 
+    # Surfaces, airfoil first: the person building from this brief cannot cut a
+    # rib without it, and it is a discrete outer-loop candidate rather than a
+    # constant, so it has to be reported per run. Read from result.geometry, so
+    # this stays architecture-agnostic — whatever surfaces the aircraft built.
+    surfaces = (result.geometry or {}).get("surfaces") or {}
+    if surfaces:
+        lines += ["## Surfaces", ""]
+        lines += ["| surface | airfoil | span (m) | area (m²) | root chord (mm) | tip chord (mm) |",
+                  "| --- | --- | --- | --- | --- | --- |"]
+        for name, s in surfaces.items():
+            lines.append(
+                f"| {name} | {s.get('airfoil', '—')} | {s['span_m']:.3f} | "
+                f"{s['area_m2']:.4f} | {s['root_chord_m'] * 1000:.0f} | "
+                f"{s['tip_chord_m'] * 1000:.0f} |"
+            )
+        lines.append("")
+
     hook = getattr(aircraft, "design_brief", None)
     if hook is not None:
         for section, rows in hook(dv, shadow_per_g=shadow).items():

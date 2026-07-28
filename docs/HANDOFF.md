@@ -1,4 +1,52 @@
-# HANDOFF — Plane Optimizer (updated 2026-07-25, end of seventh session)
+# HANDOFF — Plane Optimizer (updated 2026-07-26, eighth session)
+
+**Eighth session (2026-07-26) — RAM budget + wing architecture v4.** Three
+user asks, all implemented; NO champion run has been made yet, so every number
+below is still the M4.8 champion's.
+
+- **Memory budget (`src/planeopt/memory.py`, new).** `optimize
+  --memory-budget-gb N` / a "Dedicate memory" control in the GUI's New Run
+  form. The honest framing, which the docs and the UI both state: more RAM does
+  NOT make a solve faster — a solve is single-core and memory-bound — it decides
+  how many independent solves in a batch run side by side, i.e. it is a
+  friendlier `--parallel`. Width = budget / measured per-solve peak. Runs now
+  RECORD `diagnostics.peak_rss_gb`, and later budgets divide by that measurement
+  instead of the folklore 13 GB. Overshooting free RAM warns rather than clamps
+  (swap is real, peaks are transient, and a dial that silently refuses to move
+  is worse than no dial); the hard ceiling is physical + swap. On this box
+  (25 GB + 10 GB swap) the dial is effectively a 1-vs-2 switch — `planeopt
+  info` now prints RAM, the measured peak, and the max achievable width.
+  Stdlib only, no psutil: the frozen Windows build stays clean.
+- **Wing architecture v4 (MODEL_DETAILS §9, rewritten).** Planform went
+  SMOOTH, dihedral may go PIECEWISE — see §9 for the full rationale.
+  `r1`/`r2`/`r3` and `center_width` are retired; `taper`, `fullness`,
+  `le_shear` and `eta_break` replace them. A rectangular wing (λ=1) and a
+  straight taper (a=1) are EXACT members — that was the user's explicit
+  requirement. `le_shear` spans straight-LE / straight-c4 / straight-TE as one
+  continuous variable instead of three discrete cases. New discrete study
+  `wing_dihedral_form: [curve, polyhedral2]`, outer cant free to 60°, with the
+  16 g/side joiner block charged back so the kink pays for itself.
+- **Watch this in the next champion run:** v3 converged to `d_exp = 0` with
+  spar-fit inactive, i.e. the dihedral *distribution* is a flat direction. A
+  mild polyhedral will land on the same uniform answer; the result worth
+  reading is the hard-canted one, where the mechanism is induced drag at the
+  span cap (a blended winglet made of wing) rather than dihedral at all.
+- **Airfoils are now reported** per surface in run.json, report.html and the
+  design brief, read off the built airplane rather than the declared attribute
+  (it is a discrete outer-loop candidate, so it can differ per run).
+- Costs held flat on purpose: still 4 panels / 5 xsecs, so the CasADi graph,
+  solve time and 13 GB peak are unchanged from v3.
+- Tests: `tests/test_memory.py` (16) new, `tests/test_wingcurve.py` rewritten
+  (24). Full fast suite 113 passing. A 384-corner sweep of the wing variable
+  bounds confirms a NaN/Inf-free Jacobian in both dihedral forms.
+- **Not done:** no optimize battery has been run on v4 — FINDINGS still
+  describes v3 geometry. `aircraft/speed_sample/` (uncommitted, from the
+  in-flight max-speed work) still carries its own v3-style wing and was
+  deliberately left alone.
+
+---
+
+# Earlier: HANDOFF as of 2026-07-25, end of seventh session
 
 **M5.1 desktop GUI — done (seventh session, same day as packaging).** User
 decisions: a native PySide6 desktop app (not the web UI the plan sketched),
@@ -70,6 +118,11 @@ mission. New features enter as framework hooks + aircraft-declared data.
   battery solves 2-wide (~halves wall time; solver is single-core, 1 of 16,
   so CPU is never the limit — RAM is). Verify the allotment with `free -g`
   before using `--parallel 2`; at 15 GB it WILL OOM.
+  **Since the eighth session, prefer `--memory-budget-gb N`** (or the GUI's
+  "Dedicate memory"): it derives the width from free RAM and from the per-solve
+  peak previous runs actually measured, rather than asking you to do that
+  arithmetic from a folklore figure. `planeopt info` prints all three numbers.
+  `--parallel` still wins when given explicitly.
 - **uv lock:** `uv run` hangs silently (futex on `.venv/.lock`) when two uv
   invocations overlap on this drvfs mount. Launch background runs with
   `.venv/bin/planeopt` / `.venv/bin/python` directly; while ANY background

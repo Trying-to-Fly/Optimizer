@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import aerosandbox as asb
 import numpy as np
-from scipy.optimize import root
+from scipy.optimize import least_squares, root
 
 EXCRESCENCE = 1.08  # saddle, hatch lips, wires, hinge gaps (section 3.1)
 
@@ -48,11 +48,19 @@ def _run_ll(airplane, V, alpha, deflection, x_cg, control_name="ruddervator"):
 def trim(
     airplane, V: float, weight_n: float, x_cg: float, bodies: list[dict], rho=1.225,
     control_name: str = "ruddervator",
+    guess: tuple[float, float] | None = None,
 ) -> dict:
     """Solve (alpha, pitch-control deflection) for L = W and Cm = 0 at speed V.
 
     The pitch-trim surface is declared by the aircraft (`pitch_control_name`,
-    e.g. "ruddervator" or "elevator") — the framework assumes no tail type."""
+    e.g. "ruddervator" or "elevator") — the framework assumes no tail type.
+
+    `guess` seeds the root-find with (alpha_deg, deflection_deg). It matters more
+    than it looks: the default (2 deg, 0 deg) is near the answer for a loiter
+    design and nowhere near it for an airframe that trims at 20+ deg of
+    elevator, where the solver simply stops making progress. Callers sweeping a
+    speed range should pass the previous point's solution (continuation).
+    """
     s_ref = airplane.s_ref
     q = 0.5 * rho * V**2
     cl_req = weight_n / (q * s_ref)
@@ -62,10 +70,30 @@ def trim(
         r = _run_ll(airplane, V, a, d, x_cg, control_name)
         return [float(r["CL"]) - cl_req, float(r["Cm"])]
 
-    sol = root(residuals, x0=[2.0, 0.0], method="hybr", tol=1e-8)
-    if not sol.success:
-        raise RuntimeError(f"trim failed at V={V}: {sol.message}")
-    alpha, deflection = sol.x
+    # Trim is a stiff 2-D root-find and `hybr` from a single start is brittle:
+    # it converges instantly for a loiter design and stalls out ("not making good
+    # progress") for an airframe trimming at large deflection. So: try the seeded
+    # start, then a bounded least-squares from the same point (far more tolerant
+    # of a poor start), then a small spread of starts covering nose-up and
+    # nose-down trim. First success wins; the physics is identical in each case.
+    starts = [tuple(guess)] if guess is not None else []
+    starts += [(2.0, 0.0), (4.0, -10.0), (4.0, 10.0), (1.0, -20.0), (6.0, 20.0)]
+
+    alpha = deflection = None
+    last_message = "no attempt made"
+    for x0 in starts:
+        sol = root(residuals, x0=list(x0), method="hybr", tol=1e-8)
+        if sol.success:
+            alpha, deflection = sol.x
+            break
+        last_message = sol.message
+        ls = least_squares(residuals, x0=list(x0), xtol=1e-10, ftol=1e-10)
+        if ls.success and max(abs(r) for r in residuals(ls.x)) < 1e-6:
+            alpha, deflection = ls.x
+            break
+        last_message = f"{sol.message} / least-squares residual too large"
+    if alpha is None:
+        raise RuntimeError(f"trim failed at V={V}: {last_message}")
     r = _run_ll(airplane, V, alpha, deflection, x_cg, control_name)
 
     cd_total = float(r["CD"]) + body_cd0(bodies, V, s_ref)

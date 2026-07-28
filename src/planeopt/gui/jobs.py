@@ -33,6 +33,7 @@ class Job:
     optimize: bool = True
     multistart: int = 3
     flatness: bool = True
+    memory_budget_gb: float | None = None
     state: JobState = JobState.QUEUED
     log: list[str] = field(default_factory=list)
     run_dir: Path | None = None  # parsed out of the child's final stdout line
@@ -63,6 +64,11 @@ def program_and_args(job: Job) -> tuple[str, list[str]]:
         args += ["--multistart", str(job.multistart)]
         if not job.flatness:
             args += ["--no-flatness"]
+        # The width is derived in the child, not here: it depends on free RAM
+        # and on the per-solve peak recorded in runs/, both of which are truer
+        # at launch than they were when the dialog was filled in.
+        if job.memory_budget_gb:
+            args += ["--memory-budget-gb", str(job.memory_budget_gb)]
 
     if getattr(sys, "frozen", False):
         return sys.executable, args

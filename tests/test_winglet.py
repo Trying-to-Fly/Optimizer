@@ -30,16 +30,14 @@ def test_parametric_geometry_grows_winglet(sample_aircraft):
 
 def test_projected_span_cap_math(sample_aircraft):
     """b_ref is projected (front-view) span: sum of panel widths x cos(local
-    dihedral), sampled from the v3 curve at panel midpoints."""
-    dv = {"span": 2.2, "center_width": 0.8, "dihedral_tip": 15.0, "d_exp": 1.0}
+    dihedral), summed over the v4 station grid."""
+    dv = {"span": 2.2, "dihedral_tip": 15.0, "d_exp": 1.0}
     airplane = sample_aircraft.geometry(dv)
-    cw2 = 0.4
-    w3 = (2.2 / 2 - cw2) / 3
-    semi, s = 0.0, 0.0
-    for w in (cw2, w3, w3, w3):
-        eta = (s + w / 2) / 1.1
-        semi += w * np.cos(np.radians(15.0 * eta))
-        s += w
+    w = sample_aircraft._wing(dict(sample_aircraft.DV_DEFAULTS) | dv)
+    semi = sum(
+        width * np.cos(np.radians(delta))
+        for width, delta in zip(w["widths"], w["dihedrals"])
+    )
     assert abs(float(airplane.b_ref) - 2 * semi) < 1e-9
     # material span is unchanged by dihedral (mm-level: span() follows the
     # quarter-chord line, which twist shifts slightly)
