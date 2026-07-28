@@ -26,16 +26,31 @@ def test_builtin_props_live_inside_the_package():
 
 def test_every_shipped_table_loads():
     keys = propulsion.available_props()
-    assert keys, "no proxy tables shipped"
+    assert len(keys) > 400, "the APC catalogue should ship, not a handful of tables"
     for key in keys:
         table = propulsion.PropTable(key)
         assert table.j_max > 0
         assert len(table.ct_coeffs) and len(table.cp_coeffs)
+        # the bivariate fit is useless without the Reynolds reconstruction
+        assert table.re_coeff > 0
+        assert 0 < table.re_range[0] < table.re_range[1]
+
+
+def test_no_synthetic_tables_ship():
+    """Every table must be fitted from a published APC file.
+
+    The retired apc_11x6_blend was a pitch interpolation between two real props,
+    which quietly made one study candidate non-measured — the confound that made
+    the 2026-07-27 prop result unreadable.
+    """
+    for key in propulsion.available_props():
+        source = propulsion.PropTable(key).meta.get("source", "")
+        assert source.upper().startswith("PER3_"), f"{key} is not from an APC file: {source!r}"
 
 
 def test_sample_aircraft_table_is_shipped():
     # The fixture names a table; a release that drops it breaks the sample run.
-    assert "apc_11x6_blend" in propulsion.available_props()
+    assert "apc_11x6" in propulsion.available_props()
 
 
 def test_missing_table_names_the_search_path_and_alternatives():
@@ -43,23 +58,30 @@ def test_missing_table_names_the_search_path_and_alternatives():
         propulsion.PropTable("no_such_prop")
     msg = str(e.value)
     assert "no_such_prop" in msg
-    assert "apc_11x6_blend" in msg  # tells the user what it does have
-    assert propulsion.PROPS_DIR_ENV in msg  # ...and how to add their own
+    assert propulsion.PROPS_DIR_ENV in msg  # tells the user how to add their own
+    # 443 tables must not be dumped into an exception message
+    assert len(msg) < 600, f"error message is {len(msg)} chars — it lists too much"
+
+
+def test_missing_table_suggests_near_misses():
+    with pytest.raises(FileNotFoundError) as e:
+        propulsion.PropTable("apc_11x7z")
+    assert "apc_11x7e" in str(e.value)  # the table they probably meant
 
 
 def test_user_directory_overrides_shipped_tables(tmp_path, monkeypatch):
-    shipped = json.loads((propulsion.BUILTIN_PROPS_DIR / "apc_11x6_blend.json").read_text())
+    shipped = json.loads((propulsion.BUILTIN_PROPS_DIR / "apc_11x6.json").read_text())
     custom = dict(shipped, j_range=[0.0, 0.123])
-    (tmp_path / "apc_11x6_blend.json").write_text(json.dumps(custom))
+    (tmp_path / "apc_11x6.json").write_text(json.dumps(custom))
     (tmp_path / "my_own_prop.json").write_text(json.dumps(custom))
 
     monkeypatch.setenv(propulsion.PROPS_DIR_ENV, str(tmp_path))
-    assert propulsion.PropTable("apc_11x6_blend").j_max == pytest.approx(0.123)
+    assert propulsion.PropTable("apc_11x6").j_max == pytest.approx(0.123)
     assert propulsion.PropTable("my_own_prop").j_max == pytest.approx(0.123)
     assert "my_own_prop" in propulsion.available_props()
 
     monkeypatch.delenv(propulsion.PROPS_DIR_ENV)
-    assert propulsion.PropTable("apc_11x6_blend").j_max != pytest.approx(0.123)
+    assert propulsion.PropTable("apc_11x6").j_max != pytest.approx(0.123)
 
 
 def test_report_template_is_package_data():

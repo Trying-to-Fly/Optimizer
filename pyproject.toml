@@ -40,3 +40,13 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+# `solve` marks tests that run a real NLP. One of them holds ~12 GB for many
+# minutes, which is enough to push this machine into swap and is not something a
+# bare `pytest` should ever start by surprise. They are deselected by default and
+# run explicitly with `-m solve` (or `-m "solve or not solve"` for everything).
+addopts = "-m 'not solve'"
+markers = [
+    "solve: runs a full optimizer solve — minutes of runtime and GB of RAM",
+]

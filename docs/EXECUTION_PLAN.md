@@ -110,11 +110,14 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
 
 ## 5. Data pipelines (offline, in `tools/`)
 
-- **Prop ingest:** parse APC published performance files from `data/props/` →
-  smooth CT(J)/CP(J) fit coefficients into `src/planeopt/data/props/` (shipped
-  package data); the fit quality plot stays beside the raw tables (MODEL_DETAILS
-  §2.1). At run time `PLANEOPT_PROPS_DIR` prepends a user directory to the
-  search path, so an end user adds a prop without touching the install.
+- **Prop ingest:** parse APC published performance files → smooth **CT(J,Re) /
+  CP(J,Re)** fit coefficients into `src/planeopt/data/props/` (shipped package
+  data, MODEL_DETAILS §2.1). `--fetch` pulls the published archive (~8 MB) and
+  fits the **whole catalogue: 443 tables**, so prop diameter and pitch are a
+  design choice rather than a data limit; the 67 MB of raw `.dat` stays out of
+  git (`data/props/_apc_cache/`, regenerable). `planeopt props` lists/filters
+  them. At run time `PLANEOPT_PROPS_DIR` prepends a user directory to the search
+  path, so an end user adds a prop without touching the install.
 - **Construction-profile fitting:** takes slicer results for the 2–3 scaled sections
   (MODEL_DETAILS §1.4), regresses `k_skin`/`k_rib`/`k_joint`, and writes/updates the
   profile module with fitted values + fit metadata.
@@ -135,6 +138,12 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
 | **M5.1 — desktop GUI** | Native desktop app (PySide6, `planeopt gui`): browse `runs/`, run detail, multi-run compare, a form over the mission, and a sequential run queue with live progress and cancel. Web UI was the original sketch; a desktop app was chosen instead (user decision 2026-07-25) | Reads run.json only for browsing; runs execute as subprocesses of the same CLI, so the GUI adds no solver path of its own |
 | **M4.9 — wing v4 + RAM budget** | Wing planform as one smooth superellipse chord curve (`taper`, `fullness`) replacing the three chord ratios and their equal-width panels, LE convention as one continuous variable (`le_shear`: straight LE / straight c/4 / straight TE), free joint station (`eta_break`, inheriting `center_width`'s freedom), true area-weighted AC placement, and a `wing_dihedral_form: [curve, polyhedral2]` study with the outer panel cantable to 60° and its joiner block charged (MODEL_DETAILS §9). Plus `--memory-budget-gb` / GUI "Dedicate memory": measured per-solve peak RSS recorded per run and divided into a declared budget to set the concurrency width (`memory.py`) | A rectangular wing and a straight taper are EXACT members of the family; `dv=None` fixture reproduces 91.48 min / 1933 g unchanged; NaN-free Jacobian across a 384-corner bound sweep in both dihedral forms; one champion battery prices the kink |
 | **M5.2 — aircraft input (later)** | Form over the aircraft's *declaration* surface (hardware, span cap, tail type, bounds, discrete options). Needs a declarative data layer beneath `aircraft.py`, which is the real gate on non-programmer use — see §3 rule 3 | The sample aircraft round-trips through the data layer with identical champion numbers |
+| **M6 — powertrain as a design variable (later, user request 2026-07-28)** | Motor and battery become **priced candidates** rather than declared constants, the same way the prop became a discrete study on 2026-07-27. Motor: a candidate list of (Kv, R, I0, mass, can size) re-solved per member — Kv especially, since it sets the rpm the prop is asked to turn and therefore trades directly against pitch, so motor and prop want to be judged *jointly*, not in sequence. Battery: cell count (bus voltage), capacity and mass as a continuous or discrete family, which couples straight into the endurance objective (`E_usable`) and into CG through the battery-position variable that already exists | A battery/motor study reproduces the current hardware exactly when its candidate list is a single member; joint motor+prop study beats sequential selection on the sample plane, or is shown not to |
+
+**Not scheduled on purpose.** M6 is deferred at the user's request (2026-07-28):
+the motor and battery are hardware already on hand, so treating them as fixed is
+the correct model of the actual decision today. The note exists so that when the
+hardware is genuinely open, the coupling above is not rediscovered from scratch.
 
 Each milestone is independently useful, matching the concept doc's "stop whenever the
 payoff stops" posture.

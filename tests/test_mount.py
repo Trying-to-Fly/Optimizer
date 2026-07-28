@@ -80,9 +80,13 @@ def test_prop_is_a_declared_discrete_option(sample_aircraft):
 
 
 def test_prop_candidates_differ_only_in_pitch(sample_aircraft):
-    """One blade family, so the study isolates pitch. Same diameter keeps the
-    190 g motor_prop point mass honest; same folding knockdown keeps no
-    candidate advantaged by a friendlier installation assumption."""
+    """Same diameter and knockdown, so the study isolates pitch. Diameter keeps
+    the 190 g motor_prop point mass honest; the shared folding knockdown keeps no
+    candidate advantaged by a friendlier installation assumption.
+
+    Blade SECTION is not controlled: APC has no thin-electric 11x6, so that rung
+    is the thicker sport blade (see PROP_CANDIDATES). Pitch is isolated; section
+    is a known confound, recorded rather than pretended away."""
     from planeopt import propulsion
 
     seen = {}
@@ -103,5 +107,5 @@ def test_incumbent_powertrain_is_unchanged(sample_aircraft):
     assert p.name == "aeronaut_cam_11x6_folding"
     assert abs(p.diameter_m - 0.2794) < 1e-12
     assert abs(p.pitch_m - 0.1524) < 1e-12
-    assert p.proxy_table == "apc_11x6_blend"
+    assert p.proxy_table == "apc_11x6"
     assert abs(p.folding_derate - 0.95) < 1e-12  # puller mount derate is 1.00

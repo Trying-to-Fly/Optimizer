@@ -1,4 +1,48 @@
-# HANDOFF — Plane Optimizer (updated 2026-07-26, eighth session)
+# HANDOFF — Plane Optimizer (updated 2026-07-28, ninth session)
+
+**Ninth session (2026-07-28) — the prop model, rebuilt.** Started as "summarise
+the last run", became a correctness fix. Read `FINDINGS.md` §11 first; it is the
+substance. Short version:
+
+- **The 2026-07-27 run's +11 min was a prop swap, not wing v4.** `prop_choice`
+  was freed as a discrete study the same day the wing changed; the study picked
+  the 11×7 over the incumbent 11×6, and +10% chain efficiency at flat mass and
+  flat L/D accounts for the entire gain. Wing v4 is still **unpriced**.
+- **The prop fit was wrong where it mattered.** `CT(J)` over a hardcoded
+  3000–10000 rpm window carried **6.9% efficiency error** in the sample plane's
+  own cruise band. Replaced with **`CT(J,Re)` / `CP(J,Re)`** (MODEL_DETAILS
+  §2.1.1) — Reynolds reconstructed from the operating point via one stored
+  per-prop constant, so there is no window to choose and the model works for a
+  5″ prop and a 22″ prop alike. Same band: **0.36%**. Numeric and CasADi paths
+  verified identical; Jacobian finite across the table.
+- **The whole APC catalogue ships: 443 fitted tables** (was 3, one of them
+  synthetic). `tools/ingest_props.py --fetch` pulls the ~8 MB published archive
+  and fits everything; the 67 MB of raw `.dat` stays out of git
+  (`data/props/_apc_cache/`). New `planeopt props [match] [--detail]` lists them,
+  and `planeopt info` now prints a count instead of 443 names.
+- **`apc_11x6_blend` retired** (user decision): it was a pitch interpolation, the
+  only non-measured candidate in the study that ranked it last. Real APC 11×6
+  replaces it and has 11% more usable advance ratio than the blend predicted.
+  New caveat, recorded in `PROP_CANDIDATES`: the real 11×6 is a thicker **sport**
+  section, so blade section is now a confound against its thin-electric
+  neighbours.
+- **Deferred at user request (2026-07-28): motor + battery as tunable
+  parameters** — logged as M6 in `EXECUTION_PLAN.md` §6, with the reason it is
+  deferred (hardware already on hand) and the coupling that matters when it is
+  not (Kv sets the rpm the prop must turn, so motor and prop want a *joint*
+  study, not a sequential one).
+- Tests: `tests/test_propulsion.py` new (Reynolds law, numeric==symbolic,
+  finite Jacobian, monotonic CT, catalogue fit-quality bar);
+  `tests/test_packaging.py` gained a no-synthetic-tables guard and a
+  did-you-mean check.
+- **Nothing has been re-solved under the new model.** Every number in FINDINGS
+  §1–§10 is quoted under the old prop fit. The two runs that would make wing v4
+  readable — v4 + `cam_11x6` pinned, and v3 + `cam_11x7` pinned — are still
+  outstanding, and only mean anything under the new fit.
+
+---
+
+# Earlier: HANDOFF as of 2026-07-26, eighth session
 
 **Eighth session (2026-07-26) — RAM budget + wing architecture v4.** Three
 user asks, all implemented; NO champion run has been made yet, so every number

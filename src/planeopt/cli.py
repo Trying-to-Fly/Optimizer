@@ -192,6 +192,33 @@ def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
 
 
 @app.command()
+def props(
+    match: str = typer.Argument("", help="Substring filter, e.g. '11x' or '.5e'"),
+    detail: bool = typer.Option(False, "--detail", "-d", help="Show fit quality and ranges"),
+):
+    """List the fitted propeller tables (the whole published APC catalogue)."""
+    from . import propulsion
+
+    keys = [k for k in propulsion.available_props() if match.lower() in k.lower()]
+    if not keys:
+        typer.echo(f"no prop table matches {match!r} among "
+                   f"{len(propulsion.available_props())} available")
+        raise typer.Exit(1)
+    for key in keys:
+        if not detail:
+            typer.echo(key)
+            continue
+        t = propulsion.PropTable(key)
+        m = t.meta
+        typer.echo(
+            f"{key:22s} {str(m.get('display_name','?')):12s} "
+            f"J<={t.j_max:.3f}  Re {t.re_range[0]/1e3:6.1f}k-{t.re_range[1]/1e3:6.1f}k  "
+            f"eta err {m.get('eta_rel_pct', float('nan')):4.1f}%"
+        )
+    typer.echo(f"\n{len(keys)} of {len(propulsion.available_props())} tables")
+
+
+@app.command()
 def objectives():
     """List the objective library."""
     from .mission import OBJECTIVES
@@ -233,7 +260,12 @@ def info():
     typer.echo(f"python          {sys.version.split()[0]} ({sys.platform})")
     typer.echo(f"install         {'frozen bundle' if frozen else 'source/wheel'}")
     typer.echo(f"package         {Path(__file__).parent}")
-    typer.echo(f"prop tables     {', '.join(propulsion.available_props()) or 'NONE FOUND'}")
+    props = propulsion.available_props()
+    # 443 shipped tables would bury the rest of this report, so it reports the
+    # count and points at the command that lists them.
+    typer.echo(f"prop tables     {len(props)} available"
+               f"{'' if props else ' — NONE FOUND'}"
+               f"{' (planeopt props to list)' if props else ''}")
     for d in propulsion.props_search_path():
         typer.echo(f"  search        {d} {'' if d.is_dir() else '(missing)'}")
     typer.echo(f"parallel solves {'available' if solve.parallel_available() else 'unavailable (no fork)'}")

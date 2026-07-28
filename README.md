@@ -78,6 +78,11 @@ motor mount; see `docs/FINDINGS.md` §10 for the current champion and
   the optimizer as a continuous variable; the dihedral may take a single
   hard-cantable break, priced against the smooth curve by a study
   (`docs/MODEL_DETAILS.md` §9)
+- Propulsion v2: propeller coefficients are fitted against advance ratio **and**
+  blade Reynolds, `CT(J,Re)`, so there is no RPM window to pick and the model is
+  as valid for a 5 in prop as a 22 in one (`docs/MODEL_DETAILS.md` §2.1.1). The
+  whole published APC catalogue ships — **443 fitted tables**, browsable with
+  `planeopt props` — so diameter and pitch are a design choice, not a data limit
 
 ```sh
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample

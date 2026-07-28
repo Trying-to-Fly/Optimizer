@@ -60,14 +60,15 @@ WALL = 0.006  # printed shell + clearance, per side
 SHELL_KG_M2 = 0.60  # printed fuselage shell + formers, per m2 of wetted area
 BOOM_OD, BOOM_WALL = 0.012, 0.0008  # CF tube, only used by the pod_boom topology
 
-# Props the optimiser may choose between: every fitted table currently shipped
-# (planeopt.propulsion.available_props). All are 11 inch — that is the diameter
-# APC data exists for on this machine, so diameter is a data limit, not a design
-# decision. Pitch and usable advance ratio are what actually differ, and the J
-# ceiling matters here: it caps V/(nD) directly.
+# Props the optimiser may choose between. Diameter is no longer a data limit —
+# the whole published APC catalogue ships (443 tables, `planeopt props`) — so
+# this list is a DESIGN decision: 11 in is what fits the airframe and keeps the
+# 190 g motor_prop point mass honest. Pitch and usable advance ratio are what
+# differ, and the J ceiling matters here because it caps V/(nD) directly.
+# Widen this list (or add diameters) when the airframe can take them.
 PROP_OPTIONS = {
     "apc_11x55e": {"name": "APC 11x5.5E", "diameter_m": 0.2794, "pitch_m": 0.1397},
-    "apc_11x6_blend": {"name": "Aeronaut CAM 11x6", "diameter_m": 0.2794, "pitch_m": 0.1524},
+    "apc_11x6": {"name": "APC 11x6", "diameter_m": 0.2794, "pitch_m": 0.1524},
     "apc_11x7e": {"name": "APC 11x7E", "diameter_m": 0.2794, "pitch_m": 0.1778},
 }
 # Folding blades cost ~5% of shaft power. A speed airframe has no reason to fold

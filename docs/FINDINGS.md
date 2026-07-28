@@ -15,6 +15,14 @@ Generated 2026-07-23, M3/M4 runs. Updated same day after the SM fix
 > puller, no winglet, simple dihedral, active constraint sets) have not been
 > re-tested under v4 — no optimize battery has been run on it yet. Treat the
 > geometry description as historical and the rankings as pending re-confirmation.
+>
+> **Stale propulsion warning (2026-07-28).** Every number below also predates the
+> `CT(J,Re)` prop model (MODEL_DETAILS §2.1.1) and the retirement of the
+> synthetic `apc_11x6_blend`. The old single-variable fit over-stated prop
+> efficiency by ~6% at the sample plane's operating point, so **absolute minutes
+> below read a few percent high**; rankings survived every fit tested. See §11
+> before quoting any delta that spans 2026-07-27 — one already turned out to be a
+> prop swap wearing a wing's clothes.
 
 ## 1. The champion (architecture v2: generalized planform + critical-section stall)
 
@@ -317,3 +325,79 @@ Caveats and flags:
   layout); the study adopts puller per run either way. Flip the default
   only if the user calls the puller adopted for good.
 
+## 11. The 2026-07-27 run is not readable, and why (2026-07-28)
+
+Run `20260727T075740` reported **123.5 min at the 2.0 m cap**, against the §10
+puller champion's 112.5 min. That +11 min is **not** a wing-architecture-v4
+result and must not be quoted as one.
+
+`prop_choice` was freed as a discrete study on 2026-07-27 (`discrete_options`
+in the aircraft file, dated that day), in the same run whose wing changed. The
+study picked the **11×7**, not the incumbent 11×6 — identifiable after the fact
+because `J_peak_eta` is a property of the table alone: 0.47295 in the v1.5
+champion (`apc_11x6_blend`), 0.55556 in this one (`apc_11x7e`).
+
+| | v1.5 champion | 2026-07-27 run | Δ |
+|---|---|---|---|
+| η_prop | 0.6058 | 0.6690 | **+10.4%** |
+| η_chain | 0.3549 | 0.3908 | **+10.1%** |
+| L/D | 20.84 | 21.09 | +1.2% |
+| AUW | 1766.5 g | 1768.5 g | +2 g |
+| P_elec | 22.26 W | 20.00 W | −10.2% |
+| **Endurance** | 112.5 min | 123.5 min | **+9.8%** |
+
+A +10% chain efficiency at flat mass and flat L/D produces the entire gain on
+its own. **Wing v4 contributed ~1% of L/D — indistinguishable from noise.** The
+v4 architecture remains unpriced.
+
+A tempting wrong explanation, recorded so it is not re-derived: the 11×6 did
+*not* "run out of table". At V = 9.5 m/s its `j_max` = 0.6074 corresponds to
+3359 rpm, where it makes 0.373 N against the 0.823 N required — the bracket is
+valid and it solves normally (the v1.5 champion ran it at J = 0.544 / 3749 rpm).
+The 11×7 won on modelled efficiency, not by elimination.
+
+### 11.1 …and the model it won under was wrong at the operating point
+
+Investigating the above surfaced a bigger defect. The fits were `CT(J)` alone
+over a hardcoded RPM window of 3000–10000, which averages a Reynolds-blind fit
+across a 3.5× Reynolds spread. Measured against raw APC rows **inside the sample
+plane's own cruise band** (J 0.45–0.68, 2800–4400 rpm):
+
+| rpm window | 11×7E CT error | 11×7E η error | peak η |
+|---|---|---|---|
+| 3000–10000 (was shipped) | 2.55% | **6.90%** | 0.7167 |
+| 2000–6000 | 1.20% | 2.02% | 0.6818 |
+| **CT(J,Re), no window** (now) | 0.75% | **0.36%** | — |
+
+So the 123.5 min was inflated a *second* time: at the honest fit, η_prop at that
+operating point falls ~5.8%. Rankings survived every window tested
+(11×7 > 11×6 > 11×5.5), which is the model's declared posture holding up — but
+the absolute minutes never deserved the confidence they were given.
+
+### 11.2 What changed as a result
+
+- **Prop model is now `CT(J,Re)` / `CP(J,Re)`** (MODEL_DETAILS §2.1.1). No RPM
+  window to choose; Reynolds is reconstructed from the operating point via one
+  stored per-prop constant, accurate to 0.2%.
+- **The whole published APC catalogue ships** — 443 fitted tables, median fit
+  error 1.2%. Prop diameter and pitch are now a design decision, not a data
+  limit. `planeopt props` lists them.
+- **`apc_11x6_blend` is retired.** It was a pitch interpolation between the
+  11×5.5E and 11×7E, because APC's thin-electric line has no 11×6. It was the
+  only non-measured candidate in a study that then ranked it last. The real APC
+  11×6 replaces it, and carries **11% more usable advance ratio** (`j_max` 0.681
+  vs 0.607) than the blend predicted. New honest caveat: the real 11×6 is APC's
+  thicker **sport** section, so blade section is now a confound between it and
+  its two thin-electric neighbours.
+
+### 11.3 Everything below §10 is quoted under the old prop model
+
+No number in §1–§10 has been re-solved under `CT(J,Re)`. The rankings are
+expected to hold; the minutes are expected to fall a few percent. **Nothing in
+§11 is a new champion** — no battery has been run since. The two runs that would
+make v4 readable are still outstanding:
+
+1. v4 wing + `cam_11x6` pinned — isolates the wing at the incumbent prop.
+2. v3 wing + `cam_11x7` pinned — the honest baseline for the prop swap.
+
+Both under the new fit, which is the only model in which either is meaningful.

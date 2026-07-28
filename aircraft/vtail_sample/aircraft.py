@@ -118,19 +118,26 @@ class VTailSample:
     }
 
     # --- prop candidates (MODEL_DETAILS 2.1) — the study's declared shortlist.
-    # All three are the same 11 in folding CAM-class blade at different
-    # PITCHES, so the study isolates the one thing actually being chosen. Held
-    # deliberately to one family: same diameter (so the 190 g motor_prop point
-    # mass stays honest and ground clearance does not silently change) and the
-    # same 0.95 folding knockdown, which composes with the mount's installation
-    # derate exactly as before. The APC tables are rigid-blade proxies for
-    # folding blades — the same modelling posture the incumbent 11x6 already
-    # used, so no candidate is advantaged by a better data source than another.
+    # All three are the same 11 in folding CAM-class blade at different PITCHES,
+    # so the study isolates the one thing actually being chosen. Held
+    # deliberately to one diameter (so the 190 g motor_prop point mass stays
+    # honest and ground clearance does not silently change) and one 0.95 folding
+    # knockdown, which composes with the mount's installation derate as before.
+    #
+    # Every table is now MEASURED APC data (2026-07-28). The 11x6 used to be a
+    # synthetic pitch-blend of the 11x5.5E and 11x7E, because APC's thin-electric
+    # line has no 11x6 — it jumps 5.5 to 7. Retiring the blend removed the one
+    # candidate that was not data, and the real 11x6 turned out to carry 11% more
+    # usable advance ratio than the blend predicted. The honest caveat is now a
+    # different one: the real 11x6 is APC's THICKER SPORT section, not a thin
+    # electric, so this shortlist is no longer a single blade family. Blade
+    # section is a confound between the 11x6 and its two neighbours — read a
+    # narrow 11x6 win with that in mind.
     PROP_CANDIDATES = {
         "cam_11x55": {"name": "aeronaut_cam_11x5.5_folding",
                       "pitch_in": 5.5, "proxy_table": "apc_11x55e"},
         "cam_11x6": {"name": "aeronaut_cam_11x6_folding",
-                     "pitch_in": 6.0, "proxy_table": "apc_11x6_blend"},
+                     "pitch_in": 6.0, "proxy_table": "apc_11x6"},
         "cam_11x7": {"name": "aeronaut_cam_11x7_folding",
                      "pitch_in": 7.0, "proxy_table": "apc_11x7e"},
     }

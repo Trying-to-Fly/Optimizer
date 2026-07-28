@@ -6,3 +6,4 @@ runs/
 dist/
 .venv-win/
 build/
+data/props/_apc_cache/

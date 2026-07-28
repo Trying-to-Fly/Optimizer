@@ -125,16 +125,47 @@ objective-agnostic; mission evaluators (§5) compose it — e.g. the endurance m
 
 | Stage | Model |
 |---|---|
-| Propeller | **Proxy data table**: published APC performance data (CT(J), CP(J)) for the closest rigid analog to the configured prop, fit as smooth differentiable curves over the cruise-relevant J range. **[sample]** Aeronaut CAM 11×6 folding → blend/nearest of APC 11×5.5E and 11×7E, times a fixed folding-prop derate ≈ 0.95 (root cutout, hub, fold hinges). |
+| Propeller | **Proxy data table**: published APC performance data fit as smooth differentiable surfaces **CT(J, Re), CP(J, Re)** — advance ratio *and* blade Reynolds at 75% span (§2.1.1). The whole published catalogue ships (443 tables, `planeopt props`), so prop choice is a design decision, not a data limit. **[sample]** Aeronaut CAM 11×6 folding → APC 11×6, times a fixed folding-prop derate ≈ 0.95 (root cutout, hub, fold hinges). |
 | Motor | Equivalent circuit from config (Kv, R, I0): `Q = Kt(I−I0)`, `RPM = Kv(V_bus − IR)` — AeroSandbox's `motor_electric_performance` implements exactly this. **[sample]** D3548 900 kV; R and I0 from vendor data, tagged as uncertain (vendor values run optimistic). |
 | ESC | Constant efficiency ≈ 0.95. |
 | Battery | Fixed bus voltage at discharge-average (**[sample]** 3.7 V/cell → 14.8 V), not full-charge voltage. |
 
 Coupling into the optimizer: prop RPM is an additional variable with a thrust-match
-equality constraint (`CT(J)·ρ·n²·D⁴ = T`); shaft power then follows from CP(J), and
-the motor circuit yields current and `P_elec`. This keeps everything smooth and lets
-the optimizer *see* the prop leaving its efficient advance-ratio range as cruise speed
-moves — which a fixed chain efficiency would hide.
+equality constraint (`CT(J,Re)·ρ·n²·D⁴ = T`); shaft power then follows from CP(J,Re),
+and the motor circuit yields current and `P_elec`. This keeps everything smooth and
+lets the optimizer *see* the prop leaving its efficient advance-ratio range as cruise
+speed moves — which a fixed chain efficiency would hide.
+
+### 2.1.1 Why Reynolds is the second fit variable (2026-07-28)
+
+APC tabulates each prop across a wide RPM sweep, and at a fixed advance ratio CT and
+CP drift systematically with Reynolds. The original fit was `CT(J)` alone over a
+hardcoded RPM window, which forced a choice no single constant can make honestly: the
+window has to sit on the operating point, but the right centre depends on the aircraft
+*and* on the prop — a 5″ prop cruises above 15 000 rpm, a 22″ prop below 4 000. With
+one catalogue-wide window the shipped fits were measurably wrong where it mattered:
+against raw APC rows in the sample plane's own cruise band, the 11×7E fit carried
+**6.9% efficiency error**, enough to move endurance by several minutes.
+
+Fitting Reynolds as a second variable removes the window entirely — every RPM block is
+data, and the model is evaluated at whatever Reynolds the operating point actually has.
+Measured the same way, error drops to **0.36%** (catalogue median 1.2%).
+
+Reynolds costs nothing extra to carry, because it follows from the operating point.
+The blade at 75% span sees `W₇₅ = n·D·√((0.75π)² + J²)`, so
+
+```
+Re = re_coeff · n · √((0.75π)² + J²)        n in rev/s
+```
+
+with `re_coeff = (ρ/μ)·c₇₅·D` a per-prop constant. Backed out of APC's own Reynolds
+column it is constant to ~0.2% across every prop and RPM block, so it is **stored, not
+modelled**. Both fits are nested-Horner polynomials (degree 3 in J, 2 in log Re), which
+keeps them differentiable and identical through the numeric and CasADi-symbolic paths.
+
+Two filters apply at ingest: rows above tip Mach 0.75 are dropped (a polynomial cannot
+follow transonic drag rise), and APC's marine props are excluded by name rather than by
+accident — they are the same file format in a different fluid.
 
 ### 2.2 Energy accounting
 
@@ -159,8 +190,17 @@ chain stays datasheet/data-table only. Consequences, stated explicitly:
 - Because every candidate shares the same propulsion model, **design ranking is far
   more trustworthy than absolute minutes** — conclusions should be phrased as "A beats
   B by X%" rather than "A flies N minutes." The advance-ratio diagnostic (cruise J vs.
-  peak-η J) remains the main sanity check that the proxy table is being used inside
-  its trustworthy region.
+  peak-η J) plus `re_75` / `re_in_range` are the sanity checks that the proxy table is
+  being read inside the region it was fitted on.
+- **A ranking is only comparable within one propulsion model.** The 2026-07-27 run
+  (§FINDINGS) is the cautionary case: the prop was freed as a discrete study in the
+  same run whose airframe changed, so a +11 min "wing win" was almost entirely a prop
+  swap. When the propulsion side changes — table, fit, candidate list — the previous
+  champion must be re-solved under the new model before any delta is quoted.
+- Rigid APC blades stand in for folding CAM blades behind a flat 0.95 derate, and the
+  motor's R and I₀ are vendor figures that run optimistic. **Better tables do not touch
+  either.** No amount of catalogue coverage substitutes for the bench wattmeter this
+  program has deliberately declined; coverage buys *choice*, not accuracy.
 
 ### 2.4 Installation effects — declared per-mount factors (2026-07-24)
 

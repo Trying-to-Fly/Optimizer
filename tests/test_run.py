@@ -6,6 +6,8 @@ test checks plausibility, not calibration.
 
 import json
 
+import pytest
+
 
 def test_run_writes_artifacts(sample_aircraft, sample_mission, tmp_path):
     from planeopt import solve
@@ -72,6 +74,7 @@ def test_propulsion_solver_sane(sample_aircraft):
         assert 0 < r["J"] < 1.0
 
 
+@pytest.mark.solve
 def test_m3_optimize_smoke(sample_aircraft, sample_mission, tmp_path):
     """M3 gate (reduced): full-vehicle NLP converges with trim/SM/spar/balance
     constraints; champion is plausible; artifacts complete."""
