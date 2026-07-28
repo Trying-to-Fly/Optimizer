@@ -997,6 +997,101 @@ class VTailSample:
             avionics_power_w=3.0,
         )
 
+    def manufacturing(self, dv: dict | None = None, auw_kg: float | None = None) -> dict:
+        """Framework hook (report/manufacturing): architecture-specific build data.
+
+        Sections map to either {label: value} rows or a list of uniform dicts
+        (rendered as a table AND written as its own CSV). Everything here mirrors
+        the models that actually sized the parts — `structure_constraints` for the
+        spars, the mass model for the boom — so the cut list cannot disagree with
+        what was optimized.
+        """
+        from planeopt import structures
+
+        d = self.DV_DEFAULTS | (dv or {})
+        w = self._wing(d)
+        semi = w["semi"]
+        inner = w["eta_break"] * semi  # carry-through run, per side
+        outer = semi - inner
+        weight_n = (auw_kg if auw_kg else 1.8) * 9.81
+        n_lim = 5.0
+
+        # identical decomposition to structure_constraints(), so the reported
+        # margins are the ones the optimizer actually held
+        m_center = structures.semispan_root_moment(weight_n, n_lim, semi)
+        f_outer = sum(w["areas"][self.WING_STATIONS_INNER:]) / sum(w["areas"])
+        m_outer = n_lim * (weight_n / 2) * f_outer * 0.424 * outer
+
+        centre = structures.spar_report(
+            d["spar_od_center"], d["spar_wall_center"], inner, m_center
+        )
+        # the constraint sizes ONE cantilever half; the part is a single tube
+        # through the centre, so the stock length is both halves
+        centre_stock = round(2 * inner * 1000, 1)
+        tip = structures.spar_report(
+            d["spar_od_outer"], d["spar_wall_outer"], 0.85 * outer, m_outer
+        )
+
+        spars = [
+            dict(part="centre carry-through", qty=1, **centre, stock_length_mm=centre_stock),
+            dict(part="outer panel", qty=2, **tip, stock_length_mm=tip["length_mm"]),
+        ]
+
+        x_spar = WING_X_LE + 0.30 * d["c_root"]
+        p = self.pod_dims(d)
+        x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
+        pod_end = p["bay_end"] + p["tail_len"]
+        boom_len = (x_tail - pod_end) + 0.05  # + sockets, as the mass model has it
+
+        stock = [
+            {"item": "CF tube, centre spar", "spec":
+             f"{centre['od_mm']:.1f} x {centre['wall_mm']:.2f} mm wall",
+             "length_mm": centre_stock, "qty": 1},
+            {"item": "CF tube, outer spar", "spec":
+             f"{tip['od_mm']:.1f} x {tip['wall_mm']:.2f} mm wall",
+             "length_mm": tip["length_mm"], "qty": 2},
+        ]
+        if self.fuselage_topology == "pod_boom":
+            stock.append({"item": "CF boom tube", "spec": "12 x 10 mm (1 mm wall)",
+                          "length_mm": round(boom_len * 1000, 1), "qty": 1})
+        if self.wing_dihedral_form == "polyhedral2":
+            stock.append({"item": "spar joiner block, at the dihedral break",
+                          "spec": f"{self.DIHEDRAL_JOINER_KG * 1000:.0f} g each",
+                          "length_mm": "", "qty": 2})
+
+        mm = lambda v: f"{v * 1000:.0f} mm"
+        throw_deg = float(self.trim_deflection_limit_deg(dv))
+        c_cs = d["cs_frac"] * d["t_c_root"] * (1 + d["t_taper"]) / 2
+        return {
+            "Spars (sized at 5 g limit load)": spars,
+            "Stock list": stock,
+            "Spar and joint stations": {
+                "reading the spar margins": (
+                    f"0% means the constraint is ACTIVE — the optimizer sized the tube "
+                    f"exactly to its limit, which is the expected outcome, not a warning. "
+                    f"The {structures.SAFETY_FACTOR:.0f}x safety factor is already inside "
+                    f"the {structures.SIGMA_ALLOW / 1e6:.0f} MPa allowable, so the quoted "
+                    f"allowable is {structures.SIGMA_ALLOW / structures.SAFETY_FACTOR / 1e6:.0f} MPa."
+                ),
+                "load case": f"{n_lim:.0f} g limit, elliptical lift, no inertia relief",
+                "spar line, aft of nose datum": mm(x_spar),
+                "as a fraction of root chord": "30%",
+                "wing joint (centre spar ends, outer begins)":
+                    f"{mm(inner)} from centreline (eta = {float(w['eta_break']):.3f})",
+                "semi-span": mm(semi),
+                "dihedral form": self.wing_dihedral_form,
+                "spar hole must clear": f"{self.SPAR_DEPTH_FRACTION:.0%} of section thickness",
+            },
+            "Control throws": {
+                "pitch surface": self.pitch_control_name,
+                "control chord (mean)": mm(c_cs),
+                "available TE throw (linkage)": f"+/- {mm(self.TAIL_THROW_TE_M)}",
+                "trim may use": f"{self.TRIM_THROW_FRACTION:.0%} of it "
+                                f"(= +/- {throw_deg:.1f} deg)",
+                "as-trimmed deflection": "see report.html / run.json",
+            },
+        }
+
     def construction(self) -> dict[str, ConstructionProfile]:
         # every surface any tail type can generate has a profile — massmodel
         # maps by wing name, so the mapping must cover the whole declared list

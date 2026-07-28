@@ -46,3 +46,32 @@ def spar_constraints(opti, od, wall, length, moment_nm, defl_frac: float = 0.05)
 def semispan_root_moment(weight_n, n_limit, semispan):
     """Root bending moment of one wing half at limit load, elliptical lift."""
     return n_limit * (weight_n / 2) * 0.424 * semispan
+
+
+def spar_report(od, wall, length, moment_nm, defl_frac: float = 0.05) -> dict:
+    """As-built numbers for one spar segment: the stock to buy, and how close it
+    ended up to each limit.
+
+    Deliberately mirrors `spar_constraints` term for term — a build document that
+    re-derived the stress from its own formula would be free to disagree with the
+    constraint the optimizer actually enforced. Numeric only (report path).
+    """
+    sec = tube(float(od), float(wall))
+    stress = float(moment_nm) * (float(od) / 2) / sec["I"]
+    allow = SIGMA_ALLOW / SAFETY_FACTOR
+    defl = float(moment_nm) * float(length) ** 2 / (3 * E_CF * sec["I"])
+    defl_allow = defl_frac * float(length)
+    return {
+        "od_mm": round(float(od) * 1000, 2),
+        "wall_mm": round(float(wall) * 1000, 3),
+        "bore_mm": round(float(sec["id"]) * 1000, 2),
+        "length_mm": round(float(length) * 1000, 1),
+        "mass_g": round(float(tube_mass(od, wall, length)) * 1000, 1),
+        "root_moment_Nm": round(float(moment_nm), 2),
+        "stress_MPa": round(stress / 1e6, 1),
+        "stress_allow_MPa": round(allow / 1e6, 1),
+        "stress_margin_pct": round((allow / stress - 1) * 100, 1) if stress > 0 else "",
+        "tip_defl_mm": round(defl * 1000, 1),
+        "defl_allow_mm": round(defl_allow * 1000, 1),
+        "defl_margin_pct": round((defl_allow / defl - 1) * 100, 1) if defl > 0 else "",
+    }

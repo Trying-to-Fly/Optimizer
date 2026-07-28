@@ -114,6 +114,9 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 </table>
 <p style="color:#9a9aa0;font-size:12px;">Symmetric surfaces list the starboard half only — mirror about y&nbsp;=&nbsp;0.
 Full 3D section outlines are in <code>geometry/sections_3d.csv</code>; see <code>geometry/README.txt</code>.</p>
+<p><a href="manufacturing/BUILD.md">build document &#8599;</a> — spar stock and lengths, hinge lines,
+leading/trailing-edge polylines, the CG window and the mass budget. This page says whether the design is
+good; that one says what to cut and what to hit.</p>
 {% endif %}
 
 {% if r.geometry.get("winglet") %}

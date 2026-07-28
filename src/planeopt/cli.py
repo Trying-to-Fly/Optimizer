@@ -184,6 +184,21 @@ def brief(
 
 
 @app.command()
+def build(
+    run_dir: Path = typer.Argument(..., help="A runs/<...> directory"),
+    aircraft: Path = typer.Option(..., "--aircraft", "-a", help="Aircraft package dir or aircraft.py"),
+):
+    """Re-render the build document (manufacturing/BUILD.md + CSVs) from a run."""
+    from .report import manufacturing
+
+    ac, _ = load_aircraft(aircraft)
+    result = assemble.load(run_dir)
+    champ = (result.performance.get("optimization") or {}).get("champion") or {}
+    out = manufacturing.write(result, ac.geometry(champ.get("dv")), ac, run_dir)
+    typer.echo(out / "BUILD.md")
+
+
+@app.command()
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
     result = assemble.load(run_dir)

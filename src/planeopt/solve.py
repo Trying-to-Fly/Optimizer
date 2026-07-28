@@ -18,7 +18,7 @@ import numpy as np
 
 from . import aero, geometry, massmodel, memory, propulsion
 from .mission import OBJECTIVES
-from .report import assemble, figures, geometry_export
+from .report import assemble, figures, geometry_export, manufacturing
 from .report import html as report_html
 from .types import AircraftDefinition, MissionSpec, RunResult
 
@@ -173,6 +173,9 @@ def run(
             "stall_ok": (mission.v_stall_max_ms is None)
             or (stall["v_stall_ms"] <= mission.v_stall_max_ms * 1.01),  # 1% tol: active != violated
             "static_margin": float(sm["static_margin"]),
+            # recorded, not just checked: the build document derives the allowable
+            # CG window from this and cannot do so from the run artifact otherwise
+            "static_margin_range": [float(x) for x in mission.static_margin_range],
             "sm_in_range": bool(
                 mission.static_margin_range[0]
                 <= sm["static_margin"]
@@ -223,6 +226,9 @@ def run(
     # tells you whether the design is good; these tell you how to cut it, and
     # they come from the same airplane object that was analysed.
     geometry_export.write(airplane, run_dir)
+    # Build document: the same geometry again, but answering "what do I cut and
+    # what must I hit" — spars, hinges, edge polylines and the CG window.
+    manufacturing.write(result, airplane, aircraft, run_dir)
     (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
     return result, run_dir
 

@@ -118,6 +118,15 @@ aircraft/vtail_sample`, `planeopt sweep ...` (ε-constraint axis), `planeopt rep
   git (`data/props/_apc_cache/`, regenerable). `planeopt props` lists/filters
   them. At run time `PLANEOPT_PROPS_DIR` prepends a user directory to the search
   path, so an end user adds a prop without touching the install.
+- **Build document** (`report/manufacturing.py`, in-process not offline): every run
+  writes `manufacturing/BUILD.md` plus `edges.csv`, `hinges.csv`, `surfaces.csv`
+  and a CSV per tabular section. `report.html` says whether the design is good,
+  `design_brief.md` says what to design around, this says **what to cut and what
+  to hit** — spar stock and lengths with their as-built margins, hinge lines,
+  LE/TE polylines, the mass budget and the CG window. Generic content is read off
+  the analysed `asb.Airplane`; anything architecture-specific comes from the
+  aircraft's optional `manufacturing(dv, auw_kg=None)` hook, whose list-valued
+  sections become tables and CSVs automatically. Regenerate with `planeopt build`.
 - **Construction-profile fitting:** takes slicer results for the 2–3 scaled sections
   (MODEL_DETAILS §1.4), regresses `k_skin`/`k_rib`/`k_joint`, and writes/updates the
   profile module with fitted values + fit metadata.

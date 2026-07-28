@@ -35,6 +35,20 @@ substance. Short version:
   finite Jacobian, monotonic CT, catalogue fit-quality bar);
   `tests/test_packaging.py` gained a no-synthetic-tables guard and a
   did-you-mean check.
+- **Build document (`report/manufacturing.py`, new).** Every run now writes
+  `manufacturing/BUILD.md` + CSVs: CG target and the allowable window, mass
+  budget, surfaces, control-surface hinge lines, LE/TE polylines, and — via the
+  aircraft's new `manufacturing(dv, auw_kg)` hook — spar stock, lengths and
+  as-built stress/deflection margins, plus a cut list. `planeopt build` re-renders
+  it. Two things it fixed on contact: `run.json` now records
+  `constraints.static_margin_range` (the CG window cannot be derived without it),
+  and the document reads surfaces off the **airplane**, because `run.json`'s
+  geometry summary omits the winglet — see below.
+- **Open bug, unfixed:** `run.json` reports `n_wings: 2` and no winglet for a run
+  whose analysed airplane clearly has one (`manufacturing/edges.csv` and
+  `geometry/stations.csv` both carry it, 240 mm span, 75° cant). `geometry.summarize`
+  is evidently being called on a build where `parametric` was false. The build
+  document routes around it; the summary itself is still wrong.
 - **Nothing has been re-solved under the new model.** Every number in FINDINGS
   §1–§10 is quoted under the old prop fit. The two runs that would make wing v4
   readable — v4 + `cam_11x6` pinned, and v3 + `cam_11x7` pinned — are still
