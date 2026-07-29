@@ -762,6 +762,17 @@ def optimize(
     log.info("re-evaluating the champion numerically and writing artifacts")
     if winglet_rejected:
         aircraft.winglet = False
+    # A champion is only half described by its design vector; the studies also
+    # picked tail type, topology, mount, prop and winglet, and those are plain
+    # attributes. Record them, so rebuilding the champion later cannot silently
+    # fall back to the aircraft file's defaults (report/assemble.as_champion).
+    champion["discrete"] = {
+        attr: getattr(aircraft, attr)
+        for attr in (getattr(aircraft, "discrete_options", None) or {})
+        if hasattr(aircraft, attr)
+    }
+    if hasattr(aircraft, "winglet"):
+        champion["discrete"]["winglet"] = bool(aircraft.winglet)
     reeval_error = None
     try:
         result, run_dir = run(

@@ -1,4 +1,4 @@
-# HANDOFF — Plane Optimizer (updated 2026-07-28, ninth session)
+# HANDOFF — Plane Optimizer (updated 2026-07-29, ninth session)
 
 **Ninth session (2026-07-28) — the prop model, rebuilt.** Started as "summarise
 the last run", became a correctness fix. Read `FINDINGS.md` §11 first; it is the
@@ -40,19 +40,36 @@ substance. Short version:
   budget, surfaces, control-surface hinge lines, LE/TE polylines, and — via the
   aircraft's new `manufacturing(dv, auw_kg)` hook — spar stock, lengths and
   as-built stress/deflection margins, plus a cut list. `planeopt build` re-renders
-  it. Two things it fixed on contact: `run.json` now records
-  `constraints.static_margin_range` (the CG window cannot be derived without it),
-  and the document reads surfaces off the **airplane**, because `run.json`'s
-  geometry summary omits the winglet — see below.
-- **Open bug, unfixed:** `run.json` reports `n_wings: 2` and no winglet for a run
-  whose analysed airplane clearly has one (`manufacturing/edges.csv` and
-  `geometry/stations.csv` both carry it, 240 mm span, 75° cant). `geometry.summarize`
-  is evidently being called on a build where `parametric` was false. The build
-  document routes around it; the summary itself is still wrong.
-- **Nothing has been re-solved under the new model.** Every number in FINDINGS
-  §1–§10 is quoted under the old prop fit. The two runs that would make wing v4
-  readable — v4 + `cam_11x6` pinned, and v3 + `cam_11x7` pinned — are still
-  outstanding, and only mean anything under the new fit.
+  it. It fixed one thing on contact: `run.json` now records
+  `constraints.static_margin_range`, without which the CG window cannot be
+  derived from a run at all. Surfaces are read off the **airplane** rather than
+  the run summary, which is what caught the next item.
+- **Bug found and fixed: rebuilding a champion lost its discrete choices.**
+  `planeopt build` rebuilt from the design vector alone, which silently gave the
+  aircraft file's DEFAULT tail type, topology, mount, prop and winglet — so a
+  regenerated build document grew a **winglet the champion had rejected**. The
+  in-run path was always correct (it passes the analysed airplane). Fixed with
+  `report/assemble.champion_config()` / `as_champion()`, and `run.json` now
+  records `champion.discrete`; older runs are recovered from the study blocks.
+  (Note for anyone reading an earlier draft of this file: the claim that
+  `run.json` "omits the winglet" was WRONG — `n_wings: 2` is correct when the
+  winglet study rejects it, which it does.)
+- **Re-solved — see FINDINGS §12.** The 2026-07-29 battery (505.8 min, 2-wide)
+  is the first champion under `CT(J,Re)`: **118.3 min**, same airframe as the
+  2026-07-27 run to 0.1 g, so the −5.3 min is purely the fit that was flattering
+  the prop. **The prop verdict survived losing the blend** — against the REAL
+  11×6 the 11×7 still wins, by +9.7 min, so §11's confound did not change the
+  conclusion. Winglet rejected again (−0.78), V-tail/pod-boom/smooth-curve all
+  held. **Wing v4 is worth nothing measurable** — same L/D as the v3-era
+  airframe; it is a better parameterization, not a better wing. FINDINGS §1–§10
+  are still quoted under the old prop fit.
+- **Two solves failed to converge** in that battery (`motor_mount: pusher`, and
+  the `printed_mass_x1.10` re-solve) — both IPOPT assertions at the tight span
+  cap, and the pusher failure means the mount was retained by DEFAULT, not by
+  winning. The same `printed_mass_x1.10` member failed in M4.8. Worth a look.
+- **Static margin crossed its floor for the third champion running** (0.0787 vs
+  0.08, `sm_in_range: false`). That is now a standing estimator defect, not a
+  one-off.
 
 ---
 

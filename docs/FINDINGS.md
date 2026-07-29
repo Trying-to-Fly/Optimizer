@@ -401,3 +401,76 @@ make v4 readable are still outstanding:
 2. v3 wing + `cam_11x7` pinned — the honest baseline for the prop swap.
 
 Both under the new fit, which is the only model in which either is meaningful.
+
+## 12. First champion under the honest prop model (2026-07-29 — M4.10)
+
+Run `20260729T092108`, 505.8 min (8.4 h), 2-wide. The first battery run under
+`CT(J,Re)` (MODEL_DETAILS §2.1.1) and with the synthetic 11×6 blend retired.
+
+**Champion: 118.3 min at 2.0 m projected span, AUW 1768.5 g, 21.0 W at
+9.5 m/s.** Prop **APC 11×7E**, puller, pod-boom, V-tail, smooth dihedral
+curve, **no winglet**.
+
+### The prop fit cost 5.3 min, and nothing else moved
+
+The champion is the *same airframe* as the 2026-07-27 run — identical design
+vector, identical AUW to 0.1 g, identical L/D 21.09. Only the propulsion model
+changed:
+
+| | 2026-07-27 (old fit) | 2026-07-29 (`CT(J,Re)`) |
+|---|---|---|
+| η_prop | 0.6690 | 0.6219 |
+| η_chain | 0.3908 | 0.3717 |
+| P_elec | 20.00 W | 21.03 W |
+| **Endurance** | **123.5 min** | **118.3 min** |
+
+−5.3 min (−4.3%), matching the −5.8% predicted from the fit error at that
+operating point before the run. The old single-variable fit was flattering the
+prop, exactly as §11.1 said.
+
+### The prop verdict SURVIVED losing the blend
+
+This was the open question, and the answer is unambiguous. Priced against the
+**real** APC 11×6 rather than the synthetic pitch-blend:
+
+| candidate | objective | vs incumbent |
+|---|---|---|
+| 11×5.5E | 103.5 min | −4.3 |
+| 11×6 (real, incumbent baseline) | 107.8 min | — |
+| **11×7E** | **117.5 min** | **+9.7 → adopted** |
+
+So the 11×7 wins by **+9.7 min** on measured-vs-measured data. The 2026-07-27
+result was confounded (§11) but its *conclusion* was right — the coarser prop is
+the correct choice for this airframe, and the blend was not what made it win.
+Reading `J = 0.605` against the 11×7's peak-η `J = 0.538`, the design still
+cruises on the falling side of the curve: a coarser prop than 11×7 is worth
+pricing, and now costs nothing to add to the shortlist.
+
+### Everything else held, and wing v4 is now priced
+
+- **Winglet rejected again** (−0.78 min), so the champion carries none. The
+  VLM cross-check still shows the winglet reducing induced drag
+  (k 0.0228 vs 0.0263, span efficiency 1.47 vs 1.27) — it loses on mass and
+  wetted area, not on aerodynamics.
+- **V-tail holds**: conventional −8.3, T-tail −12.2.
+- **Pod-boom holds**: integrated −8.1.
+- **Smooth dihedral curve holds**: polyhedral2 −2.5, and `d_exp → 0` again —
+  the same flat direction v3 found. Three architectures, one answer.
+- **Wing v4 verdict:** the architecture change is worth **nothing measurable**.
+  §11 showed it contributed ~1% of L/D; this run confirms the champion sits at
+  the same L/D 21.09 as the v3-era airframe. v4 is a better *parameterization*
+  (a rectangular wing and a straight taper are exact members), not a better wing.
+
+### Verification and flags
+
+Multistart spread 1.1e-9; NLP-vs-re-eval −1.5e-5 min; shadow price
+7.40 min/100 g; cruise Reynolds 46.1 k, **inside** the fitted range.
+
+- **SM still lands at 0.0787 against the 0.08 floor** (`sm_in_range: false`) —
+  the third champion in a row to cross it. This is now a standing defect in the
+  SM estimator, not a one-off. flow5 should own the stability verdict.
+- **Two solves failed to converge**: `motor_mount: pusher` and the
+  `printed_mass_x1.10` re-solve, both IPOPT assertions at the tight span cap.
+  The pusher failure means **puller was retained by default, not by winning** —
+  the mount is unpriced in this run.
+- Cruise sits at the 9.5 m/s wind floor, as always.

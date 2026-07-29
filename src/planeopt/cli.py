@@ -194,7 +194,13 @@ def build(
     ac, _ = load_aircraft(aircraft)
     result = assemble.load(run_dir)
     champ = (result.performance.get("optimization") or {}).get("champion") or {}
-    out = manufacturing.write(result, ac.geometry(champ.get("dv")), ac, run_dir)
+    # the champion's DISCRETE choices are not in dv — without them this rebuilds
+    # the aircraft file's defaults and can document parts the champion rejected
+    with assemble.as_champion(result, ac) as cfg:
+        out = manufacturing.write(result, ac.geometry(champ.get("dv")), ac, run_dir)
+    if cfg:
+        typer.echo("champion configuration: "
+                   + ", ".join(f"{k}={v}" for k, v in sorted(cfg.items())))
     typer.echo(out / "BUILD.md")
 
 

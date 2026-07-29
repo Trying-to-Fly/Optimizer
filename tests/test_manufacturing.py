@@ -178,3 +178,68 @@ def test_spar_report_mirrors_the_sizing_constraint():
         structures.SIGMA_ALLOW / structures.SAFETY_FACTOR / 1e6
     )
     assert r["mass_g"] == pytest.approx(structures.tube_mass(0.014, 0.001, 0.5) * 1000, abs=0.05)
+
+
+# ------------------------------------------------- rebuilding a champion
+
+def _optimized(**studies) -> types.RunResult:
+    return _result(performance={
+        "objective_units": "min",
+        "optimization": {"champion": {"dv": None}, **studies},
+    })
+
+
+def test_champion_config_recovers_discrete_choices_from_the_studies():
+    """Runs made before the configuration was recorded must still rebuild right."""
+    from planeopt.report import assemble
+
+    r = _optimized(
+        discrete_studies={"tail_type": {"adopted": "ttail"},
+                          "prop_choice": {"adopted": "cam_11x7"}},
+        winglet_study={"winglet_rejected": True},
+    )
+    assert assemble.champion_config(r) == {
+        "tail_type": "ttail", "prop_choice": "cam_11x7", "winglet": False,
+    }
+
+
+def test_recorded_configuration_wins_over_the_study_blocks():
+    from planeopt.report import assemble
+
+    r = _optimized(
+        discrete_studies={"tail_type": {"adopted": "ttail"}},
+        winglet_study={"winglet_rejected": True},
+    )
+    r.performance["optimization"]["champion"]["discrete"] = {"tail_type": "vtail"}
+    assert assemble.champion_config(r) == {"tail_type": "vtail"}
+
+
+def test_evaluation_runs_have_no_discrete_configuration():
+    from planeopt.report import assemble
+
+    assert assemble.champion_config(_result(performance={})) == {}
+
+
+def test_as_champion_applies_then_restores(sample_aircraft):
+    """The bug this exists for: rebuilding from dv alone gave the aircraft file's
+    defaults, so a regenerated build document grew a winglet the champion had
+    rejected."""
+    from planeopt.report import assemble
+
+    before = (sample_aircraft.winglet, sample_aircraft.tail_type)
+    r = _optimized(discrete_studies={"tail_type": {"adopted": "ttail"}},
+                   winglet_study={"winglet_rejected": True})
+    with assemble.as_champion(r, sample_aircraft) as cfg:
+        assert sample_aircraft.winglet is False
+        assert sample_aircraft.tail_type == "ttail"
+        assert cfg["winglet"] is False
+    assert (sample_aircraft.winglet, sample_aircraft.tail_type) == before
+
+
+def test_rejected_winglet_never_reaches_the_build_document(sample_aircraft):
+    from planeopt.report import assemble
+
+    r = _optimized(winglet_study={"winglet_rejected": True})
+    with assemble.as_champion(r, sample_aircraft):
+        names = {s["surface"] for s in manufacturing.surfaces(sample_aircraft.geometry(None))}
+    assert "winglet" not in names
