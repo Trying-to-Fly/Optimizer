@@ -115,10 +115,28 @@ def optimize(
         "(single-core, memory-bound) — it decides how many run at once. "
         "Ignored when --parallel is given explicitly.",
     ),
+    warm_start: Path = typer.Option(
+        None, "--warm-start",
+        help="A runs/<...> directory whose champion seeds the nominal solve and "
+        "every study candidate. An initial guess only — all variables stay free. "
+        "Perturbed multistarts stay cold, so convergence evidence survives.",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress progress output"),
 ):
     """Optimize AIRCRAFT for MISSION (M2: wing + cruise state); write run artifacts."""
     _setup_logging(quiet)
+    warm = warm_from = None
+    if warm_start is not None:
+        prior = assemble.load(warm_start)
+        champ = (prior.performance.get("optimization") or {}).get("champion") or {}
+        if not champ.get("dv"):
+            raise typer.BadParameter(
+                f"{warm_start} has no champion design vector to start from "
+                "(is it an evaluation run rather than an optimize run?)",
+                param_hint="--warm-start",
+            )
+        warm = {**champ["dv"], "V": champ["V_ms"]}
+        warm_from = warm_start.name
     try:
         solve.check_parallel(parallel)
     except RuntimeError as e:  # fail in a second, not after the first batch
@@ -129,6 +147,7 @@ def optimize(
         ac, ms, runs_dir, input_files=[ac_file, ms_file],
         multistart=multistart, flatness=flatness, parallel=parallel,
         memory_budget_gb=memory_budget_gb,
+        warm_start=warm, warm_start_from=warm_from,
     )
     champ = result.performance["optimization"]["champion"]
     typer.echo(f"status: {result.status}")

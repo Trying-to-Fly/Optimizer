@@ -160,6 +160,11 @@ class VTailSample:
     # same pass that widens PROP_CANDIDATES; the two interact.
     PROP_FOLDING_DERATE = 0.95
 
+    # Straight trailing edge on the tail (user preference, 2026-07-29). Applies
+    # to whichever tail type is built, since they share t_sweep. See the
+    # constraint in constraints() for why it is close to free.
+    straight_tail_te = True
+
     # --- tail policy + directional floor (MODEL_DETAILS section 8) ---
     TAIL_THROW_TE_M = 0.012  # available +/- TE throw at low rates (linkage geometry)
     TRIM_THROW_FRACTION = 1 / 3  # policy: cruise trim uses <= 1/3 of available throw
@@ -540,6 +545,26 @@ class VTailSample:
 
         # --- tail (MODEL_DETAILS section 8) ---
         t_c_mean = dv["t_c_root"] * (1 + dv["t_taper"]) / 2
+        if self.straight_tail_te:
+            # Build convention (user decision 2026-07-29), pinned as a SHAPE not
+            # a number so it survives whatever taper and span the optimizer picks:
+            # sweep the leading edge back by exactly the chord the taper removes,
+            # and the trailing edge comes out vertical.
+            #
+            # Free: sweep is defined at the LE, so with t_sweep = 0 the taper
+            # rakes the TE forward — and the optimizer parks there because sweep
+            # is a flat direction (the AC placement in _tail_wings cancels the
+            # moment arm it would otherwise buy). Costs a degree of freedom that
+            # was not buying anything, and the root moves slightly forward, which
+            # shortens the boom a little.
+            #
+            # Worth more than looks: the hinge is a constant CHORD FRACTION, so a
+            # vertical TE also makes the hinge line square to the root — the
+            # control surface becomes a plain trapezoid to cut, seal and set.
+            semi_t = dv["t_span"] / 2
+            opti.subject_to(
+                semi_t * np.tand(dv["t_sweep"]) == dv["t_c_root"] * (1 - dv["t_taper"])
+            )
         # tail mean-chord Reynolds floor: relaxed vs the 90k wing-tip rule
         # (small surface — same precedent as the winglet's 60k)
         opti.subject_to(1.225 * V * t_c_mean / 1.81e-5 >= 60e3)
@@ -996,13 +1021,18 @@ class VTailSample:
             ),
             prop=PropConfig(
                 name=prop["name"],
-                diameter_m=self.PROP_DIAMETER_M,
+                # per candidate now: the folding tables span 9-16 in, so diameter
+                # is no longer one constant. Falls back to the class value.
+                diameter_m=prop.get("diameter_in", self.PROP_DIAMETER_M / 0.0254) * 0.0254,
                 pitch_m=prop["pitch_in"] * 0.0254,
                 proxy_table=prop["proxy_table"],
-                # folding knockdown x declared mount installation derate
-                # (pusher-in-wake, MODEL_DETAILS 2.4) — composed multiplicatively
+                # blade knockdown x declared mount installation derate
+                # (pusher-in-wake, MODEL_DETAILS 2.4) — composed multiplicatively.
+                # A candidate backed by MEASURED folding data declares 1.00: the
+                # folding penalty is already in the measurement, and applying the
+                # proxy derate on top would charge it twice.
                 folding_derate=(
-                    self.PROP_FOLDING_DERATE
+                    prop.get("blade_derate", self.PROP_FOLDING_DERATE)
                     * self.MOUNT_EFFECTS[self.motor_mount]["prop_eta_derate"]
                 ),
             ),

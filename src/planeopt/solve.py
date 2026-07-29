@@ -531,6 +531,8 @@ def optimize(
     flatness: bool = True,
     parallel: int = 1,
     memory_budget_gb: float | None = None,
+    warm_start: dict | None = None,
+    warm_start_from: str | None = None,
 ) -> tuple[RunResult, Path]:
     """M2 entry point: multi-start NLP -> champion -> shadow price -> flatness
     sweep -> numeric re-evaluation of the champion through the M1 pipeline.
@@ -564,8 +566,17 @@ def optimize(
         getattr(aircraft, "name", type(aircraft).__name__), mission.name, mission.objective,
         memory.observed_peak_gb(runs_root) or memory.DEFAULT_PER_SOLVE_GB, avail_gb, total_gb,
     )
+    if warm_start:
+        log.info("warm start: seeding the nominal solve and every study candidate "
+                 "from %s (all variables stay free — this is an initial guess, "
+                 "not a constraint)", warm_start_from or "a previous champion")
+    warm = {"inits": dict(warm_start)} if warm_start else {}
+
     rng = np.random.default_rng(0)
-    jobs = [("nominal", {})]
+    # The nominal start is warmed; the PERTURBED starts are deliberately left
+    # cold, so multistart still answers "does this converge from elsewhere?".
+    # A warm start that also seeded them would agree with itself by construction.
+    jobs = [("nominal", dict(warm))]
     for i in range(multistart - 1):
         inits = {
             "span": float(1.8 * rng.uniform(0.88, 1.12)),
@@ -664,7 +675,7 @@ def optimize(
         # they may run concurrently; adoption below is order-identical to the
         # sequential greedy (winner = argmax over baseline + candidates)
         res = _solve_many(
-            aircraft, mission, [(c, {}) for c in cands], parallel,
+            aircraft, mission, [(c, dict(warm)) for c in cands], parallel,
             prep=lambda c, a=attr: setattr(aircraft, a, c),
             restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
             label=f"study {attr}",
@@ -806,6 +817,10 @@ def optimize(
         for attr, val in discrete_originals.items():
             setattr(aircraft, attr, val)
     result.status = M2_STATUS
+    if warm_start:
+        # provenance: a champion seeded from another run must say so, because the
+        # local optimum it found may depend on where it started
+        result.diagnostics["warm_started_from"] = warm_start_from or "(unnamed)"
     if reeval_error is not None:
         result.diagnostics["champion_reeval_failed"] = reeval_error
         result.notes.append(

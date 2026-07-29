@@ -7,3 +7,4 @@ dist/
 .venv-win/
 build/
 data/props/_apc_cache/
+data/props/_uiuc_cache/
