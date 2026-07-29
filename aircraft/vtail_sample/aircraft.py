@@ -101,6 +101,8 @@ class VTailSample:
         # 11x7 ranks 119th of 441, and the leaders are all far coarser (an 11 in
         # 11x13 screens +25 min, so the lever is PITCH, not diameter — this is
         # the cruise-J-above-peak-eta-J diagnostic finally cashing out).
+        # The prop need NOT fold (user, 2026-07-29), so the whole catalogue is
+        # in scope rather than the one folding family these three came from.
         "prop_choice": ["cam_11x6", "cam_11x55", "cam_11x7"],
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],
@@ -150,7 +152,13 @@ class VTailSample:
     }
     prop_choice = "cam_11x6"  # spec incumbent; the study re-prices it every run
     PROP_DIAMETER_M = 0.2794  # 11 in — common to every candidate
-    PROP_FOLDING_DERATE = 0.95  # folding blades cost ~5% of shaft power
+    # Folding blades cost ~5% of shaft power. Applied UNCONDITIONALLY today,
+    # which was fair while every candidate was a folder — it is not any more:
+    # the user confirmed 2026-07-29 that this prop does NOT have to fold, so a
+    # fixed-blade candidate is currently charged ~5% it would never pay. Make
+    # this a priced discrete option (see speed_sample's BLADE_DERATE) in the
+    # same pass that widens PROP_CANDIDATES; the two interact.
+    PROP_FOLDING_DERATE = 0.95
 
     # --- tail policy + directional floor (MODEL_DETAILS section 8) ---
     TAIL_THROW_TE_M = 0.012  # available +/- TE throw at low rates (linkage geometry)

@@ -452,8 +452,10 @@ the correct choice for this airframe, and the blend was not what made it win.
 > screen holds the airframe fixed and puts the leaders at ~15% throttle, where
 > the flat 0.95 ESC efficiency and the vendor motor constants are least
 > trustworthy (§2.3) — so trust the direction, not the magnitude. Widening the
-> shortlist is the first item in HANDOFF §5, and it needs one decision from the
-> user first: must the prop fold?
+> shortlist is the first item in HANDOFF §5. The blocking question — must the
+> prop fold? — was **answered on 2026-07-29: no**, so the whole catalogue is in
+> scope, and the 0.95 folding derate must become a priced option rather than an
+> unconditional one in the same pass.
 
 Reading `J = 0.605` against the 11×7's peak-η `J = 0.538`, the design still
 cruises on the falling side of the curve: a coarser prop than 11×7 is worth

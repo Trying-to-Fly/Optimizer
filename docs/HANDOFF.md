@@ -413,10 +413,23 @@ DONE — see §4. Remaining, roughly in order of readiness:
   through `propulsion.solve()` at the incumbent operating point (seconds, no
   NLP), then full-re-solve the top N plus the incumbent. Not built yet.
 
-  Before widening, settle one question with the user, because it changes the
-  honest shortlist from ~15 props to ~440: **must this prop fold?** The current
-  candidates are one folding CAM-class family on purpose; most of the screen's
-  leaders (e.g. `11x13EP`) are fixed blades.
+  **ANSWERED 2026-07-29: the prop does NOT have to fold.** So the shortlist is
+  the whole catalogue (~440), not the ~15 folding-family props, and the screen's
+  leaders are all fair candidates.
+
+  That answer creates a second job, because folding is currently ASSUMED rather
+  than priced: `PROP_FOLDING_DERATE = 0.95` is applied unconditionally to every
+  candidate in `powertrain()`. A fixed blade does not pay it, so leaving it on
+  charges ~5% of shaft power to props that would not lose it — worth roughly 5%
+  of endurance, which is the same order as the whole prop study. Follow
+  `aircraft/speed_sample/aircraft.py`, which already has the right shape:
+  `BLADE_DERATE = {"folding": 0.95, "fixed": 1.00}` priced as a discrete option
+  rather than declared. Do this in the SAME pass as widening the shortlist — the
+  two interact, and neither result is readable while the other is wrong.
+
+  Build judgement the model does not see: a non-folding prop on a belly-landing
+  airframe is a prop you break on landing. That is the user's call, not the
+  optimizer's, and it is why the original shortlist was a folding family.
 
   Trust the direction, not yet the magnitude: the screen holds the airframe
   fixed, and the leaders sit at ~15% throttle (2.2 V of a 14.8 V bus) where the
