@@ -94,6 +94,13 @@ class VTailSample:
         # buy-it-and-bolt-it-on decision, so it is priced rather than declared.
         # Judged straight after the mount because the mount's installation
         # derate composes into the prop's (see PROP_CANDIDATES).
+        #
+        # TOO NARROW — WIDEN BEFORE THE NEXT RUN (see HANDOFF section 5). These
+        # three were the whole prop library in 2026-07-27; 443 tables ship now.
+        # Screened at the 2026-07-29 champion's operating point, the adopted
+        # 11x7 ranks 119th of 441, and the leaders are all far coarser (an 11 in
+        # 11x13 screens +25 min, so the lever is PITCH, not diameter — this is
+        # the cruise-J-above-peak-eta-J diagnostic finally cashing out).
         "prop_choice": ["cam_11x6", "cam_11x55", "cam_11x7"],
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],

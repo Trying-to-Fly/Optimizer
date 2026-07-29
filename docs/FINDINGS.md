@@ -442,6 +442,19 @@ This was the open question, and the answer is unambiguous. Priced against the
 So the 11×7 wins by **+9.7 min** on measured-vs-measured data. The 2026-07-27
 result was confounded (§11) but its *conclusion* was right — the coarser prop is
 the correct choice for this airframe, and the blend was not what made it win.
+
+> **This verdict is a local one — the study searched 3 of 443 (2026-07-29).**
+> `PROP_CANDIDATES` still lists only the three 11 in pitches (5.5 / 6 / 7) it was
+> written with, so "the 11×7 wins" means "the 11×7 wins among those three". A
+> free screen at this champion's operating point ranks the adopted 11×7E
+> **119th of 441**: `apc_14x14e` 145.9 min, `apc_11x13ep` 143.4 min (an **11 in**
+> prop — the lever is PITCH, not diameter), against the 11×7's 118.3. The
+> screen holds the airframe fixed and puts the leaders at ~15% throttle, where
+> the flat 0.95 ESC efficiency and the vendor motor constants are least
+> trustworthy (§2.3) — so trust the direction, not the magnitude. Widening the
+> shortlist is the first item in HANDOFF §5, and it needs one decision from the
+> user first: must the prop fold?
+
 Reading `J = 0.605` against the 11×7's peak-η `J = 0.538`, the design still
 cruises on the falling side of the curve: a coarser prop than 11×7 is worth
 pricing, and now costs nothing to add to the shortlist.

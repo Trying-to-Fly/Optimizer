@@ -383,6 +383,47 @@ Fourth-session state (all still true) through `d6f38cf`:
 The tail phase (was item A here) and the wing dihedral-curve rework are
 DONE — see §4. Remaining, roughly in order of readiness:
 
+- **BEFORE THE NEXT RUN — properly evaluate the propeller options (user ask,
+  2026-07-29).** The 2026-07-29 champion adopted the 11x7E after pricing
+  **3 of 443** shipped tables, all at one diameter: `PROP_CANDIDATES` /
+  `discrete_options["prop_choice"]` in `aircraft/vtail_sample/aircraft.py` still
+  lists only `cam_11x55 / cam_11x6 / cam_11x7` (pitch 5.5, 6, 7 in). That
+  shortlist was written when three tables existed and was never widened when the
+  catalogue landed.
+
+  A free screen at the champion's operating point (9.5 m/s, 0.823 N) puts the
+  adopted **11x7E at rank 119 of 441**:
+
+  | rank | prop | dia | pitch | endurance |
+  |---|---|---|---|---|
+  | 1 | apc_14x14e | 14.0 | 14.0 | 145.9 min |
+  | 2 | apc_11x13ep | **11.0** | 13.0 | 143.4 min |
+  | 5 | apc_12x12e | 12.0 | 12.0 | 141.9 min |
+  | **119** | **apc_11x7e (adopted)** | 11.0 | 7.0 | **118.3 min** |
+
+  **The lever is PITCH, not diameter** — rank 2 is an 11 in prop, so ground
+  clearance and the 190 g `motor_prop` point mass are untouched. This is the
+  `J = 0.605` vs peak-eta `J = 0.538` diagnostic that has been in the report for
+  two runs: the design has been asking for a coarser prop and the shortlist did
+  not contain one.
+
+  Do NOT simply paste 443 candidates into `discrete_options` — each is a full
+  NLP re-solve (~5 min here), so that is ~37 h sequential / ~18 h at 2-wide.
+  The intended fix is a **two-stage prop study**: screen the whole catalogue
+  through `propulsion.solve()` at the incumbent operating point (seconds, no
+  NLP), then full-re-solve the top N plus the incumbent. Not built yet.
+
+  Before widening, settle one question with the user, because it changes the
+  honest shortlist from ~15 props to ~440: **must this prop fold?** The current
+  candidates are one folding CAM-class family on purpose; most of the screen's
+  leaders (e.g. `11x13EP`) are fixed blades.
+
+  Trust the direction, not yet the magnitude: the screen holds the airframe
+  fixed, and the leaders sit at ~15% throttle (2.2 V of a 14.8 V bus) where the
+  flat 0.95 ESC efficiency and the vendor motor constants are least trustworthy
+  (MODEL_DETAILS 2.3). A re-solve would re-optimize around the coarser prop and
+  probably widen the gap rather than close it.
+
 - When the user delivers their SolidWorks .STEP: wire the imported-fuselage
   NLP mode — `ImportedShape.body_dict` feeds the existing bodies contract;
   two scale variables (length, cross-section) with Swet/volume fitted smooth
