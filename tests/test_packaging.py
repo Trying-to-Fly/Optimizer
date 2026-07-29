@@ -37,15 +37,18 @@ def test_every_shipped_table_loads():
 
 
 def test_no_synthetic_tables_ship():
-    """Every table must be fitted from a published APC file.
+    """Every table must trace to a published source — APC's files or UIUC's.
 
     The retired apc_11x6_blend was a pitch interpolation between two real props,
     which quietly made one study candidate non-measured — the confound that made
-    the 2026-07-27 prop result unreadable.
+    the 2026-07-27 prop result unreadable. UIUC tables are wind-tunnel
+    MEASUREMENT, so they satisfy this check by being more trustworthy than APC's
+    simulation output, not less.
     """
     for key in propulsion.available_props():
         source = propulsion.PropTable(key).meta.get("source", "")
-        assert source.upper().startswith("PER3_"), f"{key} is not from an APC file: {source!r}"
+        traced = source.upper().startswith("PER3_") or source.startswith("UIUC PDB vol ")
+        assert traced, f"{key} traces to no published source: {source!r}"
 
 
 def test_sample_aircraft_table_is_shipped():

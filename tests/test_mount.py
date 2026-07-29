@@ -48,8 +48,11 @@ def test_installation_effects_declared(sample_aircraft):
         pod_push = sample_aircraft.parasite_bodies(d)[0]
     finally:
         sample_aircraft.motor_mount = "puller"
-    assert abs(pt_push.prop.folding_derate - 0.95 * 0.95) < 1e-12
-    assert abs(pt_pull.prop.folding_derate - 0.95) < 1e-12
+    # blade derate is 1.00 on measured folding data, so what is left in this
+    # product IS the mount effect: the pusher's prop-in-wake 0.95, and nothing
+    # for the puller (which pays on pod drag below instead)
+    assert abs(pt_push.prop.folding_derate - 1.00 * 0.95) < 1e-12
+    assert abs(pt_pull.prop.folding_derate - 1.00) < 1e-12
     assert abs(pod_pull["form_factor"] / pod_push["form_factor"] - 1.10) < 1e-9
     # wetted area itself is untouched — only the drag factor moves
     assert abs(pod_pull["wetted_area_m2"] - pod_push["wetted_area_m2"]) < 1e-12
@@ -81,31 +84,41 @@ def test_prop_is_a_declared_discrete_option(sample_aircraft):
 
 def test_prop_candidates_differ_only_in_pitch(sample_aircraft):
     """Same diameter and knockdown, so the study isolates pitch. Diameter keeps
-    the 190 g motor_prop point mass honest; the shared folding knockdown keeps no
-    candidate advantaged by a friendlier installation assumption.
+    the 190 g motor_prop point mass honest (it is not a function of diameter yet);
+    the shared knockdown keeps no candidate advantaged by a friendlier
+    installation assumption.
 
-    Blade SECTION is not controlled: APC has no thin-electric 11x6, so that rung
-    is the thicker sport blade (see PROP_CANDIDATES). Pitch is isolated; section
-    is a known confound, recorded rather than pretended away."""
+    Since 2026-07-29 every candidate is one MEASURED Aero-Naut CAM folding
+    propeller, so blade section is controlled too — the confound that existed
+    while the 11x6 rung was an APC sport blade is gone."""
     from planeopt import propulsion
 
     seen = {}
     for key in sample_aircraft.PROP_CANDIDATES:
         sample_aircraft.prop_choice = key
         prop = sample_aircraft.powertrain().prop
-        propulsion.PropTable(prop.proxy_table)  # the table must actually resolve
+        table = propulsion.PropTable(prop.proxy_table)  # must actually resolve
+        assert table.meta.get("folding") is True, f"{key} is not a folding prop"
+        assert table.meta.get("measured") is True, f"{key} is not measured data"
         seen[key] = (prop.diameter_m, prop.folding_derate, prop.pitch_m, prop.proxy_table)
+    n = len(sample_aircraft.PROP_CANDIDATES)
     assert len({(d, f) for d, f, _, _ in seen.values()}) == 1  # one family
-    assert len({p for _, _, p, _ in seen.values()}) == 3  # three pitches
-    assert len({t for _, _, _, t in seen.values()}) == 3  # each with its own table
+    assert len({p for _, _, p, _ in seen.values()}) == n  # one pitch each
+    assert len({t for _, _, _, t in seen.values()}) == n  # each with its own table
 
 
 def test_incumbent_powertrain_is_unchanged(sample_aircraft):
-    """Freeing the prop must not move the spec plane: the default candidate has
-    to reproduce the previously hard-coded PropConfig exactly."""
+    """The incumbent is still the spec's 11x6 CAM folder — but it is now backed
+    by MEASURED data rather than an APC rigid table times a 0.95 guess.
+
+    This deliberately replaces the old "must not move the spec plane" assertion:
+    the spec plane moved on purpose on 2026-07-29, and it had to. The derate is
+    the point — a measured folding table already contains the folding penalty, so
+    applying the rigid-blade proxy derate on top charged it twice."""
     p = sample_aircraft.powertrain().prop
     assert p.name == "aeronaut_cam_11x6_folding"
     assert abs(p.diameter_m - 0.2794) < 1e-12
     assert abs(p.pitch_m - 0.1524) < 1e-12
-    assert p.proxy_table == "apc_11x6"
-    assert abs(p.folding_derate - 0.95) < 1e-12  # puller mount derate is 1.00
+    assert p.proxy_table == "uiuc_ancf_11x6"
+    # 1.00 blade x 1.00 puller mount: no proxy derate on measured folding data
+    assert abs(p.folding_derate - 1.00) < 1e-12

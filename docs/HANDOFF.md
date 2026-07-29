@@ -3,29 +3,24 @@
 **Tenth session (2026-07-29) — measured folding-prop data, and a hurried stop.**
 Session ended abruptly; read this section before touching anything.
 
-## READ FIRST: main is pushed with 4 FAILING TESTS
+## Test suite: green (158 passing)
 
-`pytest tests/ --ignore=tests/test_run.py` → **154 passed, 4 failed**. All four
-fail because they assert the OLD prop design and the design was deliberately
-changed underneath them. None is a bug in shipped behaviour; all four are a
-test-update job of maybe fifteen minutes:
+The four tests that briefly failed on 2026-07-29 asserted the OLD prop design and
+were updated to the new intent, not loosened:
 
-- `test_mount.py::test_incumbent_powertrain_is_unchanged` — asserts
-  `proxy_table == "apc_11x6"` and `folding_derate == 0.95`. The incumbent is now
-  `uiuc_ancf_11x6` at derate **1.00**. Its original purpose ("freeing the prop
-  must not move the spec plane") is obsolete: the spec plane MOVED on purpose,
-  because it is now on measured data. Rewrite it to pin the new intent.
-- `test_mount.py::test_prop_candidates_differ_only_in_pitch` — asserts 3 pitches
-  and 3 tables; there are now 5 of each. The one-diameter/one-derate assertion
-  still holds and should stay.
-- `test_mount.py::test_installation_effects_declared` — asserts the puller derate
-  is `0.95` and the pusher `0.95*0.95`. With measured folding data the blade
-  derate is 1.00, so the expected values are `1.00` and `0.95`.
-- `test_packaging.py::test_no_synthetic_tables_ship` — asserts every table's
-  `source` starts with `PER3_`. UIUC tables are sourced `UIUC PDB vol N: ...`.
-  They are MEASURED, not synthetic, so the check should accept both provenances
-  (the thing it exists to catch is the retired `apc_11x6_blend`, which was a
-  pitch interpolation).
+- `test_incumbent_powertrain_is_unchanged` now pins the incumbent to
+  `uiuc_ancf_11x6` at derate **1.00**, and says why the spec plane was ALLOWED to
+  move: a measured folding table already contains the folding penalty, so the
+  rigid-blade proxy derate on top charged it twice.
+- `test_prop_candidates_differ_only_in_pitch` scales to the candidate count and
+  now also asserts every candidate is `folding` AND `measured` — the blade-section
+  confound that existed while the 11x6 rung was an APC sport blade is gone.
+- `test_installation_effects_declared` expects 1.00 (puller) and 0.95 (pusher):
+  with the blade derate at 1.00 what remains in that product IS the mount effect.
+- `test_no_synthetic_tables_ship` accepts UIUC provenance. UIUC is wind-tunnel
+  measurement, so it passes by being more trustworthy than APC's simulation
+  output, not less. The thing the check exists to catch — the retired
+  `apc_11x6_blend` pitch interpolation — is still caught.
 
 ## What landed
 
