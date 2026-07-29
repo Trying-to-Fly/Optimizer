@@ -1,5 +1,124 @@
 # HANDOFF — Plane Optimizer (updated 2026-07-29, tenth session)
 
+**New champion: 134.5 min** (`runs/20260729T203143-...`), on measured Aero-Naut
+CAM folding data with the prop freed to coarser pitch. FINDINGS section 13 has
+the result. This section is the WORK LIST — everything below is a known open
+issue with evidence attached, written for a fresh agent to pick up.
+
+## OPEN ISSUES, highest value first
+
+### 1. 87% of the run is spent on phases that fail or barely inform
+
+Wall-clock breakdown of the 405-minute 2026-07-29 evening battery:
+
+| phase | time | outcome |
+|---|---|---|
+| multistart | 11 min | fine |
+| **flatness sweep** | **173 min (43%)** | **2 of 6 converged** |
+| **re-solve battery** | **130 min (32%)** | 3 of 4; the failure ate most of it |
+| **study motor_mount** | **50 min** | **FAILED** |
+| study prop_choice | **12 min** | the entire point of the run |
+| topology / tail / dihedral / winglet | 28 min | fine |
+| re-eval + artifacts | 6 min | fine |
+
+The prop study — the reason the run existed — cost 12 minutes. Everything in
+bold is the target. Fixing convergence is worth more than any modelling change
+on this list, because it buys back hours per run.
+
+### 2. Flatness sweep does not converge at short span, and fails SLOWLY
+
+Spans 1.5/1.6/1.7/1.8 m all fail with IPOPT assertions; only 1.9 and 2.0 return.
+Identical four failed in the 2026-07-29 morning run, so this is reproducible and
+pre-existing, not warm-start damage. Worst case: the 1.8 m solve burned
+**172 minutes** before failing.
+
+Two separable fixes, do both:
+- **Bail early.** A solve that is going to fail should not be allowed to run
+  three hours. There is no iteration cap or wall-clock guard on a member solve.
+- **Diagnose the short-span infeasibility.** Suspicion, unverified: at 1.5-1.8 m
+  the span cap is inactive, so area must come from chord, and something in the
+  spar-fit / stall / Vv set goes infeasible. Worth solving one by hand with
+  constraints relaxed one at a time to find which.
+
+### 3. `motor_mount: pusher` has failed to converge THREE runs running
+
+So the mount is retained **by default, not by winning** — it is effectively
+unpriced, and FINDINGS section 10's puller adoption has not been re-confirmed
+since. This run finally produced a specific symptom:
+
+    52 x  WARNING("solver:nlp_g failed: NaN detected for output g, at (row 72, col 0)")
+
+**All 52 occur inside the pusher solve and nowhere else.** That is a concrete
+lead the previous two runs did not give: constraint row 72 of the pusher build
+evaluates to NaN. Find which constraint that row is (build the Opti stack for
+`motor_mount = "pusher"` and index `opti.g`), then find which input makes it NaN.
+A NaN in a constraint is nearly always a sqrt/log/division of something that
+should have been guarded, not a genuine infeasibility.
+
+### 4. `printed_mass_x1.10` re-solve fails (three runs running)
+
+Same IPOPT assertion, also failed in M4.8 and in the 2026-07-29 morning run. The
+-10% member and both chain-eta members converge fine. Likely the same root cause
+as issue 2 — an over-constrained corner — and likely fixed by the same work.
+
+### 5. Static margin lands under its floor — FOURTH champion running
+
+SM 0.0782 against a 0.08 floor, `sm_in_range: false`. This is now a standing
+defect of the SM ESTIMATOR, not noise: the NLP holds SM >= 0.08 internally and
+the numeric re-evaluation disagrees by ~0.002. Also `sm_local_slopes` goes
+NEGATIVE at the cruise alpha. The build document states the consequence
+concretely: the CG target sits ~0.3 mm aft of its own aft limit.
+
+Until this is resolved, flow5 (or equivalent) should own the stability verdict
+before anything is built. Do not "fix" it by widening the mission window.
+
+### 6. M5.3 two-stage discrete studies — now clearly worth building
+
+The cheap screen predicted the 11x10's full re-solve to within **1 min**
+(screen 134.5, re-solve 133.5). That is the evidence this was waiting on: a
+screen through `propulsion.solve()` at the incumbent operating point is a
+reliable shortlister, so a study can search hundreds of candidates and
+full-re-solve only the top N. EXECUTION_PLAN section 6 has the design.
+
+### 7. Prop shortlist is still capped at 11 in, and the cap costs minutes
+
+`motor_prop` is a flat 190 g point mass and prop ground clearance is unmodelled,
+so neither is a function of diameter — which is why candidates are held to 11 in.
+Larger measured folders screen materially better: **12x10 at 143.1 min**, 14x9 at
+141.7, 13x11 at 139.9, against the adopted 11x10's 134.5. Removing the cap needs
+a diameter-dependent motor+prop mass and a clearance rule, THEN a wider list.
+
+### 8. Warm start is a wash — do not bother, or fix it properly
+
+Solve times warm 3.9/6.1/9.1 min vs cold 4.6/5.5/9.9 the run before. No
+meaningful gain, as predicted: IPOPT is an interior-point method and this
+champion sits on many active bounds (span cap, c_root, cs_frac, SM floor, Vv
+floor, both spar limits), so the solver pushes off the constraint boundary at
+startup regardless of the seed. Either drop `--warm-start` from normal use or
+investigate IPOPT's actual warm-start options (`mu_init`, `warm_start_init_point`,
+bound_push/bound_frac) rather than only seeding primal values.
+
+### 9. Smaller items
+
+- **149 non-folding UIUC props not ingested** (1202 files); `--only-folding` was
+  used at the user's request. `data/props/_uiuc_cache/` already holds ~1004
+  files. Resume with `tools/ingest_uiuc.py --fetch`. **Fetch politely** — 8
+  concurrent workers got this client TLS-blocked at the edge on BOTH hostnames
+  with no HTTP fallback, and it only cleared on a VPN switch. The tool is now
+  sequential and paced.
+- **UIUC Reynolds is estimated**, not tabulated (`re_estimated: true`): c_75 is
+  taken as 0.0638 x D, the ratio APC's own tables imply. The FIT is unaffected
+  (a wrong constant is absorbed by the stored normalisation) but the REPORTED
+  Reynolds is good to roughly +/-20%.
+- **`test_run.py` takes ~20 min** — report rendering, not solving. Only the NLP
+  test carries the `solve` marker; a `slow` marker on the other two would make
+  the default suite ~60 s.
+- **CF boom is invisible in the viz twin** (no loft), cosmetic, long-standing.
+
+---
+
+# Earlier: tenth session, first half (data ingest)
+
 **Tenth session (2026-07-29) — measured folding-prop data, and a hurried stop.**
 Session ended abruptly; read this section before touching anything.
 

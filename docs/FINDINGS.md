@@ -489,3 +489,76 @@ Multistart spread 1.1e-9; NLP-vs-re-eval −1.5e-5 min; shadow price
   The pusher failure means **puller was retained by default, not by winning** —
   the mount is unpriced in this run.
 - Cruise sits at the 9.5 m/s wind floor, as always.
+
+## 13. Champion on measured folding-prop data (2026-07-29 evening — M4.11)
+
+Run `20260729T203143`, 405 min, 2-wide, warm-started from `20260729T092108`.
+First battery on **measured Aero-Naut CAM folding data** (UIUC PDB vol 3, AIAA
+2020-2762) with the prop shortlist widened past 7 in of pitch.
+
+**Champion: 134.5 min at the 2.0 m cap, AUW 1768.8 g, 18.1 W at 9.5 m/s.**
+Prop **CAM 11×10 folding**, puller, pod-boom, V-tail, smooth dihedral curve,
+no winglet, straight tail trailing edge.
+
+### +16.2 min over the previous champion, in two roughly equal halves
+
+| | Δ |
+|---|---|
+| measured CAM data replacing the APC rigid proxy × 0.95 (same nominal 11×6) | ≈ **+12 min** |
+| pitch freed to coarsen (11×6 → 11×10) | ≈ **+13.6 min** |
+| **total, 118.3 → 134.5 min** | **+16.2 (+13.7%)** |
+
+A modelling error and a design error of about the same size. η_chain 0.372 →
+0.431; cruise rpm 3372 → 2701.
+
+**Why the modelling half was real:** `PROP_CANDIDATES` named
+`aeronaut_cam_11x6_folding` and approximated it with an APC *rigid* table times a
+flat 0.95 folding derate. The measured table already contains the folding
+penalty, so the proxy derate charged it twice.
+
+### The prop study, and an independent check on the data
+
+| candidate | objective | |
+|---|---|---|
+| 11×6 (incumbent baseline) | 119.9 min | — |
+| 11×7 | 126.9 | adopted |
+| 11×8 | 129.3 | adopted |
+| **11×10** | **133.5** | **adopted** |
+| 11×12 | 128.0 | rejected |
+
+11×12 falling *below* 11×10 reproduces AIAA 2020-2762's own finding — that CAM
+gains continue only to p/D ≈ 0.8–1.0 — in this solver, from their data. A useful
+sign the ingest is faithful.
+
+**The cheap screen predicted the winner to within 1 min** (screen 134.5 at a
+fixed operating point, full re-solve 133.5). That validates screening as a
+shortlister and is the evidence M5.3 was waiting for.
+
+### Straight tail trailing edge — free, and the tail reshaped around it
+
+Declared as a shape constraint (`semi·tan(t_sweep) = t_c_root·(1−t_taper)`), the
+exported loft comes out exact: vtail TE at x = 1433.35 mm at both root and tip,
+**Δ = 0.0000 mm**, LE swept back 3.07 mm. It cost nothing measurable.
+
+Unexpected: the optimizer responded by making the tail nearly **untapered**
+(t_taper 0.968, chords 94.9 → 91.8 mm) rather than by buying sweep — with a
+straight TE, taper must be paid for in sweep, so it largely stopped buying taper.
+`t_sweep` landed at 0.80°, not the ~6.8° predicted from the *old* tail shape.
+
+### Everything else held
+
+Winglet rejected again; V-tail (conventional −9.8, T-tail −13.4); pod-boom
+(integrated −11.1); smooth dihedral curve (polyhedral2 −4.0, `d_exp` → 0 for the
+fourth architecture running).
+
+### Verification and flags
+
+Multistart spread 6.5e-8 (warm and cold starts agree), NLP-vs-re-eval −2e-5 min,
+shadow price 7.76 min/100 g, cruise Reynolds 37.5 k inside the fitted range.
+
+Carried forward, all detailed in HANDOFF's open-issues list: **SM 0.0782 under
+its 0.08 floor for the fourth champion running**; `motor_mount: pusher` failed to
+converge a third time (so puller is retained by default, not by winning) — this
+time with 52 `NaN detected for output g, row 72` warnings confined entirely to
+that solve; `printed_mass_x1.10` failed a third time; and the flatness sweep
+returned 2 of 6 while consuming 43% of the run.
