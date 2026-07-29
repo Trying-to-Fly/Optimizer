@@ -95,7 +95,7 @@ class VTailSample:
         # Judged straight after the mount because the mount's installation
         # derate composes into the prop's (see PROP_CANDIDATES).
         #
-        # TOO NARROW — WIDEN BEFORE THE NEXT RUN (see HANDOFF section 5). These
+        # WIDENED 2026-07-29 to measured folding props (see PROP_CANDIDATES). Was:
         # three were the whole prop library in 2026-07-27; 443 tables ship now.
         # Screened at the 2026-07-29 champion's operating point, the adopted
         # 11x7 ranks 119th of 441, and the leaders are all far coarser (an 11 in
@@ -103,7 +103,7 @@ class VTailSample:
         # the cruise-J-above-peak-eta-J diagnostic finally cashing out).
         # The prop need NOT fold (user, 2026-07-29), so the whole catalogue is
         # in scope rather than the one folding family these three came from.
-        "prop_choice": ["cam_11x6", "cam_11x55", "cam_11x7"],
+        "prop_choice": ["cam_11x6", "cam_11x7", "cam_11x8", "cam_11x10", "cam_11x12"],
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],
         # Wing dihedral form (section 9). Discrete because the two are not
@@ -142,13 +142,38 @@ class VTailSample:
     # electric, so this shortlist is no longer a single blade family. Blade
     # section is a confound between the 11x6 and its two neighbours — read a
     # narrow 11x6 win with that in mind.
+    # 2026-07-29: rebuilt on MEASURED Aero-Naut CAM folding data (UIUC PDB vol 3,
+    # AIAA 2020-2762) instead of APC rigid tables times a 0.95 folding guess.
+    # These ARE the props this aircraft was always trying to model, so
+    # blade_derate is 1.00 — the folding penalty is in the measurement, and the
+    # proxy derate on top would charge it twice. On the 2026-07-29 champion's
+    # operating point that swap alone is worth +9.4 min at the SAME nominal prop
+    # (measured CAM 11x7 127.7 vs rigid-proxy 11x7 118.3).
+    #
+    # Held to 11 in on purpose: the 190 g motor_prop point mass and the prop
+    # ground clearance both assume it, and neither is modelled as a function of
+    # diameter yet. Larger folders screen better still (12x10 at 143.1 min) —
+    # see HANDOFF section 5 before widening.
+    #
+    # Pitch spans 6 to 12 in, which brackets the screen's peak: 11x10 leads at
+    # 134.5 min and 11x12 falls back to 129.0, matching AIAA 2020-2762's finding
+    # that CAM gains continue only to p/D ~0.8-1.0.
     PROP_CANDIDATES = {
-        "cam_11x55": {"name": "aeronaut_cam_11x5.5_folding",
-                      "pitch_in": 5.5, "proxy_table": "apc_11x55e"},
-        "cam_11x6": {"name": "aeronaut_cam_11x6_folding",
-                     "pitch_in": 6.0, "proxy_table": "apc_11x6"},
-        "cam_11x7": {"name": "aeronaut_cam_11x7_folding",
-                     "pitch_in": 7.0, "proxy_table": "apc_11x7e"},
+        "cam_11x6": {"name": "aeronaut_cam_11x6_folding", "diameter_in": 11.0,
+                     "pitch_in": 6.0, "proxy_table": "uiuc_ancf_11x6",
+                     "blade_derate": 1.00},
+        "cam_11x7": {"name": "aeronaut_cam_11x7_folding", "diameter_in": 11.0,
+                     "pitch_in": 7.0, "proxy_table": "uiuc_ancf_11x7",
+                     "blade_derate": 1.00},
+        "cam_11x8": {"name": "aeronaut_cam_11x8_folding", "diameter_in": 11.0,
+                     "pitch_in": 8.0, "proxy_table": "uiuc_ancf_11x8",
+                     "blade_derate": 1.00},
+        "cam_11x10": {"name": "aeronaut_cam_11x10_folding", "diameter_in": 11.0,
+                      "pitch_in": 10.0, "proxy_table": "uiuc_ancf_11x10",
+                      "blade_derate": 1.00},
+        "cam_11x12": {"name": "aeronaut_cam_11x12_folding", "diameter_in": 11.0,
+                      "pitch_in": 12.0, "proxy_table": "uiuc_ancf_11x12",
+                      "blade_derate": 1.00},
     }
     prop_choice = "cam_11x6"  # spec incumbent; the study re-prices it every run
     PROP_DIAMETER_M = 0.2794  # 11 in — common to every candidate

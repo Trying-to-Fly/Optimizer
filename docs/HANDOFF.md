@@ -1,4 +1,111 @@
-# HANDOFF — Plane Optimizer (updated 2026-07-29, ninth session)
+# HANDOFF — Plane Optimizer (updated 2026-07-29, tenth session)
+
+**Tenth session (2026-07-29) — measured folding-prop data, and a hurried stop.**
+Session ended abruptly; read this section before touching anything.
+
+## READ FIRST: main is pushed with 4 FAILING TESTS
+
+`pytest tests/ --ignore=tests/test_run.py` → **154 passed, 4 failed**. All four
+fail because they assert the OLD prop design and the design was deliberately
+changed underneath them. None is a bug in shipped behaviour; all four are a
+test-update job of maybe fifteen minutes:
+
+- `test_mount.py::test_incumbent_powertrain_is_unchanged` — asserts
+  `proxy_table == "apc_11x6"` and `folding_derate == 0.95`. The incumbent is now
+  `uiuc_ancf_11x6` at derate **1.00**. Its original purpose ("freeing the prop
+  must not move the spec plane") is obsolete: the spec plane MOVED on purpose,
+  because it is now on measured data. Rewrite it to pin the new intent.
+- `test_mount.py::test_prop_candidates_differ_only_in_pitch` — asserts 3 pitches
+  and 3 tables; there are now 5 of each. The one-diameter/one-derate assertion
+  still holds and should stay.
+- `test_mount.py::test_installation_effects_declared` — asserts the puller derate
+  is `0.95` and the pusher `0.95*0.95`. With measured folding data the blade
+  derate is 1.00, so the expected values are `1.00` and `0.95`.
+- `test_packaging.py::test_no_synthetic_tables_ship` — asserts every table's
+  `source` starts with `PER3_`. UIUC tables are sourced `UIUC PDB vol N: ...`.
+  They are MEASURED, not synthetic, so the check should accept both provenances
+  (the thing it exists to catch is the retired `apc_11x6_blend`, which was a
+  pitch interpolation).
+
+## What landed
+
+- **70 measured FOLDING propeller tables** from the UIUC Propeller Data Site,
+  fitted through the same `CT(J,Re)` core as the APC tables
+  (`tools/ingest_uiuc.py`). 513 tables ship now (443 APC + 70 UIUC). All 70 are
+  complete — `files_used == files_total` on every one.
+- **These are the props this aircraft was always modelling.** `PROP_CANDIDATES`
+  named `aeronaut_cam_11x6_folding` and approximated it with an APC rigid table
+  times a flat 0.95. It is now `uiuc_ancf_11x6`, measured, `blade_derate = 1.00` —
+  the folding penalty is in the data, and the proxy derate on top charged it
+  twice. **At the SAME nominal prop that swap is worth +9.4 min** (measured CAM
+  11x7 = 127.7 min vs rigid-proxy 11x7 = 118.3 at the champion's operating point).
+- `powertrain()` now takes **diameter and blade derate per candidate**.
+- Shortlist widened to 5 measured CAM folders, 11x6 / 7 / 8 / 10 / 12. The screen
+  at the champion's operating point puts **11x10 top at 134.5 min**, with 11x12
+  falling back to 129.0 — matching AIAA 2020-2762's finding that CAM gains
+  continue only to p/D ~0.8-1.0.
+- Earlier in the session: straight tail TE, `--warm-start`, the build document.
+
+## WHY THE SHORTLIST IS STILL CAPPED (open question — the user challenged this)
+
+The user asked, fairly: "why are we capping the prop choice again?" Two caps,
+both mine, both interim rather than principled:
+
+1. **11 inch only.** The 190 g `motor_prop` point mass and the prop ground
+   clearance both assume an 11 in prop, and NEITHER is modelled as a function of
+   diameter. Larger folders screen materially better — **12x10 at 143.1 min**,
+   14x9 at 141.7, 13x11 at 139.9 — so this cap is costing real minutes. Removing
+   it needs `motor_prop` mass as a function of diameter plus a clearance rule,
+   not just a longer candidate list.
+2. **5 candidates.** Each discrete candidate is a full NLP re-solve (~5 min), so
+   all 70 folding props would be ~6 h of solving for the prop study alone.
+
+**The real fix for cap 2 is M5.3** (two-stage discrete studies, EXECUTION_PLAN
+section 6): screen every candidate cheaply through `propulsion.solve()` at the
+incumbent operating point, then full-re-solve only the top N. That turns 70
+candidates into ~5 solves and makes the cap unnecessary. It is NOT built.
+
+## NOT DOWLOADED — the rest of the UIUC database
+
+Only the folding families were fetched and fitted, at the user's request
+(they had to leave mid-session).
+
+| | props | data files |
+|---|---|---|
+| UIUC total | 219 | 1750 |
+| **folding — fitted and shipped** | **70** | 548 |
+| **non-folding — NOT fitted** | **149** | 1202 |
+
+Missing families: APC Thin Electric x34, APC Sport x32, GWS Direct-Drive x14,
+APC Slow Flyer x11, Graupner Super Nylon x10, Master Airscrew (plain) x9,
+Master Airscrew Scimitar x8, GWS Slow Flyer x8, Kyosho x5+1, Master Airscrew
+Electric x3, APC Free Flight x2.
+
+`data/props/_uiuc_cache/` holds 1004 files (gitignored), so a lot of the
+non-folding data is already on disk. To finish:
+
+    uv run python tools/ingest_uiuc.py --fetch          # all volumes
+    uv run python tools/ingest_uiuc.py --fetch --only-folding   # folding only
+
+It resumes from cache and skips what is present. **Fetch politely** — 8
+concurrent workers got this client TLS-blocked at the edge for ~40 minutes, on
+both hostnames, with no HTTP fallback. The tool is now sequential and paced
+(0.4 s) and does volume 3 first. The block cleared only when the user switched
+VPN exit; it is not something to trigger again.
+
+Worth knowing: the non-folding UIUC props would mostly DUPLICATE APC coverage —
+but as wind-tunnel MEASUREMENT rather than APC's simulation output. That is a
+fidelity upgrade for the fixed-blade candidates, not just more rows.
+
+## Next run
+
+Not started. It should be `--warm-start` from
+`runs/20260729T092108-endurance_sample-vtail_sample_v1-6`, with the folding-only
+shortlist above. Fix the 4 tests first.
+
+---
+
+# Earlier: HANDOFF as of 2026-07-29, ninth session
 
 **Ninth session (2026-07-28) — the prop model, rebuilt.** Started as "summarise
 the last run", became a correctness fix. Read `FINDINGS.md` §11 first; it is the

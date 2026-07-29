@@ -85,47 +85,80 @@ def _text(s: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]*>", "", s))).strip()
 
 
+#: Filename prefix -> (manufacturer, series). The prefix is the only identifier
+#: that is stable across volumes: Volume 1 marks manufacturers with <h> headings
+#: and series with blue subheadings, Volumes 2-4 have no <h> headings at all, and
+#: they disagree on whether the colour attribute is single- or double-quoted.
+#: Volume 1's own headings are the source for everything it covers; the rest are
+#: added explicitly, with Volume 3's identity taken from its title and AIAA
+#: 2020-2762 ("Aero-Naut CAM Folding Propellers").
+PREFIX = {
+    "ance": ("Aeronaut", "Carbon Electric"),
+    "ancf": ("Aeronaut", "CAM Folding"),
+    "apc": ("APC", "Free Flight"),
+    "apccf": ("APC", "Carbon Fiber"),
+    "apce": ("APC", "Thin Electric"),
+    "apcff": ("APC", "Free Flight"),
+    "apcsf": ("APC", "Slow Flyer"),
+    "apcsp": ("APC", "Sport"),
+    "grcp": ("Graupner", "CAM Prop"),
+    "grcsp": ("Graupner", "CAM Slim"),
+    "grsn": ("Graupner", "Super Nylon"),
+    "gwsdd": ("GWS", "Direct-Drive"),
+    "gwssf": ("GWS", "Slow Flyer"),
+    "kavfk": ("Kavon", "FK"),
+    "kpf": ("Kyosho", "PF"),
+    "kyosho": ("Kyosho", ""),
+    "ma": ("Master_Airscrew", ""),
+    "mae": ("Master_Airscrew", "Electric"),
+    "magf": ("Master_Airscrew", "G/F"),
+    "mas": ("Master_Airscrew", "Scimitar"),
+    "rusp": ("Rev_Up", "Special Prop Series"),
+    "zin": ("Zingali", ""),
+}
+
+#: Size in the filename, e.g. ancf_11x12, apccf_7.8x7, ancf_125x6.
+_STEM = re.compile(r"data/(([a-z]+)_[\d.]+x[\d.]+)_")
+
+
 def manifest(volume: int, page: str) -> list[dict]:
     """Every propeller on one volume page: identity + its data files.
 
-    Diameter and pitch come from the page's own displayed size ("8 X 3.8"), not
-    from the filename — Volume 3 drops decimal points (`ancf_125x6` is 12.5x6)
-    while Volume 1 keeps them (`apccf_7.8x7`), so filenames are not parseable.
+    Diameter and pitch come from the page's own displayed size ("8 X 3.8"), never
+    from the filename — Volume 3 drops decimal points (`ancf_125x6` IS 12.5x6)
+    while Volume 1 keeps them (`apccf_7.8x7`), so filenames cannot be parsed for
+    size without guessing where the point went.
     """
     toks: list[tuple[int, str, str]] = []
-    toks += [(m.start(), "MFR", _text(m.group(1)))
-             for m in re.finditer(r"<h\d[^>]*>(.*?)</h\d>", page, re.S)]
     toks += [(m.start(), "HEAD", _text(m.group(1)))
-             for m in re.finditer(r"<font color='#047'><b>(.*?)</b></font>", page, re.S)]
-    toks += [(m.start(), "FILE", m.group(1))
-             for m in re.finditer(r'href="(data/[^"]+\.txt)"', page)]
+             for m in re.finditer(r'<font color=["\']#047["\']><b>(.*?)</b>', page, re.S)]
+    toks += [(m.start(), "FILE", m.group(0))
+             for m in _STEM.finditer(page)]
     toks.sort()
 
     props: dict[str, dict] = {}
-    mfr = series = None
     dia = pitch = None
     for _, kind, val in toks:
-        if kind == "MFR":
-            if "Volume" not in val:
-                mfr, series = val, None
-            continue
         if kind == "HEAD":
             size = re.fullmatch(r"([\d.]+)\s*[Xx]\s*([\d.]+)", val)
             if size:
                 dia, pitch = float(size.group(1)), float(size.group(2))
-            else:
-                series = val
             continue
-        stem = re.match(r"data/([a-z]+[a-z0-9._]*?)_(?:static_)?\d", val)
-        if not (stem and mfr and dia):
-            continue
-        key = stem.group(1)
-        p = props.setdefault(key, {
-            "stem": key, "volume": volume, "manufacturer": mfr,
-            "series": series or "", "diameter_in": dia, "pitch_in": pitch,
-            "files": [],
+        m = _STEM.match(val)
+        stem, prefix = m.group(1), m.group(2)
+        if dia is None:
+            continue  # a link before any size heading has no identity
+        mfr, series = PREFIX.get(prefix, ("unknown", prefix))
+        p = props.setdefault(stem, {
+            "stem": stem, "volume": volume, "manufacturer": mfr, "series": series,
+            "diameter_in": dia, "pitch_in": pitch, "files": [],
         })
-        p["files"].append(val)
+    # collect every file per prop separately: the size heading only marks where a
+    # prop's block starts, and one block holds a static file plus one per RPM
+    for m in re.finditer(r'href="(data/[^"]+\.txt)"', page):
+        s = _STEM.match(m.group(1))
+        if s and s.group(1) in props:
+            props[s.group(1)]["files"].append(m.group(1))
     return list(props.values())
 
 
@@ -259,6 +292,12 @@ def fit(prop: dict, cache: Path, out_dir: Path) -> dict:
         if ok.any() else 0.0,
         "n_points": int(len(J)),
         "rpm_range": [int(rpm.min()), int(rpm.max())],
+        # Partial coverage is legitimate — fewer RPM files just means a narrower
+        # Reynolds span — but it must be visible rather than folded silently
+        # into the fit, so a reader can tell a full prop from a half-fetched one.
+        "files_used": sum(
+            (cache / f"v{prop['volume']}_{Path(f).name}").is_file() for f in prop["files"]),
+        "files_total": len(prop["files"]),
     }
     (out_dir / f"{key}.json").write_text(
         json.dumps(_round(meta), separators=(",", ":")), encoding="utf-8")
@@ -269,6 +308,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--fetch", action="store_true", help="download the data files first")
     ap.add_argument("--out", type=Path, default=FITS)
+    ap.add_argument("--only-folding", action="store_true",
+                    help="fetch/fit only the folding families (see FOLDING)")
     ap.add_argument("--delay", type=float, default=0.4,
                     help="seconds between requests (the host rate-limits bursts)")
     args = ap.parse_args()
@@ -280,7 +321,10 @@ def main() -> int:
         if not page_file.is_file():
             page_file.write_bytes(_get(f"{BASE}/volume-{vol}/propDB-volume-{vol}.html"))
         props += manifest(vol, page_file.read_text(errors="ignore"))
-    print(f"manifest: {len(props)} propellers, "
+    if args.only_folding:
+        props = [p for p in props if (p["manufacturer"], p["series"]) in FOLDING]
+    print(f"manifest: {len(props)} propellers"
+          f"{' (folding only)' if args.only_folding else ''}, "
           f"{sum(len(p['files']) for p in props)} data files")
 
     if args.fetch:
