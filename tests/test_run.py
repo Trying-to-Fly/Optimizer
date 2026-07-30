@@ -9,6 +9,7 @@ import json
 import pytest
 
 
+@pytest.mark.slow
 def test_run_writes_artifacts(sample_aircraft, sample_mission, tmp_path):
     from planeopt import solve
 
@@ -49,6 +50,7 @@ def test_run_writes_artifacts(sample_aircraft, sample_mission, tmp_path):
     assert isinstance(c["stall_ok"], bool) and isinstance(c["sm_in_range"], bool)
 
 
+@pytest.mark.slow
 def test_report_rerender_roundtrip(sample_aircraft, sample_mission, tmp_path):
     from planeopt import solve
     from planeopt.report import assemble, html as html_mod

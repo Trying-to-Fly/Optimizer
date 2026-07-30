@@ -23,14 +23,24 @@ import aerosandbox as asb
 import numpy as np
 from scipy.optimize import least_squares, root
 
+from . import geometry
+
 EXCRESCENCE = 1.08  # saddle, hatch lips, wires, hinge gaps (section 3.1)
 
 
 def body_cd0(bodies: list[dict], V: float, s_ref: float, rho=1.225, mu=1.81e-5) -> float:
-    """Flat-plate turbulent Cf x form factor x wetted area, referenced to s_ref."""
+    """Flat-plate turbulent Cf x form factor x wetted area, referenced to s_ref.
+
+    The body lengths are whatever the aircraft's `parasite_bodies` produced, so
+    in the NLP they are expressions in the design variables and an infeasible
+    iterate may hand this a non-positive one. `(-Re)**0.2` is NaN, and a NaN
+    reaching a constraint row fails the SOLVE rather than the point — so the
+    length is floored (geometry.smooth_floor) before it becomes a Reynolds
+    number. Feasible designs are unaffected to within a micrometre; the
+    constraint that owns the dimension still does the rejecting."""
     d = 0.0
     for b in bodies:
-        re_l = rho * V * b["length_m"] / mu
+        re_l = rho * V * geometry.smooth_floor(b["length_m"]) / mu
         cf = 0.074 / re_l**0.2
         d += cf * b["form_factor"] * b["wetted_area_m2"]
     return EXCRESCENCE * d / s_ref
@@ -141,35 +151,90 @@ def fuselage_cm_alpha(bodies: list[dict], s_ref, c_ref) -> float:
     return total / (s_ref * c_ref)
 
 
+#: THE static-margin estimator's alpha window (deg, relative to the trim point).
+#: SM here is a REGRESSION SLOPE, not a derivative — LiftingLine's Cm(CL) is
+#: nonlinear enough over a few degrees that the window is part of the estimator's
+#: definition, so two callers sampling different windows measure different
+#: quantities and disagree by ~0.002 on the same airplane. That is a quarter of
+#: this project's SM window and it read, for four champions running, as the
+#: design missing its own floor (HANDOFF issue 5). The NLP and the numeric
+#: re-evaluation therefore share this constant rather than each choosing.
+SM_ALPHA_OFFSETS = (-2.0, 0.0, 2.0)
+#: Extra alphas the NUMERIC path samples for the nonlinearity diagnostic only —
+#: they never enter the regression above, so they cost the NLP nothing.
+SM_DIAGNOSTIC_OFFSETS = (-1.0, 1.0)
+
+
+def _slope(xs, ys):
+    """Least-squares slope dy/dx, written as plain arithmetic so it is
+    symbolic-safe (the NLP builds this out of CasADi expressions)."""
+    n = len(xs)
+    x_bar = sum(xs) / n
+    y_bar = sum(ys) / n
+    cov = sum((xs[i] - x_bar) * (ys[i] - y_bar) for i in range(n))
+    var = sum((xs[i] - x_bar) ** 2 for i in range(n))
+    return cov / var
+
+
+def static_margin_from_polar(cls, cms, offsets_deg, bodies, s_ref, c_ref):
+    """SM = -dCm/dCL, from surface runs already made at `offsets_deg`.
+
+    The single estimator, shared by the NLP and by the numeric re-evaluation.
+    `offsets_deg` are relative to the trim alpha; only differences matter, so
+    the absolute alpha may be symbolic without entering here. The Munk fuselage
+    term is converted to CL-space via the lift slope measured on the same runs.
+    """
+    sm = -_slope(cls, cms)
+    if bodies:
+        cl_alpha_rad = _slope(offsets_deg, cls) * 180 / np.pi
+        sm = sm - fuselage_cm_alpha(bodies, s_ref, c_ref) / cl_alpha_rad
+    return sm
+
+
 def static_margin(
     airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0, bodies: list[dict] | None = None
 ) -> dict:
     """SM = -dCm/dCL about the CG; x_np = x_cg + SM * c_ref.
 
-    Least-squares slope over an alpha window centered on alpha0 rather than a
-    +/-1 deg finite difference: LiftingLine's Cm(alpha) is nonlinear enough that
-    the local derivative varies strongly with alpha (see FINDINGS.md — the SM
-    model's dominant fidelity issue, along with the missing fuselage moment).
-    The per-alpha local slopes are returned so the nonlinearity is visible."""
-    alphas = np.array([alpha0 + d for d in (-2.0, -1.0, 0.0, 1.0, 2.0)])
-    runs = [_run_ll(airplane, V, a, 0.0, x_cg) for a in alphas]
-    cls = np.array([float(r["CL"]) for r in runs])
-    cms = np.array([float(r["Cm"]) for r in runs])
-    A = np.vstack([cls, np.ones_like(cls)]).T
-    slope, _ = np.linalg.lstsq(A, cms, rcond=None)[0]
-    sm = -float(slope)
-    if bodies:
-        # fuselage destabilization, converted to CL-space via the lift slope
-        a_deg = np.linalg.lstsq(
-            np.vstack([alphas, np.ones_like(alphas)]).T, cls, rcond=None
-        )[0][0]
-        cl_alpha_rad = float(a_deg) * 180 / np.pi
-        sm -= fuselage_cm_alpha(bodies, float(airplane.s_ref), c_ref) / cl_alpha_rad
+    A regression over an alpha window centered on alpha0 rather than a +/-1 deg
+    finite difference: LiftingLine's Cm(alpha) is nonlinear enough that the local
+    derivative varies strongly with alpha (see FINDINGS.md — the SM model's
+    dominant fidelity issue, along with the missing fuselage moment). The
+    per-alpha local slopes are returned so that nonlinearity stays visible.
+
+    The reported margin comes from SM_ALPHA_OFFSETS, the same window the NLP
+    constrains; the intermediate alphas feed only the diagnostic."""
+    offsets = sorted(SM_ALPHA_OFFSETS + SM_DIAGNOSTIC_OFFSETS)
+    alphas = np.array([alpha0 + d for d in offsets])
+    runs = {d: _run_ll(airplane, V, alpha0 + d, 0.0, x_cg) for d in offsets}
+    cls = {d: float(r["CL"]) for d, r in runs.items()}
+    cms = {d: float(r["Cm"]) for d, r in runs.items()}
+    sm = float(
+        static_margin_from_polar(
+            [cls[d] for d in SM_ALPHA_OFFSETS],
+            [cms[d] for d in SM_ALPHA_OFFSETS],
+            list(SM_ALPHA_OFFSETS),
+            bodies,
+            float(airplane.s_ref),
+            c_ref,
+        )
+    )
     local = [
-        {"alpha": alphas[i], "sm_local": -float((cms[i + 1] - cms[i]) / (cls[i + 1] - cls[i]))}
-        for i in range(len(alphas) - 1)
+        {
+            "alpha": float(alphas[i]),
+            "sm_local": -float(
+                (cms[offsets[i + 1]] - cms[offsets[i]])
+                / (cls[offsets[i + 1]] - cls[offsets[i]])
+            ),
+        }
+        for i in range(len(offsets) - 1)
     ]
-    return {"static_margin": sm, "x_np_m": x_cg + sm * c_ref, "sm_local_slopes": local}
+    return {
+        "static_margin": sm,
+        "x_np_m": x_cg + sm * c_ref,
+        "sm_local_slopes": local,
+        "sm_alpha_window_deg": [float(alpha0 + d) for d in SM_ALPHA_OFFSETS],
+    }
 
 
 def clmax_3d(airfoil, re: float, knockdown: float = 0.90) -> float:

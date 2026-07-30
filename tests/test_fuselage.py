@@ -84,11 +84,33 @@ def test_boom_emerges_from_geometry(sample_aircraft):
     boom = next(e for e in sample_aircraft.structure_extras(d) if e.name == "boom")
     assert abs(boom.mass_kg - 0.056 * ((x_tail - pod_end) + 0.05)) < 1e-9
     bb = next(b for b in sample_aircraft.parasite_bodies(d) if b["name"] == "boom")
-    assert abs(bb["length_m"] - (x_tail - pod_end)) < 1e-9
+    # sub-micron, not exact: the drag body's length carries the positivity guard
+    # the NLP needs (geometry.smooth_floor), whose error at a 555 mm boom is
+    # 0.45 um. The structural length above is unguarded and stays exact.
+    assert abs(bb["length_m"] - (x_tail - pod_end)) < 1e-6
     # longer tail arm -> longer boom, more drag area
     d2 = d | {"tail_arm": 1.0}
     bb2 = next(b for b in sample_aircraft.parasite_bodies(d2) if b["name"] == "boom")
     assert bb2["wetted_area_m2"] > bb["wetted_area_m2"]
+
+
+def test_boom_drag_stays_finite_on_an_infeasible_iterate():
+    """The exposed boom length is a DIFFERENCE of design variables, kept
+    positive only by the aircraft's clearance constraint — and an interior-point
+    method reaches its solution through points that violate that constraint. A
+    negative length used to make `(-Re)**0.2` NaN inside the drag build-up, and
+    one NaN in a constraint row fails the SOLVE rather than the point (HANDOFF
+    issue 3: 52 such warnings, all inside the pusher solve).
+    """
+    import numpy as np
+
+    from planeopt import aero, fuselage
+
+    for exposed in (-0.30, -1e-6, 0.0):
+        b = fuselage.boom_body(exposed)
+        assert b["length_m"] > 0
+        assert b["wetted_area_m2"] > 0 and b["volume_m3"] > 0
+        assert np.isfinite(aero.body_cd0([b], 11.0, 0.4))
 
 
 def test_design_brief_renders(sample_aircraft):

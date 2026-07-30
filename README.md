@@ -81,12 +81,26 @@ motor mount; see `docs/FINDINGS.md` §10 for the current champion and
 - Propulsion v2: propeller coefficients are fitted against advance ratio **and**
   blade Reynolds, `CT(J,Re)`, so there is no RPM window to pick and the model is
   as valid for a 5 in prop as a 22 in one (`docs/MODEL_DETAILS.md` §2.1.1). The
-  whole published APC catalogue ships — **443 fitted tables**, browsable with
-  `planeopt props` — so diameter and pitch are a design choice, not a data limit
+  whole published APC catalogue ships alongside the complete UIUC Propeller Data
+  Site — **661 fitted tables**, browsable with `planeopt props` — so diameter and
+  pitch are a design choice, not a data limit. 218 of those are wind-tunnel
+  *measurement* rather than APC's simulation output, and 71 are folding blades
 
 ```sh
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
 ```
+
+A battery runs for hours and holds ~13 GB, so it can be stopped and continued:
+
+```sh
+uv run planeopt optimize ... --checkpoint runs/_ckpt --pause-file runs/_ckpt/PAUSE
+touch runs/_ckpt/PAUSE     # stops at the next member boundary, frees the memory
+# ...re-run the identical command to resume from the checkpoint
+```
+
+The pause waits for the solve in flight (bounded by `--solve-timeout-min`)
+because IPOPT's internal state cannot be checkpointed — that wait is what makes
+it lossless. The GUI exposes the same thing as a Pause button.
 
 **M5.1 (desktop GUI)** is in: run browser, detail and compare views, mission
 form, and a sequential run queue. Aircraft definitions remain Python modules —

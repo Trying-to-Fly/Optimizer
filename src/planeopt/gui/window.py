@@ -179,6 +179,19 @@ class MainWindow(QMainWindow):
         self.queue_tree.itemSelectionChanged.connect(self._on_queue_selection)
         layout.addWidget(self.queue_tree)
 
+        # Pause before Cancel: they look alike but one keeps the work and the
+        # other throws away hours of it, so the safe one reads first.
+        self.pause_button = QPushButton("Pause running job")
+        self.pause_button.setEnabled(False)
+        self.pause_button.setToolTip(
+            "Stop after the member solve currently in flight, keeping everything "
+            "finished so far and freeing the memory. Re-queue the same job to "
+            "continue. It is not instant: a solve in progress holds ~13 GB of "
+            "solver state that cannot be saved, so the wait is up to one member."
+        )
+        self.pause_button.clicked.connect(self._pause_selected)
+        layout.addWidget(self.pause_button)
+
         self.cancel_button = QPushButton("Cancel selected job")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._cancel_selected)
@@ -364,6 +377,11 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(
             job is not None and job.state in (JobState.QUEUED, JobState.RUNNING)
         )
+        # only the running job can be paused, and only if it was queued with a
+        # checkpoint to resume from
+        self.pause_button.setEnabled(
+            job is not None and job.state is JobState.RUNNING and bool(job.pause_file)
+        )
 
     def _selected_job(self) -> Job | None:
         items = self.queue_tree.selectedItems()
@@ -376,6 +394,16 @@ class MainWindow(QMainWindow):
         job = self._selected_job()
         if job is not None:
             self.queue.cancel(job)
+
+    def _pause_selected(self) -> None:
+        job = self._selected_job()
+        if job is None or not self.queue.pause(job):
+            return
+        self.pause_button.setEnabled(False)
+        self.log.appendPlainText(
+            "-- pause requested: the run will stop after the member solve in "
+            "flight and keep everything finished so far --"
+        )
 
     def _on_output(self, job: Job, line: str) -> None:
         if job is self.queue.running:

@@ -121,6 +121,31 @@ def test_cg_window_omitted_when_the_run_never_recorded_the_range(built):
     assert "not available" in doc  # says so rather than quietly dropping it
 
 
+def test_build_document_states_the_cg_verdict_rather_than_implying_it(built):
+    """Whether the CG target is inside its own window is the single most
+    important line on the balance page, and used to be left as an exercise in
+    comparing two millimetre numbers. The 2026-07-29 champion missed its floor
+    by 0.002 of margin — about 0.3 mm of CG — and the document said so only by
+    printing both numbers."""
+    _, airplane = built
+    c_ref = float(airplane.c_ref)
+
+    inside = manufacturing.render(_result(), airplane)  # SM 0.10 in [0.08, 0.15]
+    assert "INSIDE its own allowable range" in inside
+    assert "WARNING" not in inside
+
+    # x_np - x_cg = 0.07 * c_ref, i.e. SM 0.07 against a 0.08 floor: aft of the
+    # aft limit by 0.01 * c_ref
+    aft = _result(
+        masses={"auw_kg": 1.8, "x_cg_m": 0.52 - 0.07 * c_ref,
+                "components": {"battery": 0.43}},
+        constraints={"static_margin": 0.07, "static_margin_range": [0.08, 0.15]},
+    )
+    doc = manufacturing.render(aft, airplane)
+    assert "WARNING" in doc and "aft of the aft limit" in doc
+    assert f"{0.01 * c_ref * 1000:.1f} mm" in doc
+
+
 # -------------------------------------------------------------------- render
 
 def test_document_covers_the_build_critical_sections(built, sample_aircraft):

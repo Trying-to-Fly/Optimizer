@@ -26,6 +26,8 @@ from __future__ import annotations
 import aerosandbox as asb
 import aerosandbox.numpy as np
 
+from . import geometry
+
 
 def loft(
     nose_len,
@@ -97,12 +99,20 @@ def body_dict(fuse: asb.Fuselage, length, width, height, munk_factor=0.9, interf
 def boom_body(exposed_len, od=0.012) -> dict:
     """Parasite-body entry for the exposed CF boom, symbolic-safe in its
     length (the boom now spans pod tail -> tail block, so its length is an
-    optimization outcome, not a constant)."""
+    optimization outcome, not a constant).
+
+    That length is a DIFFERENCE of design variables, held positive only by the
+    aircraft's boom-clearance constraint, so intermediate iterates can and do
+    drive it negative. The whole body dict is therefore built on a smoothly
+    floored length: length, wetted area and volume stay non-negative together,
+    the drag build-up stays finite, and the point is rejected by the constraint
+    that owns it instead of by a NaN (geometry.smooth_floor)."""
+    length = geometry.smooth_floor(exposed_len)
     return {
         "name": "boom",
-        "wetted_area_m2": np.pi * od * exposed_len,
-        "length_m": exposed_len,
+        "wetted_area_m2": np.pi * od * length,
+        "length_m": length,
         "form_factor": 1.10,
-        "volume_m3": np.pi * (od / 2) ** 2 * exposed_len,
+        "volume_m3": np.pi * (od / 2) ** 2 * length,
         "munk_factor": 0.95,
     }

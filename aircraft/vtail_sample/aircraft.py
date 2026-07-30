@@ -487,8 +487,13 @@ class VTailSample:
         """Aircraft-specific manufacturing/geometry/throw constraints (symbolic-safe)."""
         w = self._wing(dv)
         c_tip = w["chords"][-1]
-        # tip Reynolds floor (project rule; MODEL_DETAILS section 4)
-        opti.subject_to(1.225 * V * c_tip / 1.81e-5 >= 90e3)
+        # tip Reynolds floor (project rule; MODEL_DETAILS section 4).
+        # Divided through by the floor so the row reads as a ratio against 1
+        # rather than as a residual of order 1e5. Same feasible set; the
+        # difference is what the SOLVER sees, and a constraint vector that
+        # spans ten decades is what made the hard corners take hundreds of
+        # iterations (FINDINGS §14.5). Keep new constraints dimensionless.
+        opti.subject_to(1.225 * V * c_tip / 1.81e-5 / 90e3 >= 1.0)
         # A1 print bed: chord already bounded by c_root upper bound (245 mm).
         # (v3's "outer panels must exist" constraint is gone with center_width —
         # the break station's own bounds guarantee both regions are non-empty.)
@@ -502,7 +507,7 @@ class VTailSample:
             # winglet mean-chord Reynolds floor: relaxed vs the 90k tip rule
             # (small vertical surface, tolerates more drag creep than the wing)
             c_wl_mean = c_tip * dv["wl_cr"] * (1 + dv["wl_taper"]) / 2
-            opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 >= 60e3)
+            opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 / 60e3 >= 1.0)
             # winglet stays shorter than the last wing panel (buildable socket)
             opti.subject_to(dv["wl_len"] <= w["widths"][-1])
         opti.subject_to(proj_span <= self.span_cap_m)
@@ -592,7 +597,7 @@ class VTailSample:
             )
         # tail mean-chord Reynolds floor: relaxed vs the 90k wing-tip rule
         # (small surface — same precedent as the winglet's 60k)
-        opti.subject_to(1.225 * V * t_c_mean / 1.81e-5 >= 60e3)
+        opti.subject_to(1.225 * V * t_c_mean / 1.81e-5 / 60e3 >= 1.0)
         if deflection_deg is not None:
             # throw policy made geometric: the degree cap follows from the free
             # hinge fraction (see trim_deflection_limit_deg)
@@ -609,7 +614,7 @@ class VTailSample:
             s_v_eff = dv["t_span"] * t_c_mean * np.sind(dv["t_dihedral"]) ** 2
         else:
             fin_c_mean = dv["fin_c_root"] * (1 + dv["fin_taper"]) / 2
-            opti.subject_to(1.225 * V * fin_c_mean / 1.81e-5 >= 60e3)
+            opti.subject_to(1.225 * V * fin_c_mean / 1.81e-5 / 60e3 >= 1.0)
             s_v_eff = dv["fin_height"] * fin_c_mean
         vv = s_v_eff * dv["tail_arm"] / (s_wing * 2 * proj_semi)
         opti.subject_to(vv >= self.v_tail_volume_min)

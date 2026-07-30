@@ -61,7 +61,9 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 <tr><th>case</th><th>objective</th><th>delta</th><th>span</th><th>SM</th><th>ballast g</th></tr>
 {% for k, v in opt["resolve_battery"].items() %}
 <tr><td>{{ k }}</td>
-{% if v.get("failed") %}<td colspan="4" class="bad">{{ v["failed"] }}</td>
+{# colspan 5, not 4: the header has six columns and a short failure row left the
+   table ragged for every run that had one — which was every recent run. #}
+{% if v.get("failed") %}<td colspan="5" class="bad">{{ v["failed"] }}</td>
 {% else %}<td>{{ "%.1f"|format(v["objective_value"]) }}</td><td>{{ "%+.1f"|format(v["delta"]) }}</td>
 <td>{{ "%.2f"|format(v["span"]) }}</td><td>{{ "%.3f"|format(v["static_margin"]) }}</td>
 <td>{{ "%.0f"|format(v["ballast_kg"]*1000) }}</td>{% endif %}</tr>
@@ -75,11 +77,34 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 {% endif %}
 {% endif %}
 
+{% if r.diagnostics.get("phase_minutes") %}
+{# Where the run's hours went. A battery runs for hours and its phases fail
+   independently, so "which phase cost what" is a first-class result — the
+   2026-07-29 finding that 87% of a 405-minute run went to phases that failed
+   had to be reconstructed by hand from the progress log. #}
+<h2>Where the time went</h2>
+<table>
+<tr><th>phase</th><th>minutes</th><th>share</th></tr>
+{% set total = r.diagnostics["phase_minutes"].values()|sum %}
+{% for k, v in r.diagnostics["phase_minutes"].items()|sort(attribute='1', reverse=true) %}
+<tr><td>{{ k }}</td><td>{{ "%.1f"|format(v) }}</td>
+<td>{{ "%.0f"|format(100 * v / total if total else 0) }}%</td></tr>
+{% endfor %}
+<tr><th>total</th><th>{{ "%.1f"|format(total) }}</th><th></th></tr>
+</table>
+<p style="color:#9a9aa0;font-size:12px;">Per-solve wall-clock ceiling:
+{{ r.diagnostics.get("solve_timeout_min", "—") }} min. A member that hits it is
+recorded as <code>Maximum_WallTime_Exceeded</code> and the batch carries on.</p>
+{% endif %}
+
 <h2>Constraints</h2>
 <table>
 {% for k, v in r.constraints.items() %}
 <tr><th>{{ k }}</th>
-<td>{% if v is sameas true %}<span class="ok">pass</span>{% elif v is sameas false %}<span class="bad">FAIL</span>{% elif v is number %}{{ "%.3f"|format(v) }}{% else %}{{ v }}{% endif %}</td></tr>
+{# %.3f rounds a small residual to a flat "0.000", which is exactly the wrong
+   thing to say about a gap between two nearly-equal numbers — switch to
+   scientific notation below 0.01 so the magnitude survives. #}
+<td>{% if v is sameas true %}<span class="ok">pass</span>{% elif v is sameas false %}<span class="bad">FAIL</span>{% elif v is number %}{% if v != 0 and (v|abs) < 0.01 %}{{ "%.2e"|format(v) }}{% else %}{{ "%.3f"|format(v) }}{% endif %}{% else %}{{ v }}{% endif %}</td></tr>
 {% endfor %}
 </table>
 

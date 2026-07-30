@@ -115,6 +115,25 @@ def optimize(
         "(single-core, memory-bound) — it decides how many run at once. "
         "Ignored when --parallel is given explicitly.",
     ),
+    solve_timeout_min: float = typer.Option(
+        solve.SOLVE_TIMEOUT_MIN, "--solve-timeout-min",
+        help="Wall-clock ceiling for ONE member solve. A converging solve takes "
+        "4-10 min; a diverging one has no natural end and can otherwise own the "
+        "whole run. Members that hit the cap are recorded and the battery goes on.",
+    ),
+    checkpoint: Path = typer.Option(
+        None, "--checkpoint",
+        help="Directory for per-member results. A battery runs for hours; with a "
+        "checkpoint directory a stopped run continues instead of restarting, and "
+        "re-running the same command resumes.",
+    ),
+    pause_file: Path = typer.Option(
+        None, "--pause-file",
+        help="Create this file while a run is going to stop it cleanly at the next "
+        "member boundary, freeing all memory. Needs --checkpoint to be resumable. "
+        "The wait is at most one member (--solve-timeout-min) because a solve in "
+        "progress cannot be saved — see `optimize`'s docstring.",
+    ),
     warm_start: Path = typer.Option(
         None, "--warm-start",
         help="A runs/<...> directory whose champion seeds the nominal solve and "
@@ -141,14 +160,31 @@ def optimize(
         solve.check_parallel(parallel)
     except RuntimeError as e:  # fail in a second, not after the first batch
         raise typer.BadParameter(str(e), param_hint="--parallel")
+    if pause_file is not None and pause_file.exists():
+        # left over from the previous pause — clearing it here means "resume"
+        # does not stop again the instant it starts
+        pause_file.unlink()
+        typer.echo(f"cleared the pause request at {pause_file}")
     ac, ac_file = load_aircraft(aircraft)
     ms, ms_file = load_mission(mission)
-    result, run_dir = solve.optimize(
-        ac, ms, runs_dir, input_files=[ac_file, ms_file],
-        multistart=multistart, flatness=flatness, parallel=parallel,
-        memory_budget_gb=memory_budget_gb,
-        warm_start=warm, warm_start_from=warm_from,
-    )
+    try:
+        result, run_dir = solve.optimize(
+            ac, ms, runs_dir, input_files=[ac_file, ms_file],
+            multistart=multistart, flatness=flatness, parallel=parallel,
+            memory_budget_gb=memory_budget_gb,
+            warm_start=warm, warm_start_from=warm_from,
+            solve_timeout_min=solve_timeout_min,
+            checkpoint_dir=checkpoint, pause_file=pause_file,
+        )
+    except solve.RunPaused as paused:
+        # A pause is a successful outcome, not a failure: exit 0 so a shell loop
+        # or the GUI queue does not treat it as a crashed run.
+        typer.echo(f"PAUSED — {paused}")
+        if checkpoint is not None:
+            typer.echo(f"progress is in {checkpoint}; re-run the same command to resume")
+        else:
+            typer.echo("WARNING: no --checkpoint was given, so this run cannot resume")
+        raise typer.Exit(code=0)
     champ = result.performance["optimization"]["champion"]
     typer.echo(f"status: {result.status}")
     typer.echo(f"champion: {champ['dv']} V={champ['V_ms']:.1f} -> "

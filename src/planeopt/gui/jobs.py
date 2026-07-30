@@ -34,6 +34,13 @@ class Job:
     multistart: int = 3
     flatness: bool = True
     memory_budget_gb: float | None = None
+    #: wall-clock ceiling for ONE member solve (solve.SOLVE_TIMEOUT_MIN)
+    solve_timeout_min: float | None = None
+    #: Where per-member results are kept so a paused run can be resumed, and the
+    #: sentinel whose existence asks the run to stop at the next member boundary.
+    #: Both derive from the run directory so a user never has to invent a path.
+    checkpoint_dir: Path | None = None
+    pause_file: Path | None = None
     state: JobState = JobState.QUEUED
     log: list[str] = field(default_factory=list)
     run_dir: Path | None = None  # parsed out of the child's final stdout line
@@ -69,6 +76,12 @@ def program_and_args(job: Job) -> tuple[str, list[str]]:
         # at launch than they were when the dialog was filled in.
         if job.memory_budget_gb:
             args += ["--memory-budget-gb", str(job.memory_budget_gb)]
+        if job.solve_timeout_min:
+            args += ["--solve-timeout-min", str(job.solve_timeout_min)]
+        if job.checkpoint_dir:
+            args += ["--checkpoint", str(job.checkpoint_dir)]
+        if job.pause_file:
+            args += ["--pause-file", str(job.pause_file)]
 
     if getattr(sys, "frozen", False):
         return sys.executable, args

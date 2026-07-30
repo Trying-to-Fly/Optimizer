@@ -1,78 +1,262 @@
-# HANDOFF — Plane Optimizer (updated 2026-07-29, tenth session)
+# HANDOFF — Plane Optimizer (updated 2026-07-30, eleventh session)
 
-**New champion: 134.5 min** (`runs/20260729T203143-...`), on measured Aero-Naut
-CAM folding data with the prop freed to coarser pitch. FINDINGS section 13 has
-the result. This section is the WORK LIST — everything below is a known open
-issue with evidence attached, written for a fresh agent to pick up.
+**Champion still 134.5 min** (`runs/20260729T203143-...`) — no physics changed.
+This was a **solver-robustness** session and it ended with an answer:
+
+> **The three solves that have failed every run since M4.8 are INFEASIBLE
+> CORNERS, not solver defects.** `motor_mount = pusher` cannot meet the 0.08
+> static-margin floor; `span = 1.5 m` contains no aircraft at all. Four real
+> defects were found and fixed on the way there, and every one of them was
+> *masking* this rather than causing it.
+
+Practical consequences: **puller is now vindicated on merit**, not retained by
+default — pusher returns 106.55 min even with the stability window relaxed to
+0.05, against puller's 119.89 at 0.08. And **do not raise
+`SOLVE_TIMEOUT_MIN`**; the 60-minute pusher run proved more clock buys nothing.
+
+FINDINGS §14.5 carries the full chain, including three intermediate diagnoses
+that were tested and refuted — read those before re-deriving them.
+
+## FIXED this session
+
+- **The model was being evaluated outside its own variable bounds.**
+  `detect_simple_bounds` was at CasADi's default `False`, so every declared
+  bound was an ordinary constraint row — and an interior-point method may
+  violate constraints on the way to a solution. Row 72 of `g` (the row §13 saw
+  going NaN) is `L == W`, the first row after 36×2 bound rows. Now `True`.
+- **One real unguarded NaN, inside the box.** `fuselage.boom_body`'s exposed
+  length is a difference of four design variables held positive only by the
+  100 mm clearance constraint; where that is violated `aero.body_cd0` forms
+  `(negative Re)**0.2`. 23 of 600 random in-box points produced a NaN; after
+  `geometry.smooth_floor`, 0 of 1500. This is why the symptom lived in the
+  PUSHER solve specifically — that mount hangs the motor off the boom tip and
+  drives the optimizer against the short-boom bound.
+- **Failure messages no longer truncate the diagnosis.** `str(e)[:120]` cut
+  CasADi's assertion exactly before `return_status is '...'`. Failures now
+  record `return_status` + `iter_count` — which is the only reason issue 1
+  below could be reclassified at all.
+- **Per-solve wall-clock cap** — `SOLVE_TIMEOUT_MIN = 30`, `--solve-timeout-min`,
+  and a field in the GUI's New Run dialog. IPOPT's `max_wall_time`, not
+  `max_cpu_time`: a 13 GB solve on a 25 GB machine can swap, and it is the
+  clock we are protecting.
+- **One static-margin estimator.** The NLP used 3 alphas and the re-evaluation 5;
+  those are different quantities on a nonlinear Cm(CL) and differed by ~0.002.
+  Plus `sm_in_range` compared an ACTIVE constraint exactly, so the NLP's own
+  0.07999999 failed its own test — now a 1e-4 tolerance, the same convention
+  `stall_ok` already used.
+- **Constraint scaling.** Spar stress was compared in pascals and the Reynolds
+  floors in Reynolds numbers, against rows of order 1e-2 elsewhere. Both are now
+  dimensionless ratios. `inf_pr` at iteration 0: 5.16e+07 → 5.63. See issue 1.
+- **Where the time went** is now in `run.json` (`diagnostics.phase_minutes`) and
+  in the report, instead of being reconstructable only from the progress log.
+- **Full UIUC ingest** (old issue 9): 661 prop tables ship, 218 of them measured,
+  71 folding. Three data bugs found by doing it — see issue 6 below.
+- **A failed member now names the constraint it missed.** `SolveFailure` carries
+  the worst violations at the last iterate, each labelled with the source line
+  that created it, into `run.json` under `violations`. Verified on the real
+  model: 115 of 115 rows labelled. This is what turns "failed to converge" into
+  "sm >= 0.08, short by 8.3e-03".
+- **Pause and resume a battery** — `--checkpoint DIR` and `--pause-file FILE`,
+  plus a Pause button in the GUI. Creating the pause file stops the run at the
+  next member boundary; every finished member is on disk, so re-running the same
+  command continues instead of restarting, and the process exits so all ~13 GB
+  is released.
+
+  **Member boundaries are a physical limit, not a shortcut.** A solve in flight
+  is a CasADi graph plus IPOPT's barrier, filter and MUMPS state, none of it
+  serialisable through CasADi — freeing the memory necessarily destroys the
+  solve. The most that could be salvaged is the current iterate as a warm start,
+  and warm starts are already measured as a wash on this model (issue 5). So the
+  wait is at most one member (30 min) and it loses nothing, where an instant
+  pause would free the same memory and throw the solve away.
+- **Default test suite: ~20 min -> 61 s** (`slow` marker on the two end-to-end
+  render tests). Full suite **190 tests**, green.
 
 ## OPEN ISSUES, highest value first
 
-### 1. 87% of the run is spent on phases that fail or barely inform
+### 1. RESOLVED — the corners are infeasible (kept for the evidence trail)
 
-Wall-clock breakdown of the 405-minute 2026-07-29 evening battery:
+This replaces the previous issues 2, 3 and 4. The three solves that have failed
+every run were re-run with every fix above in place. **They all still fail, and
+they fail identically:**
 
-| phase | time | outcome |
+| solve | before | after |
 |---|---|---|
-| multistart | 11 min | fine |
-| **flatness sweep** | **173 min (43%)** | **2 of 6 converged** |
-| **re-solve battery** | **130 min (32%)** | 3 of 4; the failure ate most of it |
-| **study motor_mount** | **50 min** | **FAILED** |
-| study prop_choice | **12 min** | the entire point of the run |
-| topology / tail / dihedral / winglet | 28 min | fine |
-| re-eval + artifacts | 6 min | fine |
+| flatness `span = 1.5 m` | opaque assertion, up to 172 min | `Maximum_CpuTime_Exceeded` after **228 iterations**, 32.2 min |
+| `motor_mount = pusher` | opaque assertion + 52 NaN warnings, ~50 min | `Maximum_CpuTime_Exceeded` after **222 iterations**, 31.9 min |
+| `printed_mass_x1.10` | opaque assertion, three runs running | `Maximum_CpuTime_Exceeded` after **216 iterations**, 31.9 min |
 
-The prop study — the reason the run existed — cost 12 minutes. Everything in
-bold is the target. Fixing convergence is worth more than any modelling change
-on this list, because it buys back hours per run.
+Three independent perturbations, ~225 iterations each, and **never
+`Infeasible_Problem_Detected`**. The NaN was real and is gone; it was not the
+cause. So the iteration trace this called for was run — and it found two things.
 
-### 2. Flatness sweep does not converge at short span, and fails SLOWLY
+**Half of it turned out to be scaling, and that half is now fixed.** IPOPT opened
+the solve at `inf_pr = 5.16e+07`, because `spar_constraints` compared stress in
+**pascals** (~1e8) against its allowable while `Cm == 0` and the Vv floor are
+~1e-2 — a constraint vector spanning ten decades. Those rows are now
+dimensionless (`stress/allowable <= 1`, `Re/Re_min >= 1`; same feasible set).
+Measured: `inf_pr` at iteration 0 **5.16e+07 → 5.63**, iterations 228 → 194.
+Worth having regardless — that row dominated *every* solve, not just the failing
+ones. **Write new constraints dimensionless.**
 
-Spans 1.5/1.6/1.7/1.8 m all fail with IPOPT assertions; only 1.9 and 2.0 return.
-Identical four failed in the 2026-07-29 morning run, so this is reproducible and
-pre-existing, not warm-start damage. Worst case: the 1.8 m solve burned
-**172 minutes** before failing.
+Regression-gated: the nominal solve on the rescaled constraints returns
+`Optimal Solution Found` in **16 iterations / 126 s**, objective **119.89 min**,
+against the 2026-07-29 run's 119.89239 at the same configuration — the same
+optimum to five significant figures, as it must be.
 
-Two separable fixes, do both:
-- **Bail early.** A solve that is going to fail should not be allowed to run
-  three hours. There is no iteration cap or wall-clock guard on a member solve.
-- **Diagnose the short-span infeasibility.** Suspicion, unverified: at 1.5-1.8 m
-  the span cap is inactive, so area must come from chord, and something in the
-  spar-fit / stall / Vv set goes infeasible. Worth solving one by hand with
-  constraints relaxed one at a time to find which.
+**The other half is a degenerate active set, and it is still open.** With the
+primal side fixed the real signature shows:
 
-### 3. `motor_mount: pusher` has failed to converge THREE runs running
+| | baseline | rescaled |
+|---|---|---|
+| `inf_pr` at iter 0 | 5.16e+07 | **5.63** |
+| `inf_du` at the end | 5.78e+01 | **8.08e+04** (peaks 1.76e+12) |
+| `lg(mu)` | reaches −6.1, rebounds to +3.4 | never below −5.9, ends at 0.0 |
+| median `alpha_pr`, last 60 | 2.5e-03 | **2.9e-04** |
+| mean / max backtracks | 2.4 / 6 | **6.0 / 14** |
 
-So the mount is retained **by default, not by winning** — it is effectively
-unpriced, and FINDINGS section 10's puller adoption has not been re-confirmed
-since. This run finally produced a specific symptom:
+The iterates stay **feasible** (`inf_pr` ~1e-1) while **dual** infeasibility
+diverges twelve decades and the line search collapses to α ≈ 1e-5. Bounded primal
+residual with unbounded `inf_du` means the **Lagrange multipliers do not exist** —
+the active constraint gradients have gone linearly dependent (LICQ failure).
+There is nothing to converge to, which is also why the solver never calls it
+infeasible: the design is feasible, it just cannot be certified optimal.
 
-    52 x  WARNING("solver:nlp_g failed: NaN detected for output g, at (row 72, col 0)")
+**That SVD was run, and it named the pair.** 60 iterations to reach the
+degenerate region, then the singular values of the 7×36 active-row Jacobian:
 
-**All 52 occur inside the pusher solve and nowhere else.** That is a concrete
-lead the previous two runs did not give: constraint row 72 of the pusher build
-evaluates to NaN. Find which constraint that row is (build the Opti stack for
-`motor_mount = "pusher"` and index `opti.g`), then find which input makes it NaN.
-A NaN in a constraint is nearly always a sqrt/log/division of something that
-should have been guarded, not a genuine infeasibility.
+    2.060e+00  1.000e+00  5.707e-01  2.278e-01  1.472e-01  5.223e-02  0.000e+00
 
-### 4. `printed_mass_x1.10` re-solve fails (three runs running)
+Exactly rank-deficient, and the null direction has two contributors:
 
-Same IPOPT assertion, also failed in M4.8 and in the 2026-07-29 morning run. The
--10% member and both chain-eta members converge fine. Likely the same root cause
-as issue 2 — an over-constrained corner — and likely fixed by the same work.
+    +0.874 · g[0]    span's own LOWER BOUND          (slack exactly 0)
+    -0.486 · g[72]   subject_to(dv["span"] == 1.5)   (the `fixed` dict)
 
-### 5. Static margin lands under its floor — FOURTH champion running
+`aircraft.py:370` declares `"span": (1.5, span_cap_m)`; the sweep is
+`np.linspace(1.5, span_cap, 6)`. **The first member pins a design variable at its
+own lower bound with an equality** — the same constraint twice. LICQ violated by
+construction, multipliers non-unique, `inf_du` unbounded. Exactly the signature.
 
-SM 0.0782 against a 0.08 floor, `sm_in_range: false`. This is now a standing
-defect of the SM ESTIMATOR, not noise: the NLP holds SM >= 0.08 internally and
-the numeric re-evaluation disagrees by ~0.002. Also `sm_local_slopes` goes
-NEGATIVE at the cruise alpha. The build document states the consequence
-concretely: the CG target sits ~0.3 mm aft of its own aft limit.
+Worth fixing on its own:
 
-Until this is resolved, flow5 (or equivalent) should own the stability verdict
-before anything is built. Do not "fix" it by widening the mission window.
+1. **Apply `fixed` as a bound, not an equality row** — a held variable should get
+   `lower_bound = upper_bound = value` (one constraint, not two). Needs `fixed`
+   plumbed into `aircraft.design_variables` rather than applied afterwards in
+   `_solve_nlp`. Framework-level: *any* `fixed` value landing on a declared
+   bound hits this, not just span.
+2. **Don't sample a sweep exactly on a bound** — `linspace(1.5, …)` exposed it.
 
-### 6. M5.3 two-stage discrete studies — now clearly worth building
+**But that pair is NOT why the family fails — this was checked, not assumed.**
+The same solve at `span = 1.55 m`, off every bound:
+
+    Maximum_WallTime_Exceeded after 183 iterations (27.6 min)
+    inf_pr  5.29e+00 -> 7.06e-02      inf_du  3.21e+00 -> 1.11e+15
+    lg(mu) never below -5.9   alpha_pr median 8.6e-04   backtracks max 15
+
+Worse dual divergence than at 1.5 m. So the exact-zero singular value is real but
+incidental; the degeneracy is present across the short-span family, which is also
+what `pusher` and `printed_mass_x1.10` (no `fixed` dict at all) already implied.
+
+The "degenerate active set" reading is wrong as well — the same SVD at
+`span = 1.55 m` found **one** active row (the `span == 1.55` equality itself), so
+LICQ holds there, and `inf_du` still hits 1e15.
+
+### ROOT CAUSE: the objective has a pole inside the search box
+
+`mission/endurance.py` is `E_usable * 60 / (P_elec + P_avionics)`, so the
+gradient goes as `1/p_total²` — and `P_elec` is tied to anything physical only
+through `thrust == drag`, an **equality the solver is entitled to violate while
+iterating**. Sampling 3000 points inside the declared variable box:
+
+| | |
+|---|---|
+| `P_elec` range | **−109.3 W** to +867.3 W |
+| `p_total ≤ 0` | **703 of 3000 (23.4% of the box)** |
+| objective range | −2.6e+04 to **+5.5e+04 min** |
+| ‖∇objective‖ near the pole | **2.4e+07** |
+
+A quarter of the box sits past a singularity, and `p_total → 0⁺` sends endurance
+to `+∞` — an unbounded ascent direction that is not an aircraft. That accounts
+for all of it: `inf_du` spiking to 1e16 *and coming back* (huge gradient within a
+watt of the pole, ordinary away from it — degeneracy would not recover), the line
+search collapsing trying to cross it, feasibility never being the problem, and
+the champion converging because it starts well away and stays there.
+
+**FIXED.** `Objective` now carries an optional `nlp_surrogate` (always
+minimized) beside its reporting `evaluator`, and `solve._solve_nlp` forms the
+solver's objective through the single seam `nlp_expression()`. Endurance declares
+`p_total`: for fixed usable energy, maximizing `E·60/p_total` is exactly
+equivalent to minimizing `p_total` where `p_total > 0`. Reported values are
+unchanged (nominal returns the same 119.89 min / 2.0000 m / 1834.9 g digits).
+`tests/test_objectives.py` pins the monotone claim.
+
+It worked — on the dual side, and only there:
+
+| `span = 1.5 m` | with the pole | pole removed |
+|---|---|---|
+| `inf_du` at end | 8.08e+04 | **1.10e+01** |
+| `lg(mu)` at end | 0.0 (stalled) | **−2.5** (descending) |
+| median `alpha_pr` | 2.9e-04 | **1.5e-03**, max 1.0 |
+| restoration iterations | 0 | **33** |
+| `inf_pr` minimum | 9.12e-02 | 8.79e-02 |
+
+### …and the remaining obstruction is PRIMAL — the original guess was right
+
+With the dual side healthy, `inf_pr` floors (~0.09 short-span, ~7e-03 pusher) and
+IPOPT drops into feasibility restoration. It cannot reach a feasible point. That
+vindicates the 2026-07-29 "over-constrained corner" hypothesis, which was
+invisible under two layers of numerical noise (a 5e7 scaling artefact and a
+1e7-gradient pole) that had to be removed before it could be seen.
+
+**And it is stuck, not slow.** Pusher looked like the best "needs more clock"
+candidate; given 60 minutes it ran **474 iterations** (2.5x) and got no closer —
+`inf_pr` min 6.73e-03 against 8.18e-03, `inf_du` drifting up to 1.35e+04, 29
+restoration phases. **Do not raise `SOLVE_TIMEOUT_MIN`**; 30 min is right and the
+cap is doing its job.
+
+**ANSWERED.** At the pusher's last iterate the dominant violation is
+`sm >= 0.08` sitting at 0.07170 (2.5x the next-largest), with a well-conditioned
+active Jacobian (cond 14.7 — so no degeneracy). Relaxing the floor settles it:
+
+| case | SM floor 0.08 | SM floor 0.05 |
+|---|---|---|
+| `motor_mount = pusher` | timeout at 25 AND 60 min | **CONVERGED, 5.7 min**, 106.55 min, SM exactly 0.050000 |
+| flatness `span = 1.5 m` | timeout, 199 iters | **`Infeasible_Problem_Detected`**, 131 iters |
+
+Pusher cannot make the mission's stability window; span 1.5 m holds no aircraft
+even with that window opened. Both are answers, not bugs.
+
+`motor_mount` is therefore **settled**: puller wins on merit (119.89 at SM 0.08
+vs pusher's 106.55 at a *relaxed* 0.05), and FINDINGS §10's adoption stands.
+
+**Now shipped so this never needs a bespoke script again:** a failed member
+records the constraints it missed, each labelled with the source line that made
+it, under `violations` in `run.json`. Plus:
+
+    uv run python tools/degeneracy.py --mount pusher --iters 150
+    uv run python tools/parse_trace.py <ipopt.log>
+
+**The one open question is a design decision, not a defect:** the flatness sweep
+samples `linspace(1.5, cap, 6)` and the low end is infeasible, so it spends
+~30 min per member asking a question with no answer. Either start the sweep above
+the feasible floor, or let a member that reports `Infeasible_Problem_Detected`
+mark the rest of that tail infeasible and stop.
+
+### 2. Static margin: the estimator is fixed, the FIDELITY is not
+
+The two-estimator artefact is gone. What remains is real and unchanged:
+`sm_local_slopes` goes NEGATIVE at the cruise alpha, i.e. Cm(CL) is nonlinear
+enough over ±2° that "the" static margin depends on the window you measure it
+over. A regression slope is a defensible summary of that, but it is a summary.
+
+flow5 (or equivalent) should still own the stability verdict before anything is
+built. Do not "fix" it by widening the mission window.
+
+The build document now states the verdict outright — whether the CG target is
+inside the window it derives — instead of printing two millimetre numbers and
+leaving the reader to subtract.
+
+### 3. M5.3 two-stage discrete studies — now clearly worth building
 
 The cheap screen predicted the 11x10's full re-solve to within **1 min**
 (screen 134.5, re-solve 133.5). That is the evidence this was waiting on: a
@@ -80,7 +264,7 @@ screen through `propulsion.solve()` at the incumbent operating point is a
 reliable shortlister, so a study can search hundreds of candidates and
 full-re-solve only the top N. EXECUTION_PLAN section 6 has the design.
 
-### 7. Prop shortlist is still capped at 11 in, and the cap costs minutes
+### 4. Prop shortlist is still capped at 11 in, and the cap costs minutes
 
 `motor_prop` is a flat 190 g point mass and prop ground clearance is unmodelled,
 so neither is a function of diameter — which is why candidates are held to 11 in.
@@ -88,7 +272,7 @@ Larger measured folders screen materially better: **12x10 at 143.1 min**, 14x9 a
 141.7, 13x11 at 139.9, against the adopted 11x10's 134.5. Removing the cap needs
 a diameter-dependent motor+prop mass and a clearance rule, THEN a wider list.
 
-### 8. Warm start is a wash — do not bother, or fix it properly
+### 5. Warm start is a wash — do not bother, or fix it properly
 
 Solve times warm 3.9/6.1/9.1 min vs cold 4.6/5.5/9.9 the run before. No
 meaningful gain, as predicted: IPOPT is an interior-point method and this
@@ -98,21 +282,36 @@ startup regardless of the seed. Either drop `--warm-start` from normal use or
 investigate IPOPT's actual warm-start options (`mu_init`, `warm_start_init_point`,
 bound_push/bound_frac) rather than only seeding primal values.
 
-### 9. Smaller items
+### 6. Smaller items
 
-- **149 non-folding UIUC props not ingested** (1202 files); `--only-folding` was
-  used at the user's request. `data/props/_uiuc_cache/` already holds ~1004
-  files. Resume with `tools/ingest_uiuc.py --fetch`. **Fetch politely** — 8
-  concurrent workers got this client TLS-blocked at the edge on BOTH hostnames
-  with no HTTP fallback, and it only cleared on a VPN switch. The tool is now
-  sequential and paced.
+- **UIUC ingest is COMPLETE** (2026-07-30): all four volumes, 1750 files (4 dead
+  links), 218 propellers fitted, 71 folding, 661 tables shipping in total. Every
+  one of the 70 previously committed fits is byte-identical, and the sample
+  aircraft's shortlist is an explicit list of 5 `uiuc_ancf_*` keys, so nothing
+  in any solve moved. Three data bugs surfaced by doing it, all fixed:
+  - **Volume 2 states some sizes in MILLIMETRES** ("130 mm X 70 mm"). The size
+    regex required inches and failed silently, and because a size heading is
+    carried forward until the next one, four propellers inherited a
+    *neighbour's* diameter — which propagates into `re_coeff` (~ D²).
+  - **`kpf` was labelled "Kyosho PF"**; the volume-2 page's own heading reads
+    **"KP / Folding"**. A folding line was shipping as fixed. Four other
+    prefixes (`ef`, `mi`, `mit`, `pl`, `vp`) had no mapping at all and came out
+    as manufacturer `unknown` — which also makes `folding` unreachable, since
+    it is keyed on (manufacturer, series). The ingester now WARNS on an
+    unmapped prefix instead of shipping it quietly.
+  - **`apcsp_9x6` and `gwsdd_9x5` were tested in BOTH volume 1 and volume 2**,
+    and the fit file is named from the stem, so the second campaign silently
+    overwrote the first. Keys are now deduplicated with a `_v<n>` suffix; the
+    first volume to carry a stem keeps the plain key, so no existing key moved.
 - **UIUC Reynolds is estimated**, not tabulated (`re_estimated: true`): c_75 is
   taken as 0.0638 x D, the ratio APC's own tables imply. The FIT is unaffected
   (a wrong constant is absorbed by the stored normalisation) but the REPORTED
   Reynolds is good to roughly +/-20%.
-- **`test_run.py` takes ~20 min** — report rendering, not solving. Only the NLP
-  test carries the `solve` marker; a `slow` marker on the other two would make
-  the default suite ~60 s.
+- **Volume 2 coverage is partial by construction.** The manifest only sees files
+  matching `<prefix>_<D>x<P>_`, so blocks named otherwise (Crazyflie, DA40xx,
+  NR640, Union, KP's non-size headings) are skipped entirely. 219 propellers of
+  a larger database. Not corruption — every fitted prop's filename size
+  reconciles with its recorded size — but not "the whole DB" either.
 - **CF boom is invisible in the viz twin** (no loft), cosmetic, long-standing.
 
 ---
@@ -179,7 +378,10 @@ section 6): screen every candidate cheaply through `propulsion.solve()` at the
 incumbent operating point, then full-re-solve only the top N. That turns 70
 candidates into ~5 solves and makes the cap unnecessary. It is NOT built.
 
-## NOT DOWLOADED — the rest of the UIUC database
+## ~~NOT DOWLOADED~~ — the rest of the UIUC database
+
+> **RESOLVED 2026-07-30.** The full four-volume ingest is done — see the current
+> session's issue 8. The table below is the state as it stood on 2026-07-29.
 
 Only the folding families were fetched and fitted, at the user's request
 (they had to leave mid-session).

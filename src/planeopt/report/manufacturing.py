@@ -241,6 +241,23 @@ def _build(result: types.RunResult, airplane, aircraft=None) -> tuple[str, dict]
         sm = bal.get("static_margin")
         if sm is not None:
             L += [f"- **As-designed static margin:** {sm:.4f}"]
+            # State the verdict rather than leaving a builder to compare two
+            # millimetre numbers themselves. When the CG target lands outside
+            # the window this document derives, that is the single most
+            # important line on the page and it must not be inferred.
+            if "cg_fwd_limit_m" in bal:
+                x_cg = bal["x_cg_m"]
+                aft_by = x_cg - bal["cg_aft_limit_m"]
+                fwd_by = bal["cg_fwd_limit_m"] - x_cg
+                over, edge = max((aft_by, "aft of the aft"), (fwd_by, "forward of the forward"))
+                L += [
+                    "- **The CG target is INSIDE its own allowable range.**"
+                    if over <= 0
+                    else f"- **WARNING — the CG target is {over * 1000:.1f} mm {edge} "
+                    "limit** derived just above. The design does not meet the "
+                    "stability window it was optimized against; treat the margin as "
+                    "unverified until an external check (flow5 or equivalent) settles it."
+                ]
         ballast = ((result.masses or {}).get("components") or {}).get("nose_ballast")
         if ballast is not None:
             L += [f"- **Nose ballast in this design:** {abs(ballast) * 1000:.0f} g"]

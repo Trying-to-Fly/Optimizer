@@ -40,6 +40,9 @@ from .workspace import Workspace
 
 
 FIELD_WIDTH = 150  # every value field the same width, so the column reads as a column
+#: Must equal planeopt.solve.SOLVE_TIMEOUT_MIN — see the spin box below for why
+#: it is copied rather than imported. tests/test_gui.py holds them together.
+SOLVE_TIMEOUT_MIN_DEFAULT = 30
 
 
 def _spin(minimum: float, maximum: float, step: float, decimals: int, suffix: str) -> QDoubleSpinBox:
@@ -172,6 +175,26 @@ class NewRunDialog(QDialog):
         self.flatness = QCheckBox("span flatness sweep")
         self.flatness.setChecked(True)
         options.addWidget(self.flatness)
+        options.addSpacing(16)
+        # Per-solve wall-clock ceiling. A battery is a fixed set of independent
+        # solves, so one that diverges has no natural end and can quietly own the
+        # whole run — a single flatness member once took 172 minutes and failed
+        # anyway. Exposed because "how long am I willing to spend finding out
+        # this member does not converge?" is the user's call, not the model's.
+        options.addWidget(QLabel("Solve timeout"))
+        self.solve_timeout = QSpinBox()
+        self.solve_timeout.setRange(5, 240)
+        # Literal, not an import of planeopt.solve: that module pulls in
+        # aerosandbox, and paying seconds of import cost to fill in a spin box
+        # would show up as a stalled dialog. A test pins the two together.
+        self.solve_timeout.setValue(SOLVE_TIMEOUT_MIN_DEFAULT)
+        self.solve_timeout.setSuffix(" min")
+        self.solve_timeout.setToolTip(
+            "Wall-clock ceiling for ONE member solve. A converging solve takes "
+            "4-10 minutes. A member that hits the cap is recorded as "
+            "Maximum_WallTime_Exceeded and the batch carries on."
+        )
+        options.addWidget(self.solve_timeout)
         options.addStretch(1)
         mode_layout.addLayout(options)
 
@@ -232,7 +255,7 @@ class NewRunDialog(QDialog):
 
     def _update_mode(self) -> None:
         optimizing = self.mode_optimize.isChecked()
-        for widget in (self.multistart, self.flatness):
+        for widget in (self.multistart, self.flatness, self.solve_timeout):
             widget.setEnabled(optimizing)
         # Concurrency only exists inside an optimize battery — an evaluation is
         # a single pass, so offering to spread it over memory would be a lie.
@@ -341,6 +364,19 @@ class NewRunDialog(QDialog):
             optimize=self.mode_optimize.isChecked(),
             multistart=self.multistart.value(),
             flatness=self.flatness.isChecked(),
+            solve_timeout_min=float(self.solve_timeout.value()),
+            # Every optimize job gets a checkpoint directory and a pause
+            # sentinel, unasked. They cost nothing when unused, and the
+            # alternative is a Pause button that is greyed out exactly when
+            # someone finally wants it, four hours into a battery.
+            checkpoint_dir=(
+                self._runs_dir / "_checkpoints" / mission.name
+                if self.mode_optimize.isChecked() else None
+            ),
+            pause_file=(
+                self._runs_dir / "_checkpoints" / f"{mission.name}.PAUSE"
+                if self.mode_optimize.isChecked() else None
+            ),
             memory_budget_gb=(
                 self.memory_budget.value()
                 if self.mode_optimize.isChecked() and self.memory_enabled.isChecked()

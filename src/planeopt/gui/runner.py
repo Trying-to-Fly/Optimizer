@@ -36,6 +36,22 @@ class RunQueue(QObject):
         self.queue_changed.emit()
         self._start_next()
 
+    def pause(self, job: Job) -> bool:
+        """Ask a running job to stop at its next member boundary.
+
+        Unlike cancel, this keeps the work: the child writes each finished
+        member to its checkpoint directory and exits cleanly, so re-queuing the
+        same job continues instead of restarting. It cannot be instant — a solve
+        in progress holds ~13 GB of solver state that cannot be saved, so the
+        only stop that frees memory without discarding work is one that waits
+        for the member to finish (up to the solve timeout).
+        """
+        if job is not self._current or self._process is None or not job.pause_file:
+            return False
+        job.pause_file.parent.mkdir(parents=True, exist_ok=True)
+        job.pause_file.write_text("pause requested from the GUI\n", encoding="utf-8")
+        return True
+
     def cancel(self, job: Job) -> None:
         """Cancel a queued job, or kill it if it is the running one."""
         if job is self._current and self._process is not None:

@@ -10,6 +10,28 @@ from __future__ import annotations
 import math
 
 import aerosandbox as asb
+import aerosandbox.numpy as anp
+
+
+def smooth_floor(x, floor: float = 0.0, tau: float = 1e-3):
+    """`max(x, floor)`, but differentiable and finite on both sides.
+
+    A dimension the optimizer does not own directly — an exposed boom length, a
+    clearance, a gap — is only kept positive by a nonlinear constraint, and an
+    interior-point method reaches the solution through points that violate those.
+    A length that goes negative on the way then produces a negative Reynolds
+    number, `(-Re)**0.2` is NaN, and one NaN in a constraint row poisons the
+    solve rather than merely rejecting the point (HANDOFF issue 3: 52 such
+    warnings, all inside the pusher solve, at row 72 of `g`).
+
+    The hyperbola `floor + ((x-f) + sqrt((x-f)^2 + tau^2)) / 2` is the standard
+    smooth hinge: strictly above `floor`, exact to within tau^2/(4(x-f)) once
+    clear of it, and with a bounded derivative through it. `tau` is a LENGTH in
+    the same units as x — 1 mm by default, a hundredth of the 100 mm boom
+    clearance it sits under, where it costs 2.5 um. No feasible design feels it.
+    """
+    d = x - floor
+    return floor + 0.5 * (d + anp.sqrt(d * d + tau * tau))
 
 
 def superellipse_chords(etas, c_root, taper, fullness):

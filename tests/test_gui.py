@@ -150,6 +150,63 @@ def test_evaluate_command_omits_optimizer_only_flags(tmp_path):
     _, args = jobs.program_and_args(_job(tmp_path, optimize=False))
     assert "run" in args
     assert "--multistart" not in args and "--no-flatness" not in args
+    assert "--solve-timeout-min" not in args  # nothing to time-box in one pass
+
+
+def test_solve_timeout_reaches_the_child(tmp_path):
+    """The per-solve wall-clock cap is the app's guard against one diverging
+    member owning a whole battery, so it has to survive the queue -> subprocess
+    hop rather than only existing in the dialog."""
+    _, args = jobs.program_and_args(_job(tmp_path, solve_timeout_min=45.0))
+    assert args[args.index("--solve-timeout-min") + 1] == "45.0"
+    # unset means "let the CLI's own default stand", not "no limit"
+    assert "--solve-timeout-min" not in jobs.program_and_args(_job(tmp_path))[1]
+
+
+def test_checkpoint_and_pause_reach_the_child(tmp_path):
+    """The GUI's Pause button works by writing a sentinel the child polls, so
+    both paths have to survive the queue -> subprocess hop or the button does
+    nothing at all."""
+    job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt",
+               pause_file=tmp_path / "ckpt" / "m.PAUSE")
+    _, args = jobs.program_and_args(job)
+    assert args[args.index("--checkpoint") + 1] == str(tmp_path / "ckpt")
+    assert args[args.index("--pause-file") + 1] == str(tmp_path / "ckpt" / "m.PAUSE")
+
+    plain = jobs.program_and_args(_job(tmp_path))[1]
+    assert "--checkpoint" not in plain and "--pause-file" not in plain
+
+
+def test_pause_writes_the_sentinel_only_for_the_running_job(tmp_path):
+    """Pause must never kill: it asks, and the run stops at a boundary it
+    chooses. A queued (not yet started) job has nothing to ask."""
+    from planeopt.gui import runner
+
+    queue = runner.RunQueue.__new__(runner.RunQueue)  # no Qt event loop needed
+    pause_path = tmp_path / "ckpt" / "m.PAUSE"
+    running = _job(tmp_path, pause_file=pause_path)
+    queued = _job(tmp_path, pause_file=tmp_path / "other.PAUSE")
+    queue._current = running
+    queue._process = object()  # stands in for the live QProcess
+
+    assert queue.pause(running) is True
+    assert pause_path.read_text(encoding="utf-8").strip()
+
+    assert queue.pause(queued) is False
+    assert not (tmp_path / "other.PAUSE").exists()
+
+    # a job queued without a checkpoint cannot be paused, and says so
+    queue._current = bare = _job(tmp_path)
+    assert queue.pause(bare) is False
+
+
+def test_the_dialog_default_matches_the_solver_default():
+    """newrun copies the number instead of importing planeopt.solve (which drags
+    in aerosandbox and would stall the dialog). Copies drift; this pins them."""
+    from planeopt import solve
+    from planeopt.gui import newrun
+
+    assert newrun.SOLVE_TIMEOUT_MIN_DEFAULT == solve.SOLVE_TIMEOUT_MIN
 
 
 def test_source_install_goes_through_python_m_planeopt(tmp_path):

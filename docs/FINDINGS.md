@@ -562,3 +562,394 @@ converge a third time (so puller is retained by default, not by winning) — thi
 time with 52 `NaN detected for output g, row 72` warnings confined entirely to
 that solve; `printed_mass_x1.10` failed a third time; and the flatness sweep
 returned 2 of 6 while consuming 43% of the run.
+
+## 14. What was actually wrong with the solver (2026-07-30 — M4.12)
+
+Not a design finding: a **solver-robustness** one. Two real defects were found
+and fixed — and, importantly, **neither of them was why the chronic solves
+fail**. The headline result of this session is a corrected diagnosis, not a
+repaired battery.
+
+| §13 symptom | verdict |
+|---|---|
+| NaN at `g` row 72, only in the pusher solve | **real bug, fixed** (§14.1, §14.2) |
+| "failed to converge", three runs running | **was never diagnosable** — message truncated (§14.3) |
+| short span / pusher / printed_mass fail | **still fail.** Three real defects found and fixed en route (§14.5.1, §14.5.5); the residue is a PRIMAL feasibility obstruction (§14.5.6-7) |
+| SM under its floor, four champions running | **estimator artefact, fixed** (§14.6) |
+
+### 14.1 The model was being evaluated outside its own bounds
+
+`opti.solve()` ran with CasADi's `detect_simple_bounds` at its default `False`,
+so every design variable's `lower_bound`/`upper_bound` was an ordinary row of the
+constraint vector `g` rather than a bound. **An interior-point method is entitled
+to violate constraints on the way to a solution** — it is only bounds it must
+respect — so IPOPT was routinely evaluating the aircraft at negative chords and
+negative boom lengths. Row 72 of `g` is the first row after the 36×2 bound rows,
+i.e. `L == W`, which is exactly the row §13 saw going NaN.
+
+Measured on a 4-variable probe: `detect_simple_bounds=True` takes the problem
+from 9 inequality rows / 12 Jacobian nonzeros to **1 / 4**. On the real NLP it
+removes 72 rows and puts the box where IPOPT cannot leave it.
+
+### 14.2 One genuine unguarded NaN, inside the box
+
+Independently of that, `fuselage.boom_body` was NaN-capable **within** the
+declared bounds. The exposed boom length is not a design variable — it is
+
+    x_tail − (pod bay_end + pod tail_len)
+
+a difference of four of them, held positive only by the aircraft's 100 mm
+boom-clearance constraint. Where that constraint is violated the length is
+negative, `aero.body_cd0` forms `(ρVL/µ)**0.2` on a negative number, and the
+result is NaN. Sampling the declared box at 600 random points, **23 made
+`body_cd0` NaN**. After flooring the length (`geometry.smooth_floor`, a 1 mm
+smooth hinge costing 2.5 µm at the clearance bound), a 1500-point sweep of the
+same box found **no non-finite row anywhere in `g`** — while the same sweep
+widened 50% past the bounds still finds them (rows 72, 73, 74, 113, 114), which
+is precisely the region §14.1 stops IPOPT from visiting.
+
+**Why only the pusher solve.** With `motor_mount = "pusher"` the motor hangs at
+`x_tail + 0.08`, dragging the CG aft, so the optimizer works hard against a short
+boom and its iterates cross zero. The puller keeps the motor in the nose and
+never goes near it. §13's "52 warnings, all in one solve" was that, not a
+coincidence.
+
+### 14.3 The failure message was truncated exactly at the diagnosis
+
+Every failed member was recorded as `str(e)[:120]`. CasADi's assertion text ends
+with `return_status is '...'`, so 120 characters kept the boilerplate and threw
+away the only useful word. Three runs of "failed to converge" carried no
+information at all. Failures now record `return_status` and `iter_count`.
+
+That change paid for itself immediately — see §14.4.
+
+### 14.4 What the fixes did NOT fix
+
+The three solves that have failed every run were re-run with everything above in
+place. All three still fail, and they fail **identically**:
+
+| solve | before | after |
+|---|---|---|
+| flatness `span = 1.5 m` | opaque assertion, up to 172 min | `Maximum_CpuTime_Exceeded` after **228 iterations**, 32.2 min |
+| `motor_mount = pusher` | opaque assertion + 52 NaN warnings, ~50 min | `Maximum_CpuTime_Exceeded` after **222 iterations**, 31.9 min |
+| `printed_mass_x1.10` | opaque assertion, three runs running | `Maximum_CpuTime_Exceeded` after **216 iterations**, 31.9 min |
+
+(Those runs used a CPU-time cap — what AeroSandbox's `max_runtime` maps to — and
+overshot the 30-minute budget by ~2 minutes of wall clock, because IPOPT checks
+only between iterations and against CPU seconds. The shipped guard is now
+`ipopt.max_wall_time`, reporting `Maximum_WallTime_Exceeded`.)
+
+So the NaN was a genuine hazard and a genuine bug, but it was **not the cause of
+these failures** — remove it and they fail the same way, in the same place, at
+the same iteration count. Saying otherwise would have closed the issue on a
+coincidence.
+
+### 14.5 The real defect behind all three: scaling, then degeneracy
+
+Two independent solves, two unrelated perturbations (a fixed span 25% below the
+cap; a motor moved 600 mm aft), and the same signature: **~225 iterations, no
+convergence, and never `Infeasible_Problem_Detected`**. That last part is the
+informative one.
+
+HANDOFF issue 2 guessed "an over-constrained corner … something in the
+spar-fit / stall / Vv set goes infeasible", and issue 4 guessed the same cause
+for `printed_mass_x1.10`. **IPOPT does not agree.** It never declares the problem
+infeasible; it iterates until the clock stops it. That rules out the constraint
+audit those issues proposed and points at slow or cycling convergence — bad
+scaling, or an active set the solver keeps swapping between.
+
+So an **iteration trace** was run on `span = 1.5 m`. It found two separate
+things, one fixed and one not.
+
+#### 14.5.1 The constraint vector spanned ten decades (fixed)
+
+IPOPT opened the solve at **`inf_pr = 5.16e+07`**. The cause is dimensional:
+`structures.spar_constraints` wrote `stress <= SIGMA_ALLOW / SAFETY_FACTOR` with
+stress in **pascals** (~1e8) and the Reynolds floors as `... >= 90e3` (~1e5),
+while `Cm == 0`, the tail-volume floor and the SM window are all ~1e-2. Those
+rows now divide through by their own scale — `stress/allowable <= 1`,
+`Re/Re_min >= 1` — which is the identical feasible set with an order-1 residual.
+
+Measured effect on the same solve: **`inf_pr` at iteration 0 falls 5.16e+07 →
+5.63**, and the iteration count drops 228 → 194. Worth having on its own — this
+row dominated every solve in the project, not just the failing ones. **Write new
+constraints dimensionless.**
+
+**Regression gate — the solve that already worked still works.** Re-running the
+nominal solve on the rescaled constraints:
+
+    EXIT: Optimal Solution Found.   16 iterations, 126 s in IPOPT (4.7 min total)
+    objective 119.89 min, span 2.0000 m, SM 0.080000, V 9.500 m/s
+
+against the 2026-07-29 run's three multistart solves at the same configuration
+(`prop_choice` baseline `cam_11x6`), which returned 119.8923910272774,
+119.8923910903929 and 119.8923910920559. **Same optimum to five significant
+figures.** As expected: dividing a constraint by a positive constant cannot move
+the feasible set. Wall clock on this easy solve is unchanged (4.7 min against
+4.6/5.5/9.9 cold previously — the time is model build, not solving); the win is
+conditioning, and it shows on the hard corners.
+
+#### 14.5.2 Second reading: a degenerate active set — LATER REFUTED (14.5.4)
+
+It still does not converge, and with the primal side fixed the real signature is
+visible:
+
+| | baseline | rescaled |
+|---|---|---|
+| `inf_pr` at iter 0 | 5.16e+07 | **5.63** |
+| `inf_pr` at the end | 2.88e-01 | 1.05e-01 |
+| `inf_du` at the end | 5.78e+01 | **8.08e+04** (peaks 1.76e+12) |
+| `lg(mu)` | 0.0 → −6.1 → +3.4 | never driven below −5.9, ends at 0.0 |
+| median `alpha_pr`, last 60 | 2.5e-03 | **2.9e-04** |
+| mean / max backtracks | 2.4 / 6 | **6.0 / 14** |
+| iterations | 228 | 194 |
+
+The problem stays essentially **feasible throughout** (`inf_pr` ~1e-1) while
+**dual** infeasibility diverges by twelve orders of magnitude, the barrier
+parameter cannot be reduced, and the line search collapses to α ≈ 1e-5 with 14
+backtracks. Bounded primal residual with unbounded `inf_du` is the textbook
+signature of **Lagrange multipliers that do not exist** — the active constraint
+gradients have gone linearly dependent (LICQ/MFCQ failure). There is nothing for
+IPOPT to converge *to*, which is also why it never reports infeasibility: the
+design is feasible, it just cannot be certified optimal.
+
+#### 14.5.3 The degenerate pair, named
+
+That experiment was run: 60 iterations to reach the degenerate region, then the
+SVD of the active rows' Jacobian at the last iterate.
+
+    active rows: 7        singular values of the 7x36 active Jacobian:
+    2.060e+00  1.000e+00  5.707e-01  2.278e-01  1.472e-01  5.223e-02  0.000e+00
+
+**Exactly rank-deficient**, and the null direction has only two contributors:
+
+    +0.874 · g[0]    span's own LOWER BOUND          (slack exactly 0)
+    -0.486 · g[72]   subject_to(dv["span"] == 1.5)   (solve.py, the `fixed` dict)
+
+`aircraft.py` declares `"span": (1.5, span_cap_m)` and the flatness sweep is
+`np.linspace(1.5, span_cap, 6)` — so **its first member pins a design variable at
+its own lower bound with an equality constraint**. `span >= 1.5` and
+`span == 1.5` are the same constraint twice, with identical gradients.
+
+**Caveat on this measurement, added after the fact.** The SVD above is over
+`opti.g`, the SYMBOLIC constraint list, which still contains the bound rows.
+With `detect_simple_bounds=True` CasADi hands plain bounds to IPOPT as `lbx`/
+`ubx` and would be expected to merge `x >= 1.5` with `x == 1.5` into a single
+fixed bound — in which case the solver never sees the duplicate and this exact
+zero is an artefact of where the analysis looked, not a defect IPOPT suffered.
+That reading is supported by §14.5.4: removing the duplication changes nothing.
+Treat it as a latent modelling smell worth tidying, not as a proven solver bug.
+
+Tidying it, if it is ever worth the churn:
+
+1. **Apply `fixed` as a bound, not as an equality row** — one constraint rather
+   than two. Deliberately NOT done: it changes the `design_variables(opti,
+   inits)` signature that every user aircraft implements, and it demonstrably
+   fixes nothing (§14.5.4). A breaking extension-point change needs a better
+   reason than tidiness.
+2. **Do not sample a sweep exactly at the variable's bound** — cheap, and the
+   flatness sweep could start at `1.5 + eps` for free.
+
+#### 14.5.4 …but that pair is NOT why the family fails either
+
+The obvious check was run — the same solve at **`span = 1.55 m`**, off every
+bound. It fails the same way:
+
+    Maximum_WallTime_Exceeded after 183 iterations (27.6 min)
+    inf_pr  5.29e+00 -> 7.06e-02        (well scaled, essentially feasible)
+    inf_du  3.21e+00 -> 1.11e+15        (worse than at 1.5 m)
+    lg(mu)  never below -5.9, ends +0.4
+    alpha_pr last 60: median 8.6e-04    backtracks: mean 5.5, max 15
+
+So the exact-zero singular value at 1.5 m is real, but **removing it would not
+have fixed anything** — it is one instance of a degeneracy that is present across
+the short-span family, not its cause. Same conclusion the `fixed`-free failures
+(`pusher`, `printed_mass_x1.10`) already implied.
+
+And the "degenerate active set" reading is wrong too. Running the same SVD at
+`span = 1.55 m` found **one** active row at the last iterate — the `span == 1.55`
+equality itself. One row cannot be linearly dependent on anything, so LICQ holds
+there, and yet `inf_du` still reaches 1e15. Whatever this is, it is not the
+constraint geometry.
+
+#### 14.5.5 Third defect, real and fixed: a pole in the objective
+
+`mission/endurance.py` is
+
+    endurance = E_usable * 60 / (P_elec + P_avionics)
+
+so the objective's gradient goes as `1/p_total²`. `P_elec` is tied to anything
+physical only through `thrust == drag` — an **equality**, which an interior-point
+method violates on the way to a solution. So `p_total` is not pinned positive
+while iterating. Sampling 3000 points **inside the declared variable box**:
+
+| | |
+|---|---|
+| `P_elec` range | **−109.3 W** to +867.3 W |
+| `p_total = P_elec + 3 W` ≤ 0 | **703 of 3000 samples (23.4% of the box)** |
+| samples within \|p_total\| < 1 W of the pole | 29 |
+| objective range | −2.6e+04 to **+5.5e+04 min** |
+| ‖∇objective‖ near the pole | **2.4e+07** |
+
+**A quarter of the box is on the far side of a singularity**, and as `p_total →
+0⁺` the endurance objective goes to `+∞` — an unbounded ascent direction that is
+not an aircraft, held back only by a constraint the solver is entitled to break.
+
+This explains every observation, including the ones that killed the earlier
+theories:
+
+- `inf_du` spiking to 1e16 **and falling back** — the gradient is ~1e7 within a
+  watt of the pole and ordinary away from it. Degeneracy would not come back down.
+- the line search collapsing to α ≈ 1e-5 with 13–15 backtracks — it is trying to
+  step across a singularity.
+- `lg(mu)` being pushed back up repeatedly.
+- **never `Infeasible_Problem_Detected`** — the feasible set is fine. The
+  *objective surface* is the defect.
+- the champion at 2.0 m converging in 16 iterations — it starts in the
+  well-behaved region and never goes near the pole. Forcing a short span (or an
+  aft motor, or +10% printed mass) pushes the iterates across it.
+
+#### 14.5.6 The reformulation — implemented, and what it did
+
+For fixed usable energy, maximizing `E·60/p_total` is *exactly equivalent* to
+**minimizing `p_total`** wherever `p_total > 0` — a monotone transform, since
+`usable_energy_wh` is constant hardware. `Objective` now carries an optional
+`nlp_surrogate` (always minimized) beside its reporting `evaluator`, and
+`solve._solve_nlp` forms the solver's objective through `nlp_expression()` — one
+seam, so a surrogate cannot be half-adopted. Endurance declares
+`p_total`; the reported value still comes from `evaluate`, so no artifact
+changed. Framework-level on purpose: every objective in `mission/` that divides
+by a solved quantity has the same exposure.
+
+**Regression: identical.** The nominal solve returns 119.89 min, span 2.0000 m,
+AUW 1834.9 g, SM 0.080000, V 9.500 m/s, P 20.70 W — the same digits as before the
+change, as a monotone transform must.
+
+**On the hard corner it fixed the dual side, and only the dual side:**
+
+| `span = 1.5 m` | with the pole | pole removed |
+|---|---|---|
+| `inf_du` at end | 8.08e+04 | **1.10e+01** |
+| `inf_du` minimum | 1.02e+00 | **9.91e-02** |
+| `lg(mu)` at end | 0.0 (stalled) | **−2.5** (descending) |
+| median `alpha_pr`, last 60 | 2.9e-04 | **1.5e-03**, max 1.0 |
+| restoration-phase iterations | 0 | **33** |
+| `inf_pr` minimum | 9.12e-02 | 8.79e-02 |
+| iterations / outcome | 194, timeout | 199, timeout |
+
+Four orders of magnitude off the dual infeasibility, the barrier parameter
+finally descends, and full unit steps appear. The pole was real and removing it
+worked. **But the solve still does not converge**, and the reason has changed:
+`inf_pr` floors at ~0.09 and will not go lower, while IPOPT drops into
+**feasibility restoration 33 times**.
+
+That is a *primal* obstruction — and it vindicates the original 2026-07-29
+hypothesis this section spent two rounds arguing against. "An over-constrained
+corner" was the right instinct; it was simply invisible under two layers of
+numerical noise (a 5e7 scaling artefact and a 1e7-gradient pole), both of which
+had to be removed before the feasibility problem could be seen at all.
+
+#### 14.5.7 And it is stuck, not slow — the timeout was never the problem
+
+The pusher solve looked like the best candidate for "just needs more clock": at
+the 25-minute cap it had reached `inf_pr` 8.18e-03 with near-full steps and only
+8 restoration phases. Given an hour it did not close.
+
+| pusher | 25-min cap | 60-min cap |
+|---|---|---|
+| iterations | 187 | **474** (2.5x) |
+| `inf_pr` minimum | 8.18e-03 | 6.73e-03 (no better) |
+| `inf_du` at end | 4.49e+01 | **1.35e+04** (worse) |
+| restoration-phase iterations | 8 | **29** |
+| outcome | timeout | timeout |
+
+`inf_pr` plateaus near 7e-03 and never closes while dual infeasibility drifts
+back up. So **raising `SOLVE_TIMEOUT_MIN` would buy nothing but a longer wait** —
+30 minutes stays the right default, and the cap is doing exactly its job by
+turning an unbounded grind into a bounded, labelled failure.
+
+Pusher and short span are the same primal obstruction at different severities:
+pusher gets an order of magnitude closer to feasible (7e-03 against 9e-02) and
+still cannot land.
+
+#### 14.5.8 RESOLVED: the corners were infeasible all along
+
+Asking which constraint could not be satisfied, at the pusher's last iterate:
+
+    VIOLATED rows: 15    total violation 3.25e-02    worst 8.30e-03
+      sm >= 0.08            value 0.07170   SHORT BY 8.30e-03   <-- dominant
+      L == weight                           off by  6.14e-03
+      winglet Re/60e3 >= 1  value 0.99504   short by 4.96e-03
+      Cm == 0                               off by  4.84e-03
+      ... 11 more, all <= 3e-03
+
+    active-row Jacobian: condition number 14.7, smallest singular value 6.8e-02
+
+Two things at once. The active Jacobian is **well conditioned** — cond 14.7 — so
+LICQ holds and §14.5.2's degeneracy reading is dead for good. And nothing is
+badly violated: every row is a near-miss. The dominant one, 2.5x the next, is the
+**static-margin floor**, which is exactly what a pusher attacks — the mount hangs
+the motor at `x_tail + 0.08` and drags the CG aft.
+
+Relaxing that floor settles it:
+
+| case | SM floor 0.08 | SM floor 0.05 |
+|---|---|---|
+| `motor_mount = pusher` | timeout at 25 AND 60 min (187, 474 iters) | **CONVERGED in 5.7 min**, 106.55 min, SM lands exactly on 0.050000 |
+| flatness `span = 1.5 m` | timeout, 199 iters | **`Infeasible_Problem_Detected`**, 131 iters |
+
+**Both chronic failures are infeasible corners, not solver defects.**
+
+- **Pusher cannot meet the 0.08 static-margin window.** It sits on whatever floor
+  it is given and wants to go further aft still. And it is not being robbed of a
+  win: at the *relaxed* floor it returns 106.55 min against the puller's 119.89
+  at the *stricter* one. FINDINGS §10's puller adoption is now vindicated on
+  merit rather than retained by default.
+- **`span = 1.5 m` contains no aircraft at all** — infeasible even with the
+  stability window opened up, and IPOPT now says so in 18 minutes instead of
+  grinding for 32 with an opaque assertion.
+
+The four defects fixed above (bounds in `g`, the boom NaN, ten-decade scaling,
+the objective pole) were all real, and all of them were *masking this*. None of
+them was the cause. It took removing every one before the solver could express
+the actual answer.
+
+#### 14.5.9 What that changed in the product
+
+A failed member now says what it failed ON. `SolveFailure` carries the worst
+constraint violations at the last iterate, each labelled with the source line
+that created it (`solve._ConstraintLabels` wraps `subject_to` during the build —
+per-instance, so a build that raises cannot leave a patch behind). Verified on
+the real model: 115 of 115 rows labelled, resolving to the exact lines this
+section found by hand. `run.json` carries them under `violations`.
+
+The bespoke script that produced the table above is no longer needed to answer
+the question — but it ships anyway as `tools/degeneracy.py` (violated rows, then
+the active-set SVD) alongside `tools/parse_trace.py` (tells scaling from
+degeneracy from infeasibility on any verbose IPOPT log).
+
+**Do not raise `SOLVE_TIMEOUT_MIN`.** 30 minutes is right: more clock buys
+nothing on an infeasible corner, as the 60-minute pusher run proved.
+
+Open, and now a design question rather than a solver one: should the flatness
+sweep still spend 30 minutes per member on spans that hold no aircraft? Sampling
+`linspace(1.5, cap, 6)` when the low end is infeasible is the sweep asking a
+question with no answer. Take the last iterate, list the rows with
+non-zero violation, then relax them one at a time and find which one frees the
+solve. Unlike everything above this is a *modelling* answer — the short-span
+corner may simply not contain a flyable aircraft, in which case the flatness
+sweep should report it as infeasible rather than grind on it.
+
+### 14.6 Static margin: two estimators, not one drifting number
+
+The NLP regressed Cm against CL over **3** alphas (−2, 0, +2) and the numeric
+re-evaluation over **5** (−2, −1, 0, +1, +2). Cm(CL) is nonlinear enough here
+that these are different quantities, and they differ by ~0.002 — a quarter of the
+0.08–0.15 SM window. Four champions were read as missing their own floor on that
+basis. There is now one estimator (`aero.SM_ALPHA_OFFSETS`), used by both; the
+extra alphas survive only as the `sm_local_slopes` diagnostic.
+
+Separately, `sm_in_range` compared an **active** constraint against its bound
+exactly, so the NLP's own converged 0.07999999 already failed the test. It now
+carries a 1e-4 tolerance — the same "active ≠ violated" convention `stall_ok`
+has always used, and tight enough that a real miss still reports as one.

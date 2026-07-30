@@ -46,7 +46,14 @@ dev = [
 # minutes, which is enough to push this machine into swap and is not something a
 # bare `pytest` should ever start by surprise. They are deselected by default and
 # run explicitly with `-m solve` (or `-m "solve or not solve"` for everything).
-addopts = "-m 'not solve'"
+#
+# `slow` marks the two end-to-end M1 tests. Neither optimizes anything — the
+# time is report rendering, and between them they were ~20 minutes of a suite
+# that is otherwise about a minute, which is long enough that the suite stops
+# being something you run after every edit. Deselected with the same default and
+# run with `-m slow`; CI should use `-m "slow or not slow"`.
+addopts = "-m 'not solve and not slow'"
 markers = [
     "solve: runs a full optimizer solve — minutes of runtime and GB of RAM",
+    "slow: minutes of runtime, but no NLP and no large memory footprint",
 ]

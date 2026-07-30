@@ -37,8 +37,15 @@ def spar_constraints(opti, od, wall, length, moment_nm, defl_frac: float = 0.05)
     """
     sec = tube(od, wall)
     stress = moment_nm * (od / 2) / sec["I"]
-    opti.subject_to(stress <= SIGMA_ALLOW / SAFETY_FACTOR)
+    # Written as a RATIO, not `stress <= allowable`. Both forms describe exactly
+    # the same feasible set — this one is divided through by a positive constant
+    # — but the residual the SOLVER sees changes from pascals (~1e8) to order 1,
+    # which is the whole point. This row used to dominate the constraint vector:
+    # IPOPT opened the short-span solve at inf_pr = 5.2e7 and spent hundreds of
+    # iterations recovering from it (FINDINGS §14.5).
+    opti.subject_to(stress / (SIGMA_ALLOW / SAFETY_FACTOR) <= 1.0)
     tip_defl = moment_nm * length**2 / (3 * E_CF * sec["I"])
+    # already order 1e-2 on both sides (metres) — left alone deliberately
     opti.subject_to(tip_defl <= defl_frac * length)
     opti.subject_to(wall <= od / 2 * 0.45)  # stay a tube, not a rod
 

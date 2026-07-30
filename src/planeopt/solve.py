@@ -31,6 +31,241 @@ log = logging.getLogger("planeopt")
 G = 9.81
 M1_STATUS = "M1: fixed-design evaluation (Phase 1 gate pipeline) — no optimizer"
 
+#: Wall-clock ceiling for ONE member solve, minutes. A converging solve on this
+#: model takes 4-10 minutes; the cap exists because a diverging one has no
+#: natural end — the 2026-07-29 flatness sweep spent 172 minutes on a single
+#: member before failing anyway, which is 43% of that run's wall clock spent
+#: learning nothing. Generous enough (3-5x the normal solve) that hitting it is
+#: itself the diagnosis, and recorded as `Maximum_WallTime_Exceeded` when it is.
+SOLVE_TIMEOUT_MIN = 30.0
+#: Iteration ceiling for one member solve (IPOPT's own `max_iter`).
+SOLVE_MAX_ITER = 1000
+#: How far outside the mission's static-margin window a reported SM may land and
+#: still count as satisfying it. An optimizer holds this constraint ACTIVE, so
+#: the comparison has to admit the solver's own convergence tolerance or it
+#: reports every champion as out of range.
+SM_ACTIVE_TOL = 1e-4
+
+
+class RunPaused(RuntimeError):
+    """A battery stopped cleanly at a member boundary, on request.
+
+    Not an error: everything finished is on disk in the checkpoint directory,
+    and re-running the same command resumes from there.
+    """
+
+
+def _jsonable(value):
+    """Plain-Python copy of a solve result, so it survives a JSON round trip.
+
+    Results carry numpy scalars and tuples (`clmax_ab_used`), which `json` would
+    either refuse or stringify — and a checkpoint that reloads a float as the
+    string "np.float64(1.23)" is worse than no checkpoint at all.
+    """
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, (str, bool)) or value is None:
+        return value
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return [_jsonable(v) for v in value.tolist()]
+    return str(value)
+
+
+class _SolveCache:
+    """Per-member results on disk, so a battery can be stopped and continued.
+
+    A battery is a few dozen INDEPENDENT solves spread over hours, which is what
+    makes this tractable: each member's result is pure data, so finishing one is
+    progress that never has to be repeated. The cache is keyed by
+    (phase label, member key) — the sequence is deterministic for a given
+    aircraft and mission, so that is enough to line a resumed run up with the
+    one it continues.
+
+    It deliberately does NOT try to checkpoint a solve in progress; see
+    `optimize`'s docstring for why that is not possible.
+    """
+
+    def __init__(self, directory: Path):
+        self.dir = Path(directory)
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def _path(self, label: str, key) -> Path:
+        safe = "".join(c if c.isalnum() or c in "-._" else "_" for c in f"{label}__{key}")
+        return self.dir / f"{safe}.json"
+
+    def get(self, label: str, key):
+        path = self._path(label, key)
+        if not path.is_file():
+            return None
+        try:
+            import json
+
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — a corrupt entry just means "re-solve"
+            log.warning("checkpoint %s is unreadable; re-solving that member", path.name)
+            return None
+
+    def put(self, label: str, key, result: dict) -> None:
+        import json
+
+        path = self._path(label, key)
+        try:
+            # write-then-rename: a run killed mid-write must not leave a
+            # half-file that the next run trusts
+            tmp = path.with_suffix(".json.part")
+            tmp.write_text(json.dumps(_jsonable(result), indent=1), encoding="utf-8")
+            tmp.replace(path)
+        except Exception as e:  # noqa: BLE001 — checkpointing must never kill a run
+            log.warning("could not checkpoint %s/%s: %s", label, key, e)
+
+
+class SolveFailure(RuntimeError):
+    """A member solve that did not converge, carrying the solver's own verdict.
+
+    CasADi's assertion text ends with `return_status is '...'` — the single
+    piece of information a reader needs — so truncating that message for a log
+    line drops exactly the diagnosis and keeps the boilerplate. The status is
+    therefore read from the solver's stats and put first.
+
+    `Infeasible_Problem_Detected` (over-constrained corner), `Restoration_Failed`
+    (usually a NaN or a badly scaled constraint) and `Maximum_WallTime_Exceeded`
+    (hit the guard above) call for completely different fixes, and until now the
+    run artifact could not tell them apart.
+    """
+
+    def __init__(self, opti, exc: BaseException, labels: dict[int, str] | None = None):
+        try:
+            stats = opti.debug.stats()
+        except Exception:  # pragma: no cover — stats missing before the first iterate
+            stats = {}
+        self.return_status = str(stats.get("return_status", "unknown"))
+        self.iter_count = stats.get("iter_count")
+        self.detail = str(exc)
+        self.violations = _worst_violations(opti, labels or {})
+        iters = "" if self.iter_count is None else f" after {self.iter_count} iterations"
+        worst = f"; closest miss {self.violations[0]['what']}" if self.violations else ""
+        super().__init__(f"{self.return_status}{iters}{worst}")
+
+
+def _worst_violations(opti, labels: dict[int, str], top: int = 5) -> list[dict]:
+    """Which constraints the last iterate could not satisfy, worst first.
+
+    A status alone says the solve failed; this says what it failed ON, which is
+    the difference between "the solver is broken" and "you asked for an aircraft
+    that does not exist". Both of the 2026-07-30 chronic failures turned out to
+    be the latter, and it took a bespoke script to find out — so the run now
+    answers it itself.
+
+    Diagnostics must never turn a failed solve into a crashed one, so the whole
+    thing is best-effort.
+    """
+    try:
+        import casadi as cas
+
+        x, g = opti.x, opti.g
+        if g.shape[0] == 0:
+            return []
+        xs = opti.debug.value(x)
+        gv = np.array(cas.Function("g", [x], [g])(xs)).ravel()
+        lbg = np.array(opti.debug.value(opti.lbg)).ravel()
+        ubg = np.array(opti.debug.value(opti.ubg)).ravel()
+        # how far outside its own bounds each row sits (0 when satisfied)
+        below = np.where(np.isfinite(lbg), lbg - gv, -np.inf)
+        above = np.where(np.isfinite(ubg), gv - ubg, -np.inf)
+        viol = np.maximum(np.maximum(below, above), 0.0)
+        viol = np.where(np.isfinite(viol), viol, 0.0)
+        rows = [r for r in np.argsort(-viol)[:top] if viol[r] > 1e-8]
+        return [
+            {
+                "row": int(r),
+                "by": float(viol[r]),
+                "value": float(gv[r]),
+                "what": labels.get(int(r), f"g[{int(r)}]"),
+            }
+            for r in rows
+        ]
+    except Exception:  # noqa: BLE001 — never mask the real failure
+        return []
+
+
+class _ConstraintLabels:
+    """Records which source line produced each row of `opti.g`, while building.
+
+    CasADi numbers constraint rows; a person needs "the static-margin floor".
+    Wrapping `subject_to` for the duration of the build is the only way to keep
+    that mapping, and it costs one stack walk per constraint against a solve
+    measured in minutes. Used only to make a FAILURE readable.
+
+    The wrapper is bound to the INSTANCE, not the class: an exception during the
+    build then cannot leave a global patch behind to corrupt every later solve
+    in the process, and two Opti stacks alive at once cannot see each other's.
+    """
+
+    def __init__(self, opti):
+        import traceback
+
+        self.spans: list[tuple[int, int, str]] = []
+        real = opti.subject_to  # already bound to this instance
+        spans = self.spans
+
+        def traced(constraint, *a, **kw):
+            before = opti.g.shape[0]
+            out = real(constraint, *a, **kw)
+            added = opti.g.shape[0] - before
+            if added > 0:
+                frame = next(
+                    (f for f in reversed(traceback.extract_stack()[:-1])
+                     if "aerosandbox" not in f.filename),
+                    None,
+                )
+                where = (
+                    f"{Path(frame.filename).name}:{frame.lineno} {(frame.line or '').strip()}"
+                    if frame is not None else "?"
+                )
+                spans.append((before, added, where[:120]))
+            return out
+
+        opti.subject_to = traced
+        self._opti = opti
+
+    def stop(self) -> None:
+        """Hand the Opti back its own method; safe to call more than once."""
+        self._opti.__dict__.pop("subject_to", None)
+
+    def as_dict(self) -> dict[int, str]:
+        return {r: src for start, n, src in self.spans for r in range(start, start + n)}
+
+
+def _failure_record(exc: BaseException) -> dict:
+    """The dict a failed job contributes to run.json."""
+    rec = {"failed": str(exc)[:280]}
+    if isinstance(exc, SolveFailure):
+        rec["return_status"] = exc.return_status
+        rec["iter_count"] = exc.iter_count
+        if exc.violations:
+            rec["violations"] = exc.violations
+        if exc.return_status == "unknown":
+            # no stats to read — the solver did not get far enough to have a
+            # verdict, so the raw exception text is all there is. Keep it.
+            rec["detail"] = exc.detail[:400]
+    return rec
+
+
+#: What a batch member's failure carries forward into the study/battery entry.
+#: Every summariser projects a solve result down to a few fields, and each one
+#: used to drop everything but the message.
+_FAILURE_FIELDS = (
+    "failed", "return_status", "iter_count", "violations", "detail", "solve_minutes",
+)
+
+
+def _failed_entry(r: dict) -> dict:
+    return {k: r[k] for k in _FAILURE_FIELDS if k in r}
+
 
 def run(
     aircraft: AircraftDefinition,
@@ -176,10 +411,18 @@ def run(
             # recorded, not just checked: the build document derives the allowable
             # CG window from this and cannot do so from the run artifact otherwise
             "static_margin_range": [float(x) for x in mission.static_margin_range],
+            # Tolerance, for the same reason stall_ok has one: the NLP drives
+            # this constraint ACTIVE, so an exact comparison against the bound
+            # reports every optimized design as violating it — IPOPT converges
+            # to 0.07999999 against a 0.08 floor and is entitled to. The
+            # tolerance is deliberately tight (1e-4, one part in 800 of this
+            # project's SM window): it absorbs solver and round-off noise and
+            # nothing else, so a design that genuinely misses its floor still
+            # says so.
             "sm_in_range": bool(
-                mission.static_margin_range[0]
+                mission.static_margin_range[0] - SM_ACTIVE_TOL
                 <= sm["static_margin"]
-                <= mission.static_margin_range[1]
+                <= mission.static_margin_range[1] + SM_ACTIVE_TOL
             ),
             "trim_deflection_deg": best["deflection_deg"],
         },
@@ -246,6 +489,7 @@ def _solve_nlp(
     extra_mass_kg: float = 0.0,
     printed_scale: float = 1.0,
     eta_scale: float = 1.0,
+    timeout_min: float = SOLVE_TIMEOUT_MIN,
 ) -> dict:
     """One NLP solve. Returns the champion design + state, all numeric.
 
@@ -259,6 +503,10 @@ def _solve_nlp(
     pt = aircraft.powertrain()
 
     opti = asb.Opti()
+    # Record which source line each constraint row comes from, so that if this
+    # solve fails the artifact can name the constraint it could not satisfy
+    # rather than a row index (_ConstraintLabels).
+    labels = _ConstraintLabels(opti)
     dv = aircraft.design_variables(opti, inits)
     bodies = aircraft.parasite_bodies(dv)  # may be symbolic (fuselage loft)
     # Operating-point box bounds. These are numerical brackets, not physics —
@@ -307,10 +555,12 @@ def _solve_nlp(
     opti.subject_to(pr["thrust_n"] == drag)
     opti.subject_to(pr["J"] < 0.95 * pr["j_max"])  # stay on the fitted table
 
-    # static margin about the produced CG: regression slope over a +/-2 deg
-    # window (LL's local Cm derivative is noisy — FINDINGS.md), plus the Munk
-    # fuselage destabilizing term converted to CL-space via the lift slope
-    offs = (-2.0, 0.0, 2.0)
+    # static margin about the produced CG: regression slope over the shared
+    # alpha window (LL's local Cm derivative is noisy — FINDINGS.md), plus the
+    # Munk fuselage destabilizing term converted to CL-space via the lift slope.
+    # The estimator itself lives in aero, so the numeric re-evaluation below
+    # measures the same quantity this constraint holds (aero.SM_ALPHA_OFFSETS).
+    offs = aero.SM_ALPHA_OFFSETS
     sm_runs = [
         asb.LiftingLine(
             airplane=airplane,
@@ -319,16 +569,10 @@ def _solve_nlp(
         ).run()
         for o in offs
     ]
-    cls = [r["CL"] for r in sm_runs]
-    cms = [r["Cm"] for r in sm_runs]
-    cl_mean = sum(cls) / 3
-    cm_mean = sum(cms) / 3
-    var_cl = sum((c - cl_mean) ** 2 for c in cls)
-    cov = sum((cls[i] - cl_mean) * (cms[i] - cm_mean) for i in range(3))
-    sm_surf = -cov / var_cl
-    a_deg = sum((offs[i] - 0.0) * (cls[i] - cl_mean) for i in range(3)) / sum(o**2 for o in offs)
-    cl_alpha_rad = a_deg * 180 / np.pi
-    sm = sm_surf - aero.fuselage_cm_alpha(bodies, s_ref, airplane.c_ref) / cl_alpha_rad
+    sm = aero.static_margin_from_polar(
+        [r["CL"] for r in sm_runs], [r["Cm"] for r in sm_runs],
+        list(offs), bodies, s_ref, airplane.c_ref,
+    )
     opti.subject_to(sm >= mission.static_margin_range[0])
     opti.subject_to(sm <= mission.static_margin_range[1])
 
@@ -380,10 +624,37 @@ def _solve_nlp(
         opti.subject_to(V <= float(placard))
 
     p_bus_eff = pr["p_bus_w"] / eta_scale  # eta_scale: chain-efficiency re-solves
+    # Two expressions, deliberately: `obj_expr` is what gets REPORTED, in the
+    # objective's own units, and is read back from the solution below. What the
+    # solver minimizes may be a better-behaved monotone equivalent — endurance's
+    # reported form is a quotient with a pole inside the variable box
+    # (mission.Objective.nlp_surrogate, FINDINGS §14.5.5).
     obj_expr = objective.evaluator(V, p_bus_eff, mission, pt)
-    opti.minimize(-obj_expr if objective.direction == "maximize" else obj_expr)
+    opti.minimize(objective.nlp_expression(V, p_bus_eff, mission, pt))
 
-    sol = opti.solve(verbose=False, max_iter=1000)
+    # detect_simple_bounds: hand the plain variable bounds to IPOPT as BOUNDS
+    # rather than as ordinary constraint rows. Without it the box lives in `g`,
+    # which an interior-point method is free to violate on the way to a
+    # solution — so the model gets evaluated at negative chords and negative
+    # boom lengths, and the resulting NaN is a solver failure rather than a
+    # rejected point. It also drops 2 rows per design variable from the
+    # Jacobian.
+    labels.stop()
+    try:
+        sol = opti.solve(
+            verbose=False,
+            max_iter=SOLVE_MAX_ITER,
+            detect_simple_bounds=True,
+            # WALL time, not CPU time. AeroSandbox's own `max_runtime` maps to
+            # IPOPT's `max_cpu_time`, which is the wrong unit for this guard: a
+            # solve peaks near 13 GB on a 25 GB machine, and the case worth
+            # bailing out of is exactly the one where it starts swapping and CPU
+            # time falls behind the clock. What is being protected is the run's
+            # wall clock, so that is what gets capped.
+            options={"ipopt.max_wall_time": 60.0 * timeout_min},
+        )
+    except RuntimeError as e:
+        raise SolveFailure(opti, e, labels.as_dict()) from None
     return {
         "dv": {k: float(sol(v)) for k, v in dv.items()},
         "V_ms": float(sol(V)),
@@ -407,10 +678,12 @@ def _solve_nlp(
 
 
 def _solve_worker(conn, aircraft, mission, kw):  # pragma: no cover — child process
+    t0 = time.monotonic()
     try:
         r = _solve_nlp(aircraft, mission, **kw)
     except Exception as e:
-        r = {"failed": str(e)[:120]}
+        r = _failure_record(e)
+    r["solve_minutes"] = round((time.monotonic() - t0) / 60.0, 2)
     # A forked worker is the only place a genuine per-solve peak can be read:
     # this process did exactly one solve, so its high-water mark IS that solve's.
     # It is what the next run's memory budget divides by (memory.py).
@@ -442,8 +715,11 @@ def check_parallel(parallel: int) -> None:
         )
 
 
-def _log_result(label: str, key, done: int, total: int, result: dict, t0: float) -> None:
-    mins = (time.monotonic() - t0) / 60.0
+def _log_result(label: str, key, done: int, total: int, result: dict) -> None:
+    # THIS solve's minutes, not the batch's elapsed time: a sequential batch
+    # reported cumulative time against every member, which reads as though each
+    # one got slower than the last.
+    mins = result.get("solve_minutes") or 0.0
     peak = result.get("peak_rss_gb") or 0.0
     ram = f", peak {peak:.1f} GB" if peak else ""
     if "failed" in result:
@@ -456,7 +732,8 @@ def _log_result(label: str, key, done: int, total: int, result: dict, t0: float)
 
 def _solve_many(
     aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None,
-    label: str = "solve",
+    label: str = "solve", timeout_min: float = SOLVE_TIMEOUT_MIN,
+    cache: "_SolveCache | None" = None, pause_file: Path | None = None,
 ) -> dict:
     """Run independent _solve_nlp jobs, `parallel` at a time.
 
@@ -468,28 +745,47 @@ def _solve_many(
     ~13 GB — HANDOFF section 2); 2-wide needs the 26 GB .wslconfig active.
     A job failure never kills the batch. `label` names the batch in the
     progress log.
+
+    `cache` makes each finished member durable, so a stopped run continues
+    rather than restarting; `pause_file`, if it exists when a member finishes,
+    stops the battery cleanly at that boundary (RunPaused). Member boundaries
+    are the only place a pause can free memory — see `optimize`.
     """
     check_parallel(parallel)
     results = {}
-    t0 = time.monotonic()
+    jobs = [(key, {"timeout_min": timeout_min, **kw}) for key, kw in jobs]
     total = len(jobs)
     log.info("%s: %d solve(s), %d-wide", label, total, max(1, parallel))
     if parallel <= 1:
         for key, kw in jobs:
+            done = cache.get(label, key) if cache is not None else None
+            if done is not None:
+                results[key] = done
+                log.info("  %s [%d/%d] %s: from checkpoint", label, len(results), total, key)
+                continue
             if prep is not None:
                 prep(key)
+            t_job = time.monotonic()
             try:
                 results[key] = _solve_nlp(aircraft, mission, **kw)
             except RuntimeError as e:
-                results[key] = {"failed": str(e)[:120]}
+                results[key] = _failure_record(e)
             finally:
                 if restore is not None:
                     restore()
+            results[key]["solve_minutes"] = round((time.monotonic() - t_job) / 60.0, 2)
             # In-process, the high-water mark spans the whole batch rather than
             # this one solve — an over-estimate of a single peak, which is the
             # safe direction for a number that later sizes a parallel width.
             results[key]["peak_rss_gb"] = memory.peak_rss_gb()
-            _log_result(label, key, len(results), total, results[key], t0)
+            _log_result(label, key, len(results), total, results[key])
+            if cache is not None:
+                cache.put(label, key, results[key])
+            if pause_file is not None and Path(pause_file).exists():
+                raise RunPaused(
+                    f"paused after {label}/{key} — {len(results)} of {total} members "
+                    f"of this phase are checkpointed"
+                )
         return results
 
     import multiprocessing as mp
@@ -501,6 +797,11 @@ def _solve_many(
     while pending or running:
         while pending and len(running) < parallel:
             key, kw = pending.pop(0)
+            done = cache.get(label, key) if cache is not None else None
+            if done is not None:
+                results[key] = done
+                log.info("  %s [%d/%d] %s: from checkpoint", label, len(results), total, key)
+                continue
             rx, tx = ctx.Pipe(duplex=False)
             if prep is not None:
                 prep(key)
@@ -518,7 +819,16 @@ def _solve_many(
                 results[key] = {"failed": "worker died before reporting (OOM?)"}
             proc.join()
             rx.close()
-            _log_result(label, key, len(results), total, results[key], t0)
+            _log_result(label, key, len(results), total, results[key])
+            if cache is not None:
+                cache.put(label, key, results[key])
+        # A pause waits for the whole in-flight group: killing a running child
+        # would throw away a solve that is minutes from finishing.
+        if pause_file is not None and Path(pause_file).exists() and not running:
+            raise RunPaused(
+                f"paused during {label} — {len(results)} of {total} members "
+                f"of this phase are checkpointed"
+            )
     return results
 
 
@@ -533,6 +843,9 @@ def optimize(
     memory_budget_gb: float | None = None,
     warm_start: dict | None = None,
     warm_start_from: str | None = None,
+    solve_timeout_min: float = SOLVE_TIMEOUT_MIN,
+    checkpoint_dir: Path | None = None,
+    pause_file: Path | None = None,
 ) -> tuple[RunResult, Path]:
     """M2 entry point: multi-start NLP -> champion -> shadow price -> flatness
     sweep -> numeric re-evaluation of the champion through the M1 pipeline.
@@ -548,7 +861,31 @@ def optimize(
     how many fit side by side, so it is just a friendlier way to say `parallel`
     (memory.py). Divided by the per-solve peak this aircraft has actually been
     measured at, so the arithmetic gets better the more you run. An explicit
-    `parallel` wins, since it is the more specific instruction."""
+    `parallel` wins, since it is the more specific instruction.
+
+    solve_timeout_min: wall-clock ceiling for any ONE member solve. A battery is
+    a fixed set of independent solves and a diverging one has no natural end, so
+    without a cap a single bad member can own the whole run (SOLVE_TIMEOUT_MIN).
+    Members that hit it are recorded as `Maximum_WallTime_Exceeded` and the
+    battery carries on.
+
+    checkpoint_dir / pause_file: stop a multi-hour battery and get the machine
+    back, without losing what it has already done. Creating `pause_file` makes
+    the run finish the member in flight, then exit with `RunPaused`; every member
+    completed so far is in `checkpoint_dir`, and re-running the same command with
+    the same checkpoint directory continues from there.
+
+    **The pause is at MEMBER boundaries, and that is not a shortcut — it is the
+    only point where memory can actually be released.** A solve in progress is
+    ~13 GB of CasADi graph plus IPOPT's barrier state, filter and MUMPS
+    factorization; none of that is serialisable through CasADi, so freeing the
+    memory necessarily destroys it. The most that could be salvaged mid-solve is
+    the current iterate as a warm start, and this project has already measured
+    warm starts as a wash on this model (HANDOFF: the champion sits on many
+    active bounds, so IPOPT pushes off them at startup regardless). Waiting for
+    the member boundary therefore costs at most `solve_timeout_min` and loses
+    nothing, where a mid-solve pause would free the same memory and throw the
+    solve away."""
     if memory_budget_gb is not None and parallel <= 1:
         per = memory.observed_peak_gb(runs_root)
         parallel, why = memory.plan_parallel(memory_budget_gb, per_solve_gb=per)
@@ -572,6 +909,31 @@ def optimize(
                  "not a constraint)", warm_start_from or "a previous champion")
     warm = {"inits": dict(warm_start)} if warm_start else {}
 
+    # Where the hours actually went. Reconstructing this from the progress log
+    # after the fact is what turned up the 2026-07-29 finding that 87% of a
+    # 405-minute run was spent on phases that failed or barely informed; it
+    # belongs in the artifact, next to what each phase concluded.
+    phase_minutes: dict[str, float] = {}
+
+    cache = _SolveCache(checkpoint_dir) if checkpoint_dir is not None else None
+    if cache is not None:
+        log.info("checkpointing members to %s%s", cache.dir,
+                 f"; create {pause_file} to pause at the next member boundary"
+                 if pause_file is not None else "")
+
+    def batch(label, jobs, **kw):
+        t_phase = time.monotonic()
+        try:
+            return _solve_many(
+                aircraft, mission, jobs, parallel, label=label,
+                timeout_min=solve_timeout_min, cache=cache, pause_file=pause_file,
+                **kw
+            )
+        finally:
+            phase_minutes[label] = round(
+                phase_minutes.get(label, 0.0) + (time.monotonic() - t_phase) / 60.0, 1
+            )
+
     rng = np.random.default_rng(0)
     # The nominal start is warmed; the PERTURBED starts are deliberately left
     # cold, so multistart still answers "does this converge from elsewhere?".
@@ -591,7 +953,7 @@ def optimize(
     # the +20 g shadow-price bump is independent of the champion, so it rides
     # the same batch; its delta is computed afterwards
     jobs.append(("mass_bump", {"extra_mass_kg": 0.020}))
-    first = _solve_many(aircraft, mission, jobs, parallel, label="multistart")
+    first = batch("multistart", jobs)
     starts, results = [], []
     for key, _ in jobs:
         if key == "mass_bump":
@@ -618,16 +980,14 @@ def optimize(
     span_cap = getattr(aircraft, "span_cap_m", 3.0)
     if flatness:
         spans = [float(s) for s in np.linspace(1.5, span_cap, 6)]
-        fr = _solve_many(
-            aircraft, mission, [(s, {"fixed": {"span": s}}) for s in spans], parallel,
-            label="flatness sweep",
-        )
+        fr = batch("flatness sweep", [(s, {"fixed": {"span": s}}) for s in spans])
         flat = [
-            {
+            {"span": s, "objective_value": None, **_failed_entry(fr[s])}
+            if "failed" in fr[s]
+            else {
                 "span": s,
-                "objective_value": (
-                    fr[s]["objective_value"] if "failed" not in fr[s] else None
-                ),
+                "objective_value": fr[s]["objective_value"],
+                "solve_minutes": fr[s].get("solve_minutes"),
             }
             for s in spans
         ]
@@ -640,12 +1000,10 @@ def optimize(
         ("chain_eta_x1.10", {"eta_scale": 1.10}),
     ]
     battery = {}
-    battery_results = _solve_many(
-        aircraft, mission, battery_jobs, parallel, label="re-solve battery"
-    )
+    battery_results = batch("re-solve battery", battery_jobs)
     for label, r in battery_results.items():
         if "failed" in r:
-            battery[label] = {"failed": r["failed"]}
+            battery[label] = _failed_entry(r)
         else:
             battery[label] = {
                 "objective_value": r["objective_value"],
@@ -674,16 +1032,15 @@ def optimize(
         # solve depends only on its own attr value, not on the champion), so
         # they may run concurrently; adoption below is order-identical to the
         # sequential greedy (winner = argmax over baseline + candidates)
-        res = _solve_many(
-            aircraft, mission, [(c, dict(warm)) for c in cands], parallel,
+        res = batch(
+            f"study {attr}", [(c, dict(warm)) for c in cands],
             prep=lambda c, a=attr: setattr(aircraft, a, c),
             restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
-            label=f"study {attr}",
         )
         for cand in cands:
             r_c = res[cand]
             if "failed" in r_c:
-                study["alternatives"][cand] = {"failed": r_c["failed"]}
+                study["alternatives"][cand] = _failed_entry(r_c)
                 continue
             delta = r_c["objective_value"] - champion["objective_value"]
             study["alternatives"][cand] = {
@@ -716,14 +1073,14 @@ def optimize(
             aircraft.winglet = True
             aircraft.tip_dihedral_max_deg = prev_cant
 
-        wr = _solve_many(
-            aircraft, mission, [("off", {}), ("continuous_cant", {})], parallel,
-            prep=_wl_prep, restore=_wl_restore, label="winglet study",
+        wr = batch(
+            "winglet study", [("off", {}), ("continuous_cant", {})],
+            prep=_wl_prep, restore=_wl_restore,
         )
 
         r_off = wr["off"]
         if "failed" in r_off:
-            winglet_study["off"] = {"failed": r_off["failed"]}
+            winglet_study["off"] = _failed_entry(r_off)
         else:
             winglet_study["off"] = {
                 **{k: r_off[k] for k in ("objective_value", "V_ms", "auw_kg")},
@@ -757,7 +1114,7 @@ def optimize(
 
         r_cant = wr["continuous_cant"]
         if "failed" in r_cant:
-            winglet_study["continuous_cant"] = {"failed": r_cant["failed"]}
+            winglet_study["continuous_cant"] = _failed_entry(r_cant)
         else:
             winglet_study["continuous_cant"] = {
                 "objective_value": r_cant["objective_value"],
@@ -817,6 +1174,16 @@ def optimize(
         for attr, val in discrete_originals.items():
             setattr(aircraft, attr, val)
     result.status = M2_STATUS
+    if best is not None:
+        # The two SM numbers side by side. They now come from the same estimator
+        # (aero.SM_ALPHA_OFFSETS), so what is left is the difference between the
+        # NLP's cruise alpha and the re-evaluation's trimmed one — real, since
+        # SM varies with alpha on this model, and worth seeing rather than
+        # rediscovering as a mystery 0.002.
+        result.constraints["static_margin_nlp"] = champion["static_margin"]
+        result.constraints["static_margin_gap"] = (
+            result.constraints["static_margin"] - champion["static_margin"]
+        )
     if warm_start:
         # provenance: a champion seeded from another run must say so, because the
         # local optimum it found may depend on where it started
@@ -878,6 +1245,11 @@ def optimize(
         max(memory.peak_rss_gb(children=True), memory.peak_rss_gb()), 2
     )
     result.diagnostics["parallel_width"] = parallel
+    result.diagnostics["solve_timeout_min"] = solve_timeout_min
+    phase_minutes["re-eval + artifacts"] = round(
+        (time.monotonic() - t_start) / 60.0 - sum(phase_minutes.values()), 1
+    )
+    result.diagnostics["phase_minutes"] = phase_minutes
     if memory_budget_gb is not None:
         result.diagnostics["memory_budget_gb"] = memory_budget_gb
     figures.flatness_plot(flat, champion, run_dir / "figures")
