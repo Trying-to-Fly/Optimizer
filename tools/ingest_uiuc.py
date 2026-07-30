@@ -69,7 +69,8 @@ C75_OVER_D = 0.0638
 #: AIAA 2020-2762 for the Volume 3 set ("Aero-Naut CAM Folding Propellers").
 #: CAM (Graupner/aero-naut) and Kavan's FK are folding lines; Master Airscrew's
 #: G/F is the glider/folding series; APC's Carbon Fiber blades are their folding
-#: glider product. Everything not listed here is treated as FIXED.
+#: glider product; KP's series is named "Folding" on the volume-2 page itself.
+#: Everything not listed here is treated as FIXED.
 FOLDING = {
     ("Aeronaut", "CAM Folding"),
     ("Aeronaut", "Carbon Electric"),
@@ -77,6 +78,7 @@ FOLDING = {
     ("Graupner", "CAM Prop"),
     ("Graupner", "CAM Slim"),
     ("Kavon", "FK"),
+    ("KP", "Folding"),
     ("Master_Airscrew", "G/F"),
 }
 
@@ -101,24 +103,53 @@ PREFIX = {
     "apcff": ("APC", "Free Flight"),
     "apcsf": ("APC", "Slow Flyer"),
     "apcsp": ("APC", "Sport"),
+    "ef": ("E-Flite", ""),
     "grcp": ("Graupner", "CAM Prop"),
     "grcsp": ("Graupner", "CAM Slim"),
     "grsn": ("Graupner", "Super Nylon"),
     "gwsdd": ("GWS", "Direct-Drive"),
     "gwssf": ("GWS", "Slow Flyer"),
     "kavfk": ("Kavon", "FK"),
-    "kpf": ("Kyosho", "PF"),
+    # volume 2's own heading over this block reads "KP / Folding" — it is a
+    # folding line, and while it was labelled "Kyosho PF" it could not be one.
+    "kpf": ("KP", "Folding"),
     "kyosho": ("Kyosho", ""),
     "ma": ("Master_Airscrew", ""),
     "mae": ("Master_Airscrew", "Electric"),
     "magf": ("Master_Airscrew", "G/F"),
     "mas": ("Master_Airscrew", "Scimitar"),
+    "mi": ("Micro_Invent", "2-Blade"),
+    "mit": ("Micro_Invent", "3-Blade"),
+    "pl": ("Plantraco", ""),
     "rusp": ("Rev_Up", "Special Prop Series"),
+    "vp": ("Vapor", ""),
     "zin": ("Zingali", ""),
 }
 
 #: Size in the filename, e.g. ancf_11x12, apccf_7.8x7, ancf_125x6.
 _STEM = re.compile(r"data/(([a-z]+)_[\d.]+x[\d.]+)_")
+
+#: A size heading. Volume 2 states some of its props in MILLIMETRES ("130 mm X
+#: 70 mm", and "57 mm X 20mm" with the space dropped) while every other volume
+#: uses inches. The unit is optional and may be written on either number.
+_SIZE = re.compile(r"([\d.]+)\s*(mm|in)?\s*[Xx]\s*([\d.]+)\s*(mm|in)?", re.I)
+MM_PER_IN = 25.4
+
+
+def parse_size(heading: str) -> tuple[float, float] | None:
+    """(diameter_in, pitch_in) from a page heading, or None if it is not a size.
+
+    Anything with a number, an X and a number is a size heading; everything else
+    ("2-Blade", "Folding", "U-80 (3.15 in)") is a series or specimen label and
+    leaves the current size alone.
+    """
+    m = _SIZE.fullmatch(heading.strip())
+    if not m:
+        return None
+    dia, pitch = float(m.group(1)), float(m.group(3))
+    if "mm" in (str(m.group(2)).lower(), str(m.group(4)).lower()):
+        dia, pitch = dia / MM_PER_IN, pitch / MM_PER_IN
+    return dia, pitch
 
 
 def manifest(volume: int, page: str) -> list[dict]:
@@ -127,7 +158,14 @@ def manifest(volume: int, page: str) -> list[dict]:
     Diameter and pitch come from the page's own displayed size ("8 X 3.8"), never
     from the filename — Volume 3 drops decimal points (`ancf_125x6` IS 12.5x6)
     while Volume 1 keeps them (`apccf_7.8x7`), so filenames cannot be parsed for
-    size without guessing where the point went.
+    size without guessing where the point went. Volume 2 states several of its
+    props in millimetres, which `parse_size` converts.
+
+    A size heading stays in force until the next one, because one heading covers
+    a block of files (static sweep + one per RPM). That carry-forward is why
+    parsing has to be complete: a heading this function fails to read does not
+    fail loudly, it silently gives the next propeller its neighbour's diameter —
+    which then propagates into the Reynolds normalisation, since re_coeff ~ D^2.
     """
     toks: list[tuple[int, str, str]] = []
     toks += [(m.start(), "HEAD", _text(m.group(1)))
@@ -140,9 +178,9 @@ def manifest(volume: int, page: str) -> list[dict]:
     dia = pitch = None
     for _, kind, val in toks:
         if kind == "HEAD":
-            size = re.fullmatch(r"([\d.]+)\s*[Xx]\s*([\d.]+)", val)
+            size = parse_size(val)
             if size:
-                dia, pitch = float(size.group(1)), float(size.group(2))
+                dia, pitch = size
             continue
         m = _STEM.match(val)
         stem, prefix = m.group(1), m.group(2)
@@ -213,6 +251,29 @@ def fetch_all(props: list[dict], dest: Path, workers: int = 1,
     return done
 
 
+def key_for(prop: dict) -> str:
+    return f"uiuc_{prop['stem'].replace('.', 'p')}"
+
+
+def assign_keys(props: list[dict]) -> None:
+    """Give every propeller a unique fit key, in place.
+
+    A stem is only unique WITHIN a volume: `apcsp_9x6` and `gwsdd_9x5` were each
+    tested in both volume 1 and volume 2, and since the fit is written to
+    `<key>.json` the second campaign used to overwrite the first — eight
+    downloaded files discarded, and a shipped fit whose `source` named only one
+    of the two campaigns. The first volume to carry a stem keeps the plain key
+    (so no existing key ever moves); later ones are suffixed with their volume.
+    """
+    seen: set[str] = set()
+    for prop in sorted(props, key=lambda p: p["volume"]):
+        key = key_for(prop)
+        if key in seen:
+            key = f"{key}_v{prop['volume']}"
+        seen.add(key)
+        prop["key"] = key
+
+
 def _rows(prop: dict, cache: Path) -> np.ndarray:
     """(rpm, J, CT, CP) from every file of one propeller, static included at J=0."""
     out = []
@@ -264,15 +325,18 @@ def fit(prop: dict, cache: Path, out_dir: Path) -> dict:
     eta_raw, eta_fit = J * Ct / Cp, J * ct_fit / cp_fit
     ok = eta_raw > 0.05
 
-    key = f"uiuc_{prop['stem'].replace('.', 'p')}"
+    key = prop.get("key") or key_for(prop)
     meta = {
         "schema": 2,
         "key": key,
         "source": f"UIUC PDB vol {prop['volume']}: {prop['stem']}",
         "source_db": "UIUC",
         "measured": True,
+        # 3 significant figures: a millimetre size converts to something like
+        # 5.118110236 in, and the name is for reading, not for arithmetic (the
+        # exact numbers are right below it).
         "display_name": f"{prop['manufacturer']} {prop['series']} "
-                        f"{prop['diameter_in']:g}x{prop['pitch_in']:g}".replace("_", " "),
+                        f"{prop['diameter_in']:.3g}x{prop['pitch_in']:.3g}".replace("_", " "),
         "manufacturer": prop["manufacturer"],
         "series": prop["series"],
         "folding": (prop["manufacturer"], prop["series"]) in FOLDING,
@@ -321,11 +385,21 @@ def main() -> int:
         if not page_file.is_file():
             page_file.write_bytes(_get(f"{BASE}/volume-{vol}/propDB-volume-{vol}.html"))
         props += manifest(vol, page_file.read_text(errors="ignore"))
+    # keys are assigned over the FULL manifest, so a --only-folding run and a
+    # full run give the same propeller the same key
+    assign_keys(props)
     if args.only_folding:
         props = [p for p in props if (p["manufacturer"], p["series"]) in FOLDING]
     print(f"manifest: {len(props)} propellers"
           f"{' (folding only)' if args.only_folding else ''}, "
           f"{sum(len(p['files']) for p in props)} data files")
+    unknown = sorted({p["series"] for p in props if p["manufacturer"] == "unknown"})
+    if unknown:
+        # An unmapped prefix does not just lose a display name: `folding` is
+        # decided by (manufacturer, series), so an unknown prefix can never be
+        # recognised as a folding line. Say so rather than shipping it quietly.
+        print(f"  WARNING: {len(unknown)} unmapped filename prefix(es) — add them "
+              f"to PREFIX: {', '.join(unknown)}")
 
     if args.fetch:
         print(f"downloading (1 worker, {args.delay}s apart — the host blocks bursts)…")
