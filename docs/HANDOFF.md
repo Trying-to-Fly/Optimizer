@@ -240,11 +240,20 @@ it, under `violations` in `run.json`. Plus:
     uv run python tools/degeneracy.py --mount pusher --iters 150
     uv run python tools/parse_trace.py <ipopt.log>
 
-**The one open question is a design decision, not a defect:** the flatness sweep
-samples `linspace(1.5, cap, 6)` and the low end is infeasible, so it spends
-~30 min per member asking a question with no answer. Either start the sweep above
-the feasible floor, or let a member that reports `Infeasible_Problem_Detected`
-mark the rest of that tail infeasible and stop.
+**The flatness sweep no longer grinds on empty spans** (2026-07-30). It runs
+DOWNWARD from the cap and stops descending once a member returns a PROOF of
+infeasibility, marking the smaller spans `Skipped_Below_Infeasible_Span`.
+
+Both halves are load-bearing. Downward, because feasibility in span is an
+interval `[s_min, cap]` on this model — shrinking span at fixed area drives CL up
+and makes stall, gust and stability harder, never easier — so an infeasible
+member licenses an inference about SMALLER spans only. Sweeping upward, as it
+did, licenses nothing: 1.5 m being infeasible says nothing about 1.6 m. And only
+on `Infeasible_Problem_Detected`, because a **timeout certifies nothing** and
+cascading one would silently discard spans that are merely slow.
+
+That assumption is stated rather than hidden, and `tests/test_flatness_sweep.py`
+pins all three properties including the timeout case.
 
 ### 2. Static margin: the estimator is fixed, the FIDELITY is not
 
@@ -268,13 +277,33 @@ screen through `propulsion.solve()` at the incumbent operating point is a
 reliable shortlister, so a study can search hundreds of candidates and
 full-re-solve only the top N. EXECUTION_PLAN section 6 has the design.
 
-### 4. Prop shortlist is still capped at 11 in, and the cap costs minutes
+### 4. ~~Prop shortlist capped at 11 in~~ — DONE (2026-07-30)
 
-`motor_prop` is a flat 190 g point mass and prop ground clearance is unmodelled,
-so neither is a function of diameter — which is why candidates are held to 11 in.
-Larger measured folders screen materially better: **12x10 at 143.1 min**, 14x9 at
-141.7, 13x11 at 139.9, against the adopted 11x10's 134.5. Removing the cap needs
-a diameter-dependent motor+prop mass and a clearance rule, THEN a wider list.
+The shortlist now spans **11 to 14 in** (8 candidates), and the two blockers are
+resolved:
+
+- **Diameter-dependent mass.** `motor_prop` was a flat 190 g point mass, so a
+  bigger disc arrived weightless — free thrust on the longest lever the airframe
+  has. Split into `MOTOR_MASS_KG` (145 g, prop-independent) plus
+  `prop_assembly_mass_kg()`, which scales as D^2.4 from a 45 g reference at
+  11 in. **Reproduces the frozen 190 g exactly at 11 in**, so no champion solved
+  before today moves; 14 in now costs 225 g, i.e. +35 g of nose weight that the
+  bigger disc has to earn back against a 7.76 min/100 g shadow price.
+- **The "ground clearance" blocker was mis-framed.** For a FOLDING prop on a
+  belly-landing airframe the blades lie back along the fuselage when the motor
+  stops — that is what a folder is for — so a stationary tip strike is not the
+  binding case. What actually limits diameter is handling and nose structure, a
+  builder's judgement, so it is now DECLARED as `prop_diameter_max_in = 14.0`
+  (the `placard_speed_ms` posture) and **enforced in `powertrain()`**: a
+  candidate past it raises rather than quietly winning a study.
+
+The candidate list is derived from `PROP_CANDIDATES` rather than restated in
+`discrete_options`, because two hand-maintained lists of the same thing drift and
+the one that drifts silently is the one the study runs.
+
+Unverified until a battery runs: the screen ranked 12x10 at 143.1 and 14x9 at
+141.7 against 11x10's 134.5, but that screen did NOT charge prop mass. Expect the
+real gain to be smaller than the screen suggests.
 
 ### 5. Warm start is a wash — do not bother, or fix it properly
 
@@ -316,7 +345,12 @@ bound_push/bound_frac) rather than only seeding primal values.
   NR640, Union, KP's non-size headings) are skipped entirely. 219 propellers of
   a larger database. Not corruption — every fitted prop's filename size
   reconciles with its recorded size — but not "the whole DB" either.
-- **CF boom is invisible in the viz twin** (no loft), cosmetic, long-standing.
+- ~~**CF boom is invisible in the viz twin**~~ — DONE (2026-07-30). It has a
+  loft now (`fuselage.boom_loft`), spanning pod tail cap to tail block, so the
+  three-view and interactive model no longer show a pod and a tail floating
+  apart. Viz only: `parasite_bodies` takes the pod from `_pod_loft` directly
+  instead of indexing the drawable list, so drag cannot double-count, and a test
+  pins that.
 
 ---
 

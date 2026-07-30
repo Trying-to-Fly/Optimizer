@@ -2,6 +2,7 @@
 continuity, loft/spec agreement, mass calibration, topology flip, symbolics."""
 
 import aerosandbox as asb
+import pytest
 
 
 def test_spec_fixture_bodies_frozen(sample_aircraft):
@@ -94,6 +95,53 @@ def test_boom_emerges_from_geometry(sample_aircraft):
     assert bb2["wetted_area_m2"] > bb["wetted_area_m2"]
 
 
+def test_the_boom_is_drawn_and_bridges_the_gap(sample_aircraft):
+    """Long-standing cosmetic gap: the boom had no loft, so the three-view and
+    the interactive model showed a pod and a tail with empty space between them.
+    It must span exactly the gap it fills — anything else is a prettier lie."""
+    d = dict(sample_aircraft.DV_DEFAULTS)
+    p = sample_aircraft.pod_dims(d)
+    lofts = {loft.name: loft for loft in sample_aircraft.fuselage_lofts(d)}
+    assert set(lofts) == {"pod", "boom"}
+
+    xs = [float(x.xyz_c[0]) for x in lofts["boom"].xsecs]
+    x_tail = 0.390 + 0.25 * 0.201 + d["tail_arm"]
+    assert min(xs) == pytest.approx(p["bay_end"] + p["tail_len"])  # pod tail cap
+    assert max(xs) == pytest.approx(x_tail)                        # tail block
+
+
+def test_drawing_the_boom_does_not_change_any_drag(sample_aircraft):
+    """The loft is viz only. Boom drag comes from `boom_body` and pod drag from
+    the pod loft, so a body added for drawing must not reach the buildup —
+    `parasite_bodies` takes the pod from `_pod_loft`, never by indexing the
+    drawable list."""
+    d = dict(sample_aircraft.DV_DEFAULTS)
+    bodies = {b["name"]: b for b in sample_aircraft.parasite_bodies(d)}
+    assert set(bodies) == {"pod", "boom"}
+    # the pod body is the pod loft's own integral, not the first drawable
+    pod_loft = sample_aircraft._pod_loft(d)
+    assert float(bodies["pod"]["wetted_area_m2"]) == pytest.approx(
+        float(pod_loft.area_wetted())
+    )
+    # and the boom's drag length is still the exposed span, not the drawn one
+    x_tail = 0.390 + 0.25 * 0.201 + d["tail_arm"]
+    p = sample_aircraft.pod_dims(d)
+    assert float(bodies["boom"]["length_m"]) == pytest.approx(
+        x_tail - (p["bay_end"] + p["tail_len"]), abs=1e-6
+    )
+
+
+def test_the_integrated_topology_draws_no_boom(sample_aircraft):
+    """There is no boom to draw when the tail cone runs to the tail block."""
+    original = sample_aircraft.fuselage_topology
+    sample_aircraft.fuselage_topology = "integrated"
+    try:
+        names = {l.name for l in sample_aircraft.fuselage_lofts(dict(sample_aircraft.DV_DEFAULTS))}
+    finally:
+        sample_aircraft.fuselage_topology = original
+    assert names == {"pod"}
+
+
 def test_boom_drag_stays_finite_on_an_infeasible_iterate():
     """The exposed boom length is a DIFFERENCE of design variables, kept
     positive only by the aircraft's clearance constraint — and an interior-point
@@ -142,5 +190,8 @@ def test_loft_symbolic_safe(sample_aircraft):
         dv[k] = opti.variable(init_guess=dv[k])
     bodies = sample_aircraft.parasite_bodies(dv)
     assert not isinstance(bodies[0]["wetted_area_m2"], float)  # stayed symbolic
+    # pod AND boom now (the boom gained a loft 2026-07-30); both must survive
+    # symbolic dv, since the viz twin is built from the champion's design vector
     lofts = sample_aircraft.fuselage_lofts(dv)
-    assert len(lofts) == 1 and isinstance(lofts[0], asb.Fuselage)
+    assert [l.name for l in lofts] == ["pod", "boom"]
+    assert all(isinstance(l, asb.Fuselage) for l in lofts)

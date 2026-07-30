@@ -103,7 +103,10 @@ class VTailSample:
         # the cruise-J-above-peak-eta-J diagnostic finally cashing out).
         # The prop need NOT fold (user, 2026-07-29), so the whole catalogue is
         # in scope rather than the one folding family these three came from.
-        "prop_choice": ["cam_11x6", "cam_11x7", "cam_11x8", "cam_11x10", "cam_11x12"],
+        # Derived from PROP_CANDIDATES, never restated: two hand-maintained lists
+        # of the same thing drift, and the one that drifts silently is the one
+        # the study actually runs.
+        "prop_choice": None,  # filled in below from PROP_CANDIDATES
         "fuselage_topology": ["pod_boom", "integrated"],
         "tail_type": ["vtail", "conventional", "ttail"],
         # Wing dihedral form (section 9). Discrete because the two are not
@@ -159,22 +162,75 @@ class VTailSample:
     # 134.5 min and 11x12 falls back to 129.0, matching AIAA 2020-2762's finding
     # that CAM gains continue only to p/D ~0.8-1.0.
     PROP_CANDIDATES = {
+        # --- 11 in: the spec incumbent and the M4.11 champion, kept as the
+        # control rung so every widening is measured against a known number ---
         "cam_11x6": {"name": "aeronaut_cam_11x6_folding", "diameter_in": 11.0,
                      "pitch_in": 6.0, "proxy_table": "uiuc_ancf_11x6",
-                     "blade_derate": 1.00},
-        "cam_11x7": {"name": "aeronaut_cam_11x7_folding", "diameter_in": 11.0,
-                     "pitch_in": 7.0, "proxy_table": "uiuc_ancf_11x7",
-                     "blade_derate": 1.00},
-        "cam_11x8": {"name": "aeronaut_cam_11x8_folding", "diameter_in": 11.0,
-                     "pitch_in": 8.0, "proxy_table": "uiuc_ancf_11x8",
                      "blade_derate": 1.00},
         "cam_11x10": {"name": "aeronaut_cam_11x10_folding", "diameter_in": 11.0,
                       "pitch_in": 10.0, "proxy_table": "uiuc_ancf_11x10",
                       "blade_derate": 1.00},
-        "cam_11x12": {"name": "aeronaut_cam_11x12_folding", "diameter_in": 11.0,
-                      "pitch_in": 12.0, "proxy_table": "uiuc_ancf_11x12",
+        # --- past the old 11 in cap (2026-07-30). The screen ranked these well
+        # above the incumbent at the champion's operating point: 12x10 at 143.1,
+        # 14x9 at 141.7, 13x11 at 139.9 against 11x10's 134.5. They now carry
+        # their own mass (prop_assembly_mass_kg), so a bigger disc has to pay
+        # for itself in nose weight and CG instead of arriving free. ---
+        "cam_12x9": {"name": "aeronaut_cam_12x9_folding", "diameter_in": 12.0,
+                     "pitch_in": 9.0, "proxy_table": "uiuc_ancf_12x9",
+                     "blade_derate": 1.00},
+        "cam_12x10": {"name": "aeronaut_cam_12x10_folding", "diameter_in": 12.0,
+                      "pitch_in": 10.0, "proxy_table": "uiuc_ancf_12x10",
+                      "blade_derate": 1.00},
+        "cam_13x10": {"name": "aeronaut_cam_13x10_folding", "diameter_in": 13.0,
+                      "pitch_in": 10.0, "proxy_table": "uiuc_ancf_13x10",
+                      "blade_derate": 1.00},
+        "cam_13x11": {"name": "aeronaut_cam_13x11_folding", "diameter_in": 13.0,
+                      "pitch_in": 11.0, "proxy_table": "uiuc_ancf_13x11",
+                      "blade_derate": 1.00},
+        "cam_14x9": {"name": "aeronaut_cam_14x9_folding", "diameter_in": 14.0,
+                     "pitch_in": 9.0, "proxy_table": "uiuc_ancf_14x9",
+                     "blade_derate": 1.00},
+        "cam_14x12": {"name": "aeronaut_cam_14x12_folding", "diameter_in": 14.0,
+                      "pitch_in": 12.0, "proxy_table": "uiuc_ancf_14x12",
                       "blade_derate": 1.00},
     }
+
+    # Fill the study's candidate list from the data above, in the class body so
+    # the two can never disagree. (discrete_options is already in the class
+    # namespace here; PROP_CANDIDATES was not yet defined where it is declared.)
+    discrete_options["prop_choice"] = list(PROP_CANDIDATES)
+
+    #: Largest propeller the AIRFRAME will take, inches. **Declared, not
+    #: predicted** — the same posture as `placard_speed_ms`.
+    #:
+    #: The old blocker on widening was recorded as "prop ground clearance is
+    #: unmodelled", and on inspection that framing does not survive contact with
+    #: a FOLDING prop on a belly-landing airframe: the blades lie back along the
+    #: fuselage when the motor stops, which is the entire point of a folder, so
+    #: a stationary tip strike is not the binding case. What actually limits
+    #: diameter here is handling and the nose structure — a builder's judgement,
+    #: which is why it is declared rather than derived. 14 in on a 2 m span is
+    #: already a large disc for a hand-launched model; raise it if you are
+    #: willing to own the handling.
+    #:
+    #: Enforced in `powertrain()`, so a candidate added past it fails loudly
+    #: rather than quietly shipping an airframe nobody agreed to.
+    prop_diameter_max_in = 14.0
+
+    # --- motor + propeller group mass (was one frozen 190 g point mass) ---
+    # Split because the prop is now a DIAMETER choice, not a constant, and a
+    # bigger disc that arrives weightless is a free lunch the optimizer would
+    # happily eat. Anchored so the sum reproduces the frozen 190 g EXACTLY at
+    # 11 in, which is what every champion up to M4.11 was solved against.
+    MOTOR_MASS_KG = 0.145  # motor, mount and shaft adapter — prop-independent
+    PROP_ASSY_MASS_KG_AT_REF = 0.045  # folding blades + folding spinner, at 11 in
+    PROP_MASS_REF_DIAMETER_IN = 11.0
+    #: Blade mass scales as D^2 if thickness were held constant and D^3 under
+    #: pure geometric scaling; a folding hub scales more weakly than either.
+    #: 2.4 is the middle of that range and matches how a carbon folding line's
+    #: blade weights grow across 9-16 in. **Declared data, uncalibrated** — the
+    #: honest way to improve it is to weigh two props, not to argue about it.
+    PROP_MASS_DIAMETER_EXPONENT = 2.4
     prop_choice = "cam_11x6"  # spec incumbent; the study re-prices it every run
     PROP_DIAMETER_M = 0.2794  # 11 in — common to every candidate
     # Folding blades cost ~5% of shaft power. Applied UNCONDITIONALLY today,
@@ -466,22 +522,62 @@ class VTailSample:
             "length": d["pod_nose"] + d["pod_bay"] + tail_len,
         }
 
-    def fuselage_lofts(self, dv: dict | None = None) -> list:
-        """Framework hook (solve.run viz twin + parasite_bodies): the pod loft."""
+    def prop_assembly_mass_kg(self, diameter_in: float | None = None) -> float:
+        """Folding blades + spinner for one candidate, kg.
+
+        Diameter is a design CHOICE now, so its mass has to be one too — a 14 in
+        disc is roughly 1.7x the 11 in prop's mass, all of it on the longest
+        lever the airframe has (the nose, for a puller). Letting it arrive
+        weightless would hand the optimizer free thrust and quietly move the CG.
+        """
+        if diameter_in is None:
+            diameter_in = self.PROP_CANDIDATES[self.prop_choice]["diameter_in"]
+        ratio = float(diameter_in) / self.PROP_MASS_REF_DIAMETER_IN
+        return self.PROP_ASSY_MASS_KG_AT_REF * ratio**self.PROP_MASS_DIAMETER_EXPONENT
+
+    def _pod_loft(self, d: dict):
+        """The pod body itself. Symbolic-safe — this one is on the NLP path,
+        because `parasite_bodies` reads its wetted area and volume."""
         from planeopt import fuselage
 
-        d = self.DV_DEFAULTS | (dv or {})
         p = self.pod_dims(d)
         # pod top always meets the wing root plane (z = 0) with a small embed —
         # derived from pod height, so a shrunken pod can never leave the wing
         # floating above the fuselage
         z_c = self.SADDLE_EMBED - p["h"] / 2
-        return [
-            fuselage.loft(
-                d["pod_nose"], d["pod_bay"], p["tail_len"], p["w"], p["h"],
-                x_nose=p["nose_tip"], z_c=z_c,
+        return fuselage.loft(
+            d["pod_nose"], d["pod_bay"], p["tail_len"], p["w"], p["h"],
+            x_nose=p["nose_tip"], z_c=z_c,
+        )
+
+    def fuselage_lofts(self, dv: dict | None = None) -> list:
+        """Framework hook (solve.run viz twin): every body worth DRAWING.
+
+        The pod plus, in pod-boom topology, the boom — which until now had no
+        loft at all, so the three-view and the interactive model showed a pod
+        and a tail with empty space between them.
+
+        Drag and mass do not come from here (the boom's are `boom_body` and the
+        aircraft's structure model), so adding a body to this list cannot
+        double-count anything. `parasite_bodies` takes the pod from `_pod_loft`
+        directly rather than indexing this list, so the two cannot drift.
+        """
+        from planeopt import fuselage
+
+        d = self.DV_DEFAULTS | (dv or {})
+        p = self.pod_dims(d)
+        lofts = [self._pod_loft(d)]
+        if self.fuselage_topology == "pod_boom":
+            pod_end = p["bay_end"] + p["tail_len"]
+            x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
+            lofts.append(
+                fuselage.boom_loft(
+                    pod_end, x_tail - pod_end,
+                    od=self._BOOM_BODY.get("od_m", 0.012),
+                    z_c=self.SADDLE_EMBED - p["h"] / 2,
+                )
             )
-        ]
+        return lofts
 
     def geometry_constraints(self, opti, dv, V, deflection_deg=None) -> None:
         """Aircraft-specific manufacturing/geometry/throw constraints (symbolic-safe)."""
@@ -882,9 +978,16 @@ class VTailSample:
         # parametric default (M1 validation continuity).
         mount = self.motor_mount if dv is not None else "pusher"
         x_motor = x_tail + 0.08 if mount == "pusher" else p["nose_tip"] + 0.02
+        # The dv=None fixture is the frozen v1.2 spec design, which carries an
+        # 11 in prop: it keeps the literal 190 g so M1 validation continuity
+        # survives whatever the prop study is currently pointed at. Parametric
+        # designs pay for the diameter they picked.
+        motor_prop_kg = (
+            0.190 if dv is None else self.MOTOR_MASS_KG + self.prop_assembly_mass_kg()
+        )
         return [
             PointMass("battery", 0.430, d["x_battery"]),  # inside the lofted bay
-            PointMass("motor_prop", 0.190, x_motor),
+            PointMass("motor_prop", motor_prop_kg, x_motor),
             PointMass("esc_wiring", 0.080, p["nose_tip"] + 0.3932 * p["length"]),
             PointMass("servos_aileron", 0.024, 0.470),  # in-wing
             PointMass("servos_tail", 0.024, x_tail),  # tail root block (2 micro servos, any type)
@@ -978,7 +1081,7 @@ class VTailSample:
             ]
         d = self.DV_DEFAULTS | dv
         p = self.pod_dims(d)
-        pod = fuselage.body_dict(self.fuselage_lofts(dv)[0], p["length"], p["w"], p["h"])
+        pod = fuselage.body_dict(self._pod_loft(d), p["length"], p["w"], p["h"])
         # puller slipstream scrubs the pod: declared drag factor (MODEL_DETAILS 2.4)
         pod["form_factor"] = pod["form_factor"] * self.MOUNT_EFFECTS[self.motor_mount]["pod_drag_factor"]
         bodies = [pod]
@@ -1040,6 +1143,16 @@ class VTailSample:
 
     def powertrain(self) -> PowertrainConfig:
         prop = self.PROP_CANDIDATES[self.prop_choice]
+        diameter_in = prop["diameter_in"]
+        if diameter_in > self.prop_diameter_max_in + 1e-9:
+            # Loudly, not quietly: a candidate past the declared airframe limit
+            # would otherwise win a study and be adopted as a champion nobody
+            # agreed could be built.
+            raise ValueError(
+                f"prop candidate {self.prop_choice!r} is {diameter_in:g} in, past this "
+                f"airframe's declared prop_diameter_max_in = {self.prop_diameter_max_in:g}. "
+                "Raise the declared limit deliberately, or drop the candidate."
+            )
         return PowertrainConfig(
             motor=MotorConfig(
                 name="D3548-900kv",

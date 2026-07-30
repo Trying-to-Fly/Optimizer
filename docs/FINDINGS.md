@@ -925,7 +925,36 @@ the objective pole) were all real, and all of them were *masking this*. None of
 them was the cause. It took removing every one before the solver could express
 the actual answer.
 
-#### 14.5.9 What that changed in the product
+#### 14.5.9 Why `span = 1.5 m` is different: it is an AREA shortfall
+
+The one corner that stayed infeasible even with the stability window opened.
+Violated rows at its last iterate (`tools/degeneracy.py --span 1.5`), with the
+`fixed` row shifting the numbering one past the pusher run's:
+
+    VIOLATED rows: 15    total violation 1.1020    worst 7.5029e-01
+      g[73]  L == weight_n            [0, 0]        BY 7.503e-01   <-- dominant
+      g[79]  stall smooth_max <= 1    value 1.0878  BY 8.775e-02
+      g[77]  sm >= 0.08               value 0.0080  BY 7.197e-02
+      g[74]  Cm == 0                  [0, 0]        BY 6.921e-02
+      g[75]  thrust == drag           [0, 0]        BY 3.278e-02
+
+**Total violation 1.10 against the pusher's 0.0325 — thirty-four times worse**,
+and the character is different. Pusher missed one constraint (stability) by a
+hair. This one **cannot carry its own weight**: lift equilibrium is off by 0.75,
+the critical-section stall limit is exceeded, and the static margin has collapsed
+to 0.008 — not 0.072 short of the floor so much as absent.
+
+That is an **area shortfall**, not a stability problem, which is exactly why
+relaxing the SM floor to 0.05 rescued pusher and did nothing here: at 0.008 the
+design is nowhere near even the relaxed floor. At 1.5 m of span with `c_root`
+capped at 245 mm there is simply not enough wing to fly this 1.8 kg airframe
+below the stall-station limit.
+
+So the flatness sweep's bottom end is not a solver problem to be fixed — **it is
+a correct answer to a question about an aircraft that does not exist.** Which is
+what §14.5.10 acts on.
+
+#### 14.5.10 What that changed in the product
 
 A failed member now says what it failed ON. `SolveFailure` carries the worst
 constraint violations at the last iterate, each labelled with the source line

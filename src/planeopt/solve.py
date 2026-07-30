@@ -979,8 +979,37 @@ def optimize(
     flat = []
     span_cap = getattr(aircraft, "span_cap_m", 3.0)
     if flatness:
-        spans = [float(s) for s in np.linspace(1.5, span_cap, 6)]
-        fr = batch("flatness sweep", [(s, {"fixed": {"span": s}}) for s in spans])
+        # Swept DOWNWARD from the cap, and short-circuited when a member proves
+        # infeasible. Both halves matter:
+        #
+        # Downward, because feasibility in span is an interval [s_min, cap] on
+        # this class of model — shrinking span at a fixed wing area drives CL up
+        # and makes the stall, gust and stability constraints harder, never
+        # easier. Sweeping up from the bottom licenses no inference at all: 1.5 m
+        # being infeasible says nothing about 1.6 m.
+        #
+        # Only on a PROOF, because `Infeasible_Problem_Detected` is the solver
+        # certifying there is no aircraft there, whereas a timeout certifies
+        # nothing — cascading a timeout would silently discard spans that are
+        # merely slow. The 2026-07-30 sweep spent ~2 hours re-deriving that its
+        # bottom end is empty (FINDINGS §14.5.8).
+        spans = sorted((float(s) for s in np.linspace(1.5, span_cap, 6)), reverse=True)
+        fr, floor = {}, None
+        for span in spans:
+            if floor is not None:
+                fr[span] = {
+                    "failed": f"skipped: {floor:.2f} m proved infeasible and span "
+                    "feasibility is an interval up to the cap",
+                    "return_status": "Skipped_Below_Infeasible_Span",
+                }
+                log.info("  flatness sweep: %.2f m skipped (below the infeasible %.2f m)",
+                         span, floor)
+                continue
+            one = batch("flatness sweep", [(span, {"fixed": {"span": span}})])
+            fr[span] = one[span]
+            if fr[span].get("return_status") == "Infeasible_Problem_Detected":
+                floor = span
+        spans = sorted(spans)
         flat = [
             {"span": s, "objective_value": None, **_failed_entry(fr[s])}
             if "failed" in fr[s]

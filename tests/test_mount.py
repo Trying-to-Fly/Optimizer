@@ -82,15 +82,15 @@ def test_prop_is_a_declared_discrete_option(sample_aircraft):
     )
 
 
-def test_prop_candidates_differ_only_in_pitch(sample_aircraft):
-    """Same diameter and knockdown, so the study isolates pitch. Diameter keeps
-    the 190 g motor_prop point mass honest (it is not a function of diameter yet);
-    the shared knockdown keeps no candidate advantaged by a friendlier
-    installation assumption.
+def test_prop_candidates_are_one_measured_folding_family(sample_aircraft):
+    """The shortlist spans DIAMETER as well as pitch since 2026-07-30, so the
+    old "same diameter" invariant is gone deliberately — it existed only because
+    motor_prop was a flat 190 g point mass that diameter could not move.
 
-    Since 2026-07-29 every candidate is one MEASURED Aero-Naut CAM folding
-    propeller, so blade section is controlled too — the confound that existed
-    while the 11x6 rung was an APC sport blade is gone."""
+    What must still hold: every candidate is one MEASURED Aero-Naut CAM folding
+    propeller with the same installation knockdown, so no candidate wins on a
+    friendlier assumption or an uncontrolled blade section, and each has its own
+    table rather than sharing one."""
     from planeopt import propulsion
 
     seen = {}
@@ -101,10 +101,54 @@ def test_prop_candidates_differ_only_in_pitch(sample_aircraft):
         assert table.meta.get("folding") is True, f"{key} is not a folding prop"
         assert table.meta.get("measured") is True, f"{key} is not measured data"
         seen[key] = (prop.diameter_m, prop.folding_derate, prop.pitch_m, prop.proxy_table)
+
     n = len(sample_aircraft.PROP_CANDIDATES)
-    assert len({(d, f) for d, f, _, _ in seen.values()}) == 1  # one family
-    assert len({p for _, _, p, _ in seen.values()}) == n  # one pitch each
-    assert len({t for _, _, _, t in seen.values()}) == n  # each with its own table
+    assert len({f for _, f, _, _ in seen.values()}) == 1  # one installation rule
+    assert len({t for _, _, _, t in seen.values()}) == n  # each its own table
+    assert len({(d, p) for d, _, p, _ in seen.values()}) == n  # no duplicate sizes
+    assert len({d for d, _, _, _ in seen.values()}) > 1  # diameter is in play now
+
+
+def test_a_bigger_prop_carries_its_own_mass(sample_aircraft):
+    """The whole reason diameter was pinned: a disc that arrives weightless is
+    free thrust, and it sits on the longest lever the airframe has. The 11 in
+    reference must still reproduce the frozen 190 g exactly, so no champion
+    solved before 2026-07-30 moves."""
+    ref = sample_aircraft.PROP_MASS_REF_DIAMETER_IN
+    assert sample_aircraft.MOTOR_MASS_KG + sample_aircraft.prop_assembly_mass_kg(ref) == 0.190
+    # the frozen spec fixture keeps the literal value whatever the study picked
+    sample_aircraft.prop_choice = "cam_14x12"
+    frozen = next(e for e in sample_aircraft.fixed_equipment() if e.name == "motor_prop")
+    assert frozen.mass_kg == 0.190
+
+    # and a parametric design pays for what it chose
+    d = dict(sample_aircraft.DV_DEFAULTS)
+    big = next(e for e in sample_aircraft.fixed_equipment(d) if e.name == "motor_prop")
+    sample_aircraft.prop_choice = "cam_11x6"
+    small = next(e for e in sample_aircraft.fixed_equipment(d) if e.name == "motor_prop")
+    assert big.mass_kg > small.mass_kg + 0.020, "14 in must cost real grams over 11 in"
+    assert small.mass_kg == 0.190
+
+
+def test_a_prop_past_the_declared_airframe_limit_is_refused(sample_aircraft):
+    """Declared, not predicted — but enforced, so a candidate past it cannot win
+    a study and be adopted as a champion nobody agreed could be built."""
+    import pytest
+
+    assert all(
+        c["diameter_in"] <= sample_aircraft.prop_diameter_max_in
+        for c in sample_aircraft.PROP_CANDIDATES.values()
+    )
+    sample_aircraft.PROP_CANDIDATES["cam_16x8"] = {
+        "name": "too_big", "diameter_in": 16.0, "pitch_in": 8.0,
+        "proxy_table": "uiuc_ancf_16x8", "blade_derate": 1.00,
+    }
+    try:
+        sample_aircraft.prop_choice = "cam_16x8"
+        with pytest.raises(ValueError, match="prop_diameter_max_in"):
+            sample_aircraft.powertrain()
+    finally:
+        del sample_aircraft.PROP_CANDIDATES["cam_16x8"]
 
 
 def test_incumbent_powertrain_is_unchanged(sample_aircraft):

@@ -77,6 +77,29 @@ def loft(
     return asb.Fuselage(name=name, xsecs=xsecs)
 
 
+def boom_loft(x_start, length, od=0.012, z_c=0.0, name="boom") -> asb.Fuselage:
+    """The exposed CF boom as a drawable body: a plain constant-section tube.
+
+    Viz only. The boom's DRAG comes from `boom_body`, and its mass from the
+    aircraft's own structure model — this exists because a three-view and an
+    interactive model that show a pod and a tail floating apart, with nothing
+    between them, misrepresent the aircraft to the person reading them.
+
+    Two end caps plus one mid station: a tube needs no more, and every station
+    is an asb.FuselageXSec that something downstream has to walk.
+    """
+    return asb.Fuselage(
+        name=name,
+        xsecs=[
+            asb.FuselageXSec(
+                xyz_c=[x_start + length * t, 0, z_c],
+                width=od, height=od, shape=2.0,  # circular
+            )
+            for t in (0.0, 0.5, 1.0)
+        ],
+    )
+
+
 def body_dict(fuse: asb.Fuselage, length, width, height, munk_factor=0.9, interference=1.08) -> dict:
     """Parasite-body entry (aero.body_cd0 / Munk contract) from a loft.
 

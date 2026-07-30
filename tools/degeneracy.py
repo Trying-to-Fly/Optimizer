@@ -20,7 +20,6 @@ Costs one ~60-iteration solve (~10 min, ~13 GB) plus a symbolic Jacobian.
 import argparse
 import os
 import sys
-import traceback
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -48,21 +47,23 @@ mission, _ = load_mission(REPO / "missions" / "endurance_sample.py")
 if args.mount:
     aircraft.motor_mount = args.mount
 
-# --- record where every constraint row came from -------------------------
-prov = []  # (start_row, n_rows, "file:line  source")
-_real_subject_to = asb.Opti.subject_to
+# --- constraint provenance ------------------------------------------------
+# solve._solve_nlp already labels every row (solve._ConstraintLabels), so this
+# reuses those rather than wrapping subject_to a second time. Two tracers on one
+# Opti is not merely wasteful: the outer one records the INNER wrapper's source
+# line for every constraint, which is how this tool briefly reported all 116
+# rows as "solve.py:217 out = real(constraint, *a, **kw)".
+held: dict = {}
+_RealLabels = S._ConstraintLabels
 
 
-def traced(self, constraint, *a, **kw):
-    before = self.g.shape[0]
-    out = _real_subject_to(self, constraint, *a, **kw)
-    st = [f for f in traceback.extract_stack()[:-1] if "aerosandbox" not in f.filename][-1]
-    prov.append((before, self.g.shape[0] - before,
-                 f"{Path(st.filename).name}:{st.lineno}  {(st.line or '').strip()[:78]}"))
-    return out
+class _Spy(_RealLabels):
+    def __init__(self, opti):
+        super().__init__(opti)
+        held["labels"] = self
 
 
-asb.Opti.subject_to = traced
+S._ConstraintLabels = _Spy
 
 captured = {}
 _real_solve = asb.Opti.solve
@@ -125,11 +126,11 @@ scale = np.maximum(1.0, np.abs(gv))
 active = np.where(slack / scale < TOL)[0]
 
 
+_labels = held["labels"].as_dict() if "labels" in held else {}
+
+
 def where(row):
-    for start, n, src in prov:
-        if start <= row < start + n:
-            return src
-    return "(bound row / unknown)"
+    return _labels.get(int(row), "(unlabelled)")
 
 
 # --- PRIMAL first: what could the solver not satisfy? ---------------------
