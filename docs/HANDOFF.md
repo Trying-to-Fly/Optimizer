@@ -221,10 +221,14 @@ active Jacobian (cond 14.7 — so no degeneracy). Relaxing the floor settles it:
 | case | SM floor 0.08 | SM floor 0.05 |
 |---|---|---|
 | `motor_mount = pusher` | timeout at 25 AND 60 min | **CONVERGED, 5.7 min**, 106.55 min, SM exactly 0.050000 |
+| `printed_mass_x1.10` | timeout, 198 iters | **CONVERGED, 5.3 min**, 112.81 min, SM exactly 0.050000 |
 | flatness `span = 1.5 m` | timeout, 199 iters | **`Infeasible_Problem_Detected`**, 131 iters |
 
-Pusher cannot make the mission's stability window; span 1.5 m holds no aircraft
-even with that window opened. Both are answers, not bugs.
+**Two of the three are STATIC-MARGIN limited**: pusher and printed_mass converge
+in ~5 minutes once the floor moves and land exactly on whatever floor they get,
+which is what a binding constraint looks like. `span = 1.5 m` is the odd one
+out — still infeasible at 0.05, so something beyond stability is missing there,
+and that is the one corner still worth a look.
 
 `motor_mount` is therefore **settled**: puller wins on merit (119.89 at SM 0.08
 vs pusher's 106.55 at a *relaxed* 0.05), and FINDINGS §10's adoption stands.

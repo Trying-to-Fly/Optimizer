@@ -895,10 +895,21 @@ Relaxing that floor settles it:
 
 | case | SM floor 0.08 | SM floor 0.05 |
 |---|---|---|
-| `motor_mount = pusher` | timeout at 25 AND 60 min (187, 474 iters) | **CONVERGED in 5.7 min**, 106.55 min, SM lands exactly on 0.050000 |
+| `motor_mount = pusher` | timeout at 25 AND 60 min (187, 474 iters) | **CONVERGED in 5.7 min**, 106.55 min, SM exactly 0.050000 |
+| `printed_mass_x1.10` | timeout, 198 iters | **CONVERGED in 5.3 min**, 112.81 min, SM exactly 0.050000 |
 | flatness `span = 1.5 m` | timeout, 199 iters | **`Infeasible_Problem_Detected`**, 131 iters |
 
-**Both chronic failures are infeasible corners, not solver defects.**
+**All three chronic failures are infeasible corners, not solver defects — and
+two of the three are specifically STATIC-MARGIN limited.** Pusher and
+printed_mass both converge in ~5 minutes once the floor moves, and both land
+*exactly* on whatever floor they are given, which is what a binding constraint
+looks like. `span = 1.5 m` is the odd one out: still infeasible at 0.05, so
+something beyond stability is missing there.
+
+`printed_mass_x1.10` also shows the mildest version of the pattern — its SM
+shortfall is 5.4e-03 against pusher's 8.3e-03 — while being the only one that
+cannot even close lift equilibrium (`L == weight_n` off by 1.6e-02, its largest
+single miss).
 
 - **Pusher cannot meet the 0.08 static-margin window.** It sits on whatever floor
   it is given and wants to go further aft still. And it is not being robbed of a
