@@ -1692,3 +1692,100 @@ and at 55 degrees the model is converged (0.700 / 0.715 / 0.724 across
 resolutions). The corner that fails is high cant, which is where the
 `continuous_cant` study member goes by construction — so that member is the one
 to distrust in any pre-2026-08-01 artifact, and it has never won a study.
+
+## 19. The span curve turns over at 2.50 m (2026-08-01 — the 3 m run)
+
+`runs/20260801T043954-endurance_sample-vtail_sample_v1-7_span300`, 127 minutes,
+**champion 150.53 min**. The run exists because span had sat exactly on its cap in
+every solve this project has ever done, so no span figure it has ever quoted was
+a property of the aeroplane.
+
+### 19.1 It is a genuine interior optimum, and it is FLAT
+
+Span landed at **2.4970 m** against a 3.0 m cap — the first time it has not been
+pinned. Three multistarts agreed to five decimals, and the flatness sweep (which
+now samples around the champion rather than from a constant 1.5 m) drew both
+sides of the curve for the first time, **6 of 6 members converged**:
+
+| span (m) | 2.104 | 2.283 | **2.462** | 2.642 | 2.821 | 3.000 |
+|---|---|---|---|---|---|---|
+| endurance (min) | 123.44 | 125.43 | **126.20** | 125.71 | 124.53 | 122.03 |
+
+(That sweep is at the pre-study incumbent prop, hence 126 rather than 150.)
+
+**Going to 3.0 m COSTS 4.2 min.** The extra span stops paying well before the cap,
+because wing and spar mass overtake the induced-drag saving — and AUW confirms it,
+rising 1.912 -> 1.932 kg between 2.475 and 2.497 m where it had been FALLING with
+span at every earlier cap.
+
+Two consequences worth carrying:
+
+- **The 2.0 m cap costs ~6.3 min** (119.93 at 2.0 against 126.20 at 2.475, same
+  configuration). §15.8 extrapolated 1-1.5 min for 2.0 -> 2.2 m from a slope
+  measured against a wall; the real curve is steeper near 2.0 and then flattens.
+- **The optimum is flat to +-180 mm** (under 1 min across 2.28-2.64 m), so the
+  buildability call — transport, storage, hand-launch — has real room before it
+  costs endurance. That is a better answer for a builder than the peak itself.
+
+### 19.2 The prop is worth more than the span
+
+`ancf_12x10` beat the incumbent `ancf_11x6` by **+24.33 min**, which is four
+times what the whole span increase bought. It is the same story the reports have
+carried for four sessions — cruise J below peak-eta J, i.e. the design asking for
+a coarser prop — and it took M5.3's screen to make the question affordable: **65
+candidates ranked with no NLP, and the full re-solves reproduced the screen's
+ordering exactly** (150.53 / 146.93 / 146.15 / 144.53 against screen ranks
+1/2/3/4).
+
+The caveat is unchanged and now matters more: the champion cruises at **19.3%
+throttle**, where a flat 0.95 ESC efficiency and vendor motor constants are least
+trustworthy (MODEL_DETAILS 2.3). The RANKING is solid; the absolute minutes at
+that throttle are the uncalibrated part.
+
+### 19.3 The winglet is retained for the first time — and read the bound
+
+Winglet-on 150.53 against winglet-off 149.88: **+0.65 min**, where every earlier
+run rejected it. Both independent checks agree it is real:
+
+- `aero.mesh_convergence_check`: in-loop drag 0.70712 N against 0.72724 N at 16
+  panels/section, **-2.8%, converged** — the champion is not a mesh artefact,
+  which after §18 is not a formality.
+- The rebuilt VLM ensemble, 3-of-3 mesh consensus on both configurations and both
+  flagged reliable: **k_induced 0.01839 with the winglet against 0.02278
+  without** (-19.3%), e_projected 1.240 against 1.001. This is the first run in
+  which that cross-check has been worth reading at all (§16.1), and it agrees
+  with the paired re-optimizations.
+
+**But `wl_cant` sits on its 55-degree LOWER bound**, i.e. the optimizer wants the
+panel FLATTER than the floor allows. That floor exists precisely to keep a
+winglet from becoming "a span extension the Schrenk stall model cannot see"
+(MODEL_DETAILS 3.6). So the honest reading is not "a winglet finally pays" but
+**"the design wants more span, and with the projected-span cap binding, a
+low-cant winglet is the only door left open"**. Before adopting it, price the
+same panel as span.
+
+### 19.4 What the champion is pinned against
+
+Eight bounds, now reported rather than reconstructed (§16.4):
+
+| variable | at | reading |
+|---|---|---|
+| `spar_od_center` | 14 mm max | **the centre spar wants to be fatter** — part of this answer is the tube you can buy, not the aerodynamics |
+| `wl_cant` | 55 deg min | see §19.3 — wants to be a span extension |
+| `t_dihedral` | 55 deg max | V-angle at its declared handling cap, as in every run since M4.7 |
+| `le_shear` | 1.0 max | straight TRAILING edge — DESIGN_SPEC specifies a straight LE |
+| `cs_frac` | 0.40 max | max control-surface fraction |
+| `fullness` | 1.0 min | straight taper, the simplest member of the chord family |
+| `d_exp`, `ballast_kg` | 0 | simple dihedral, no ballast — both benign |
+
+`span` and `c_root` are absent for the first time. **`spar_od_center` is the one
+to move next**: it is the same shape as the `c_root` story in §15 — a declared
+manufacturing limit that has been quietly setting an aerodynamic answer.
+
+### 19.5 Everything else held
+
+Pod-boom over integrated (**-8.22 min**, a wider margin than at 2.0 m — a longer
+wing wants a longer tail arm and the boom buys it cheaply), V-tail over
+conventional (-4.36) and T-tail (-6.20), smooth dihedral curve over polyhedral
+(-4.19). Static margin exactly on its 0.08 floor, stall clear, NLP-vs-re-eval gap
+**0.0000**.
