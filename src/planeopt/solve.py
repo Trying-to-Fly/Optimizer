@@ -689,6 +689,10 @@ def _solve_nlp(
         airplane=plane_defl,
         op_point=asb.OperatingPoint(velocity=V, alpha=alpha),
         xyz_ref=[x_cg, 0, 0],
+        # NOT the AeroSandbox default — see aero.LL_VORTEX_CORE_RADIUS. At 1e-8
+        # this model returns negative drag on a strongly canted winglet, and the
+        # optimizer finds it.
+        vortex_core_radius=aero.LL_VORTEX_CORE_RADIUS,
     ).run()
     q = 0.5 * 1.225 * V**2
     s_ref = airplane.s_ref
@@ -711,6 +715,7 @@ def _solve_nlp(
             airplane=airplane,
             op_point=asb.OperatingPoint(velocity=V, alpha=alpha + o),
             xyz_ref=[x_cg, 0, 0],
+            vortex_core_radius=aero.LL_VORTEX_CORE_RADIUS,
         ).run()
         for o in offs
     ]
@@ -744,6 +749,25 @@ def _solve_nlp(
         opti.subject_to(V >= mission.v_min_ms)
     if mission.ballast_max_kg is not None and "ballast_kg" in dv:
         opti.subject_to(dv["ballast_kg"] <= mission.ballast_max_kg)
+    # MODEL-VALIDITY ceiling on lift-to-drag, declared by the aircraft. Not a
+    # design preference and not a prediction — the same posture as
+    # speed_sample's `aspect_ratio_min`: past some L/D the number this model
+    # reports is not aerodynamics any more, and an optimizer that reaches it has
+    # found a hole rather than an aeroplane. On 2026-08-01 two solves rode a
+    # lifting-line artefact to an L/D of 889 and the powertrain's idle-power
+    # ceiling (FINDINGS §18); `aero.LL_VORTEX_CORE_RADIUS` fixed that particular
+    # hole, and this refuses the NEXT one up front instead of after the battery.
+    ld_max = getattr(aircraft, "lift_to_drag_max", None)
+    if ld_max is not None:
+        # Written as a DRAG FLOOR (drag >= W / ld_max), not as `L/drag <= ld_max`.
+        # The natural form is satisfied by negative drag — a negative number is
+        # comfortably below any ceiling — which would have let the exact iterate
+        # this constraint exists to refuse walk straight through it. Against the
+        # WEIGHT rather than the lift, because lift is only equal to weight at a
+        # converged point and may be anything on the way there, while weight is a
+        # sum of positive masses at every iterate. Dimensionless, like every other
+        # row here (FINDINGS §14.5).
+        opti.subject_to(drag * ld_max / weight_n >= 1.0)
     aircraft.geometry_constraints(opti, dv, V, deflection_deg=defl)
     aircraft.structure_constraints(opti, dv, weight_n)
 

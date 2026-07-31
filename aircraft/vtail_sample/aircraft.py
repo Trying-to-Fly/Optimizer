@@ -125,11 +125,24 @@ class VTailSample:
     #: shortfall as a STABILITY failure (FINDINGS section 15).
     c_root_max_m = 0.275
     winglet = True  # tip winglet as a separate asb.Wing (parametric designs only)
-    #: Spanwise STATIONS on the winglet, not panels: AeroSandbox's LiftingLine
-    #: puts `spanwise_resolution` panels in each section, so 3 stations is 8
-    #: panels a side instead of 4. Two was too few and produced negative drag at
-    #: high cant — see the winglet block in `geometry` and FINDINGS section 18.
-    WL_STATIONS = 3
+    #: MODEL-VALIDITY ceiling on lift-to-drag — a limit on what this model may be
+    #: believed about, not a limit on the aeroplane, and the same posture as
+    #: speed_sample's `aspect_ratio_min`. Enforced in the NLP.
+    #:
+    #: It exists because on 2026-08-01 two solves rode a lifting-line artefact to
+    #: an L/D of **889** and sat at the powertrain's idle-power ceiling, and each
+    #: one cost a battery (FINDINGS section 18). The artefact itself is fixed
+    #: (`aero.LL_VORTEX_CORE_RADIUS`); this refuses the next one up front rather
+    #: than after the run, which matters when a battery is 24 solves and only the
+    #: champion gets a fine-mesh cross-check.
+    #:
+    #: 45 is deliberately far above anything this airframe can reach, so it
+    #: cannot quietly cap a real design: the 2.0 m champion trims at L/D 25 and
+    #: the 2.5 m one at 25.1, and a competition sailplane of twice the span and
+    #: a fraction of the wetted area lives around 35-40. **If a solve ever lands
+    #: ON this bound, that is the model failing, not the design succeeding** —
+    #: it will show up in `active_bounds` and should be read as a defect report.
+    lift_to_drag_max = 45.0
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
     # Outer-panel cant ceiling for the two-panel dihedral form. 60 deg is a
     # MODEL limit, not a structural one: past it a Schrenk station on a
@@ -903,16 +916,12 @@ class VTailSample:
         # LiftingLine picks up the nonplanar induced benefit either way
         # (verified against VLM, MODEL_DETAILS 3.6).
         #
-        # WL_STATIONS, and it is not cosmetic. AeroSandbox's LiftingLine puts
-        # `spanwise_resolution` (4) panels in each SECTION, so a two-station
-        # winglet is four panels of a small, highly loaded, near-vertical
-        # surface — and at high cant that discretization returns NEGATIVE drag.
-        # It bit on 2026-08-01: a span-3.0 m solve reported 0.0275 N of total
-        # drag (L/D 889) and 222 min of endurance, because the optimizer found
-        # the corner where the winglet's own contribution went to about -0.93 N.
-        # The converged answer is +0.92 N, and the extra stations recover it for
-        # four more panels a side — where reaching it through
-        # `spanwise_resolution` would have cost 72 (FINDINGS section 18).
+        # This surface is where the in-loop lifting-line went NEGATIVE on
+        # 2026-08-01 — at 86 degrees of cant it contributed about -0.93 N and a
+        # solve rode that to 222 min of endurance at an L/D of 889. The cause is
+        # not the station count here: it is an unregularized vortex core
+        # (`aero.LL_VORTEX_CORE_RADIUS`), and adding stations was tried first,
+        # fixed the sign, and produced a NaN instead. FINDINGS section 18.
         winglet = None
         if self.winglet and parametric:
             c_tip = chords[-1]
@@ -923,21 +932,18 @@ class VTailSample:
             x0 = WING_X_LE + le_x[-1] + c_tip - wl_cr
             dy = dv["wl_len"] * np.cosd(dv["wl_cant"])
             dz = dv["wl_len"] * np.sind(dv["wl_cant"])
-            fracs = np.linspace(0.0, 1.0, self.WL_STATIONS)
             winglet = asb.Wing(
                 name="winglet",
                 symmetric=True,
                 xsecs=[
                     asb.WingXSec(
-                        xyz_le=[
-                            x0 + f * 0.25 * dv["wl_len"],
-                            ys[-1] + f * dy,
-                            zs[-1] + f * dz,
-                        ],
-                        chord=wl_cr + f * (wl_ct - wl_cr),
+                        xyz_le=[x0, ys[-1], zs[-1]], chord=wl_cr,
                         twist=dv["wl_toe"], airfoil=wing_af,
-                    )
-                    for f in fracs
+                    ),
+                    asb.WingXSec(
+                        xyz_le=[x0 + 0.25 * dv["wl_len"], ys[-1] + dy, zs[-1] + dz],
+                        chord=wl_ct, twist=dv["wl_toe"], airfoil=wing_af,
+                    ),
                 ],
             )
 

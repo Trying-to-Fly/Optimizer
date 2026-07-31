@@ -10,9 +10,15 @@ This is the same failure family as the VLM cross-check (§16.1, tests/test_vlm_c
 with one difference that matters: this model is IN THE LOOP, so the optimizer is
 drawn to it rather than merely reporting it.
 
-Two defences, both pinned here: the winglet carries enough stations that the
-in-loop mesh is not wrong to begin with, and the champion's drag is re-checked
-against a finer mesh so that a future artefact is reported rather than shipped.
+Two defences, both pinned here: every lifting-line call regularizes its vortex
+cores so the in-loop model is not wrong to begin with, and the champion's drag is
+re-checked against a finer mesh so a future artefact is reported rather than
+shipped.
+
+Refining the mesh was tried first — more stations on the winglet — and it is
+recorded here as the rejected fix: it corrected the sign and then produced a NaN
+in the real solve, because more panels on a small canted surface is more chances
+of the near-coincident filaments that caused this in the first place.
 """
 
 from __future__ import annotations
@@ -41,23 +47,31 @@ V, ALPHA, DEFL, X_CG = 9.5, 5.44095, -2.25439, 0.4105
 CONVERGED_DRAG_N = 0.92
 
 
-def _drag(aircraft, dv, resolution=4):
+#: The same design at the cant the champion actually uses — converged before the
+#: fix and after it, which is what makes it the control.
+CHAMPION_DV = {**ARTEFACT_DV, "span": 2.49246, "c_root": 0.21742,
+               "washout_tip": -0.62744, "wl_cant": 55.0, "taper": 0.64382,
+               "fullness": 1.0}
+
+
+def _drag(aircraft, dv, resolution=4, core=None):
     plane = aircraft.geometry(dv).with_control_deflections(
         {getattr(aircraft, "pitch_control_name", "ruddervator"): DEFL}
     )
     r = asb.LiftingLine(
         airplane=plane, op_point=asb.OperatingPoint(velocity=V, alpha=ALPHA),
         xyz_ref=[X_CG, 0, 0], spanwise_resolution=resolution,
+        vortex_core_radius=aero.LL_VORTEX_CORE_RADIUS if core is None else core,
     ).run()
     return float(r["D"])
 
 
-def test_the_winglet_carries_enough_stations_to_be_meshed(sample_aircraft):
-    """`spanwise_resolution` panels go in each SECTION, so a two-station winglet
-    is four panels of a small, highly loaded, near-vertical surface."""
-    assert sample_aircraft.WL_STATIONS >= 3
-    winglet = next(w for w in sample_aircraft.geometry({}).wings if w.name == "winglet")
-    assert len(winglet.xsecs) == sample_aircraft.WL_STATIONS
+def test_the_vortex_core_is_regularized_at_all(sample_aircraft):
+    """AeroSandbox's 1e-8 default is no regularization: a filament's induced
+    velocity goes as 1/r, so a control point a micron away dominates the
+    solution. It also must not be so large that it distorts a fine mesh — at
+    1e-3 the 16-panel answer itself moves 8%."""
+    assert 1e-5 <= aero.LL_VORTEX_CORE_RADIUS <= 5e-4
 
 
 def test_the_artefact_geometry_no_longer_makes_thrust(sample_aircraft):
@@ -67,41 +81,45 @@ def test_the_artefact_geometry_no_longer_makes_thrust(sample_aircraft):
     assert d == pytest.approx(CONVERGED_DRAG_N, rel=0.10)
 
 
-def test_the_two_station_winglet_is_what_was_wrong(sample_aircraft):
-    """Kept as the reproduction: with the old station count the in-loop mesh
-    returns negative drag on this geometry, so the fix is load-bearing and not
-    a coincidence of some other change."""
-    sample_aircraft.WL_STATIONS = 2
-    try:
-        assert _drag(sample_aircraft, ARTEFACT_DV) < 0
-    finally:
-        sample_aircraft.WL_STATIONS = 3
+def test_the_unregularized_core_is_what_was_wrong(sample_aircraft):
+    """The reproduction, kept: at AeroSandbox's default core this geometry still
+    returns negative drag, so the fix is load-bearing rather than a coincidence
+    of some other change."""
+    assert _drag(sample_aircraft, ARTEFACT_DV, core=1e-8) < 0
 
 
 def test_the_fix_does_not_move_designs_that_were_already_converged(sample_aircraft):
-    """A mesh fix that changed converged answers would be trading one artefact
-    for another. On the 2026-08-01 champion the shift is under 1%."""
-    dv = {**ARTEFACT_DV, "span": 2.49246, "c_root": 0.21742, "washout_tip": -0.62744,
-          "wl_cant": 55.0, "taper": 0.64382, "fullness": 1.0}
-    fine = _drag(sample_aircraft, dv, resolution=16)
-    assert _drag(sample_aircraft, dv) == pytest.approx(fine, rel=0.05)
+    """A fix that changed converged answers would be trading one artefact for
+    another: on the champion's own cant the shift is a couple of percent, and it
+    moves TOWARD the fine mesh rather than away."""
+    fine = _drag(sample_aircraft, CHAMPION_DV, resolution=16)
+    before = _drag(sample_aircraft, CHAMPION_DV, core=1e-8)
+    after = _drag(sample_aircraft, CHAMPION_DV)
+    assert after == pytest.approx(fine, rel=0.05)
+    assert abs(after - fine) <= abs(before - fine)
+
+
+def test_refining_the_mesh_would_also_have_worked_and_is_not_how_it_is_fixed():
+    """Recorded because it is the fix a reader will reach for first, and it was
+    tried: at 16 panels/section the shipped core radius is unnecessary. The
+    reason it is not the answer is cost and NaNs, not correctness — the NLP
+    builds four of these graphs per solve and already peaks near 12 GB."""
+    assert aero.LL_CHECK_RESOLUTION > 4
 
 
 # --------------------------------------------------------------- the guard
 
 
-class _FakeRun(dict):
-    pass
-
-
-def _stub_ll(monkeypatch, by_resolution):
+def _stub_ll(monkeypatch, by_resolution, seen=None):
     class _LL:
-        def __init__(self, airplane, op_point, xyz_ref, spanwise_resolution=4):
+        def __init__(self, airplane, op_point, xyz_ref, spanwise_resolution=4,
+                     vortex_core_radius=None):
             self.res = spanwise_resolution
+            if seen is not None:
+                seen.append((spanwise_resolution, vortex_core_radius))
 
         def run(self):
-            d = by_resolution[self.res]
-            return {"D": d, "L": 19.0, "CL": 0.7}
+            return {"D": by_resolution[self.res], "L": 19.0, "CL": 0.7}
 
     monkeypatch.setattr(aero.asb, "LiftingLine", _LL)
 
@@ -136,17 +154,76 @@ def test_agreement_passes(monkeypatch):
 
 
 def test_the_check_compares_the_in_loop_resolution_against_a_finer_one(monkeypatch):
-    """It must ask the SAME resolution the NLP used, or it is checking nothing."""
+    """It must ask the SAME resolution and the SAME core radius the NLP used, or
+    it is checking a different model and can only mislead."""
     seen = []
-
-    class _LL:
-        def __init__(self, airplane, op_point, xyz_ref, spanwise_resolution=4):
-            seen.append(spanwise_resolution)
-
-        def run(self):
-            return {"D": 0.7, "L": 19.0, "CL": 0.7}
-
-    monkeypatch.setattr(aero.asb, "LiftingLine", _LL)
+    _stub_ll(monkeypatch, {4: 0.7, aero.LL_CHECK_RESOLUTION: 0.7}, seen=seen)
     aero.mesh_convergence_check(_Plane(), 9.5, 5.0, -2.0, 0.4)
-    assert seen == [4, aero.LL_CHECK_RESOLUTION]
+
+    assert [res for res, _ in seen] == [4, aero.LL_CHECK_RESOLUTION]
     assert aero.LL_CHECK_RESOLUTION > 4
+    assert {core for _, core in seen} == {aero.LL_VORTEX_CORE_RADIUS}
+
+
+# ------------------------------------------- the model-validity backstop
+# The core-radius fix removes the artefact that was FOUND. A battery is ~24
+# solves and only the champion gets a fine-mesh cross-check, so the next hole
+# would again be discovered by reading an implausible number hours later.
+
+
+def test_the_aircraft_declares_a_lift_to_drag_ceiling(sample_aircraft):
+    """Declared, not predicted — the same posture as speed_sample's
+    `aspect_ratio_min`: a limit on what this model may be believed about."""
+    assert sample_aircraft.lift_to_drag_max == pytest.approx(45.0)
+
+
+def test_the_ceiling_cannot_bind_on_a_real_design_of_this_class(sample_aircraft):
+    """A validity bound that caps actual designs is a silent lie about the
+    optimum. Both champions on record trim near L/D 25."""
+    fine = _drag(sample_aircraft, CHAMPION_DV, resolution=16)
+    lift_n = 18.79  # the 2.49 m champion's weight
+    assert lift_n / fine < 0.75 * sample_aircraft.lift_to_drag_max
+
+
+def test_the_ceiling_would_have_refused_the_artefact(sample_aircraft):
+    """L/D 889 against a ceiling of 45 — the constraint the NLP now carries
+    rejects that iterate instead of converging onto it."""
+    artefact_ld = 24.47 / 0.02754  # the 2026-08-01 solve's own numbers
+    assert artefact_ld > 10 * sample_aircraft.lift_to_drag_max
+
+
+def test_the_ceiling_is_written_so_that_NEGATIVE_drag_violates_it():
+    """The natural form — `L / drag <= ld_max` — is SATISFIED by negative drag,
+    because a negative number is comfortably below any ceiling. It would have let
+    the exact iterate this constraint exists to refuse walk straight through.
+
+    Written as a drag floor against WEIGHT (`drag * ld_max / W >= 1`) it refuses
+    both: an implausible L/D and a physically impossible sign.
+    """
+    W, LD = 24.47, 45.0
+
+    def natural_form_ok(drag):
+        return (W / drag) <= LD          # the tempting version
+
+    def shipped_form_ok(drag):
+        return (drag * LD / W) >= 1.0    # what _solve_nlp carries
+
+    assert natural_form_ok(-0.03303) is True, "this is why the form matters"
+    assert shipped_form_ok(-0.03303) is False
+    # and both agree on the cases that are merely implausible or fine
+    assert shipped_form_ok(W / 889) is False   # the artefact's own L/D
+    assert shipped_form_ok(W / 25) is True     # a real champion
+
+
+def test_the_ceiling_is_optional_at_the_framework_level():
+    """An aircraft that declares nothing must solve exactly as before — the
+    framework may not assume an aerodynamic limit on someone else's design."""
+    import inspect
+
+    from planeopt import solve
+
+    src = inspect.getsource(solve._solve_nlp)
+    assert 'getattr(aircraft, "lift_to_drag_max", None)' in src
+    assert "if ld_max is not None:" in src
+    # and it is the drag-floor form, not the one negative drag satisfies
+    assert "drag * ld_max / weight_n >= 1.0" in src

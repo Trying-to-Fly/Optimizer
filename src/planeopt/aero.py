@@ -46,14 +46,37 @@ def body_cd0(bodies: list[dict], V: float, s_ref: float, rho=1.225, mu=1.81e-5) 
     return EXCRESCENCE * d / s_ref
 
 
+#: Vortex core radius for EVERY lifting-line call, in metres. AeroSandbox
+#: defaults to 1e-8, which is no regularization at all: the induced velocity of
+#: a filament goes as 1/r, so a control point that happens to sit a micron from
+#: one gets an enormous induced velocity and the circulation solution is
+#: garbage. On 2026-08-01 that produced NEGATIVE total drag on a wing with an
+#: 86-degree-canted winglet — an L/D of 889 and 222 minutes of endurance, which
+#: the optimizer went looking for because to a maximizer negative drag is free
+#: endurance (FINDINGS section 18).
+#:
+#: 1e-4 m is chosen from measurement, not taste. It fixes the sign and brings the
+#: in-loop mesh within ~1.3% of a 16-panel one on the offending design and ~2% on
+#: the champion, while sitting a full order of magnitude below where the core
+#: starts distorting the FINE mesh too (at 1e-3 the 16-panel answer itself moves
+#: 8%). It is also the physically conservative direction: a real vortex core on a
+#: model wing is millimetres, not nanometres.
+#:
+#: Refining the mesh was tried first and is the worse fix: more panels on a small
+#: canted surface is more chances of near-coincident filaments, it grew the
+#: CasADi graph on a solve that already peaks near 12 GB, and it converted the
+#: negative drag into a NaN.
+LL_VORTEX_CORE_RADIUS = 1e-4
+
+
 def _run_ll(airplane, V, alpha, deflection, x_cg, control_name="ruddervator"):
     p = airplane.with_control_deflections({control_name: float(deflection)})
     return asb.LiftingLine(
         airplane=p,
         op_point=asb.OperatingPoint(velocity=V, alpha=float(alpha)),
         xyz_ref=[x_cg, 0, 0],
+        vortex_core_radius=LL_VORTEX_CORE_RADIUS,
     ).run()
-
 
 #: Resolution the champion's drag is re-checked at, and how far the in-loop
 #: answer may sit from it. The NLP runs LiftingLine at AeroSandbox's default 4
@@ -86,7 +109,8 @@ def mesh_convergence_check(
     out = {}
     for label, res in (("in_loop", 4), ("fine", LL_CHECK_RESOLUTION)):
         r = asb.LiftingLine(
-            airplane=plane, op_point=op, xyz_ref=[x_cg, 0, 0], spanwise_resolution=res
+            airplane=plane, op_point=op, xyz_ref=[x_cg, 0, 0], spanwise_resolution=res,
+            vortex_core_radius=LL_VORTEX_CORE_RADIUS,
         ).run()
         out[label] = {"spanwise_resolution": res, "D_n": float(r["D"]),
                       "L_n": float(r["L"]), "CL": float(r["CL"])}

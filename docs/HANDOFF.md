@@ -131,12 +131,42 @@ from a slope measured against a wall.
 
 **2. The in-loop aero model returns NEGATIVE DRAG, and the optimizer found it.**
 The flatness member at 3.0 m reported 222 min, 0.0275 N of total drag and an L/D
-of 889, because a 52 mm winglet canted 86 degrees contributed about -0.93 N at
-AeroSandbox's default four panels per section. **FINDINGS §18** has the chain.
-Fixed by giving the winglet a third station (four more panels a side, converged
-answer, planform and mass byte-identical), and guarded by
-`aero.mesh_convergence_check`, which re-runs the champion at 16 panels/section
-and flags the run if the in-loop drag is negative or off by more than 10%.
+of 889, because a 52 mm winglet canted 86 degrees contributed about -0.93 N.
+**FINDINGS §18** has the chain.
+
+The cause is `vortex_core_radius`, which AeroSandbox defaults to **1e-8 m** — a
+filament's induced velocity goes as 1/r, so ten nanometres of smoothing is none
+at all, and a control point that lands a micron from a filament dominates the
+solution. It is now **1e-4 m** (`aero.LL_VORTEX_CORE_RADIUS`), which fixes the
+sign, agrees with a 16-panel mesh to ~1-2%, and is still far below a real vortex
+core.
+
+**Refining the mesh was tried first and is recorded as the REJECTED fix.** A
+third winglet station corrected the sign — and then the next solve died with
+`Invalid_Number_Detected`, and the perturbed start reached 222.12 min again on a
+different geometry (span 2.62, cant 78 deg). More panels on a small canted
+surface is more chances of the near-coincident filaments that cause this:
+**it moved the artefact rather than removing it.**
+
+Both artefacts land on exactly 222.12 min and 0.02754 N — that is this
+powertrain's IDLE-POWER CEILING, what endurance becomes when drag goes to zero.
+A solve reporting it has stopped modelling an aeroplane, which makes it a useful
+number to recognise.
+
+Guarded either way by `aero.mesh_convergence_check`: every champion is re-run at
+16 panels/section, and the run is flagged in `run.json`, the log and the report
+if the in-loop drag is negative or off by more than 10%. Plus a declared
+`lift_to_drag_max = 45` enforced in the NLP — a model-validity ceiling in the
+same idiom as speed_sample's `aspect_ratio_min`, set far above anything this
+airframe reaches (both champions trim near 25), so **a solve landing on it is a
+defect report rather than an optimum**. Written as a drag floor rather than an
+L/D ceiling, because the natural form is satisfied by negative drag.
+
+**Verified on the solve that found it.** The start that reached 222.12 min under
+both the original model and the rejected station fix now converges to
+**126.20350 at span 2.4751 — identical to the nominal to five decimals**. The
+2.0 m regression moves -0.16% (119.93422) and the 3 m one -0.12%, which is the
+size of a mesh correction, and both move toward the fine-mesh answer.
 
 The champion at 2.49 m is mesh-converged (0.700 / 0.715 / 0.724 across
 resolutions) and was never contaminated — but the run has to be redone, because

@@ -1576,61 +1576,114 @@ And the neighbourhood is discontinuous, which is the tell that this is numerics
 rather than physics: at `washout_tip` -3.0 deg the drag is +0.86 N, at -3.854
 (the solved value) it is -0.03, and at -4.0 it is **-5.33**.
 
-### 18.2 The cause: four panels on a near-vertical surface
+The same 222.12 min turns up again in §18.3 on a completely different geometry,
+which is what identifies it as a ceiling rather than a design.
 
-`spanwise_resolution` in AeroSandbox's LiftingLine is panels per SECTION, and it
-defaults to **4**. The winglet was two stations — one section — so the whole
-surface was four panels. Sweeping the resolution on the offending design:
+### 18.2 The cause: an unregularized vortex core
 
-| spanwise resolution | 4 (shipped) | 6 | 8 | 12 | 16 | 24 |
+A lifting-line filament's induced velocity goes as **1/r**. AeroSandbox's
+`vortex_core_radius` — the radius inside which that singularity is smoothed —
+defaults to **1e-8 m**. Ten nanometres is not regularization; it means a control
+point that happens to land a micron from a filament receives an enormous induced
+velocity, and the circulation solution built on it is garbage. On a small,
+strongly canted winglet the panels sit close enough for exactly that.
+
+Sweeping the core radius on the offending design, at the shipped 4 panels per
+section and at 16:
+
+| core radius | 1e-8 | 1e-6 | 1e-5 | **1e-4** | 3e-4 | 1e-3 |
 |---|---|---|---|---|---|---|
-| drag (N) | **-0.033** | +0.905 | +0.889 | +0.914 | +0.923 | +0.921 |
+| drag, 4 panels/section | **-0.034** | +0.863 | +0.902 | **+0.903** | +0.904 | +0.909 |
+| drag, 16 panels/section | +0.923 | +0.921 | +0.916 | +0.915 | +0.915 | +0.913 |
 
-Every mesh except the shipped one agrees on ~0.92 N. The champion at 2.49 m, by
-contrast, gives 0.700 / 0.715 / 0.724 across the same range — converged, and
-therefore never contaminated.
+**1e-4 m is the shipped value**, chosen from that table rather than from taste:
+it fixes the sign, brings the in-loop mesh within ~1.3% of a 16-panel one on
+this design and ~2% on the champion, and sits a full order of magnitude below
+where the core starts distorting the FINE mesh as well (at 1e-3 the 16-panel
+answer itself moves 8%). It is also the physically conservative direction — a
+real vortex core on a model wing is millimetres, not nanometres.
 
-This is the same failure family as §16.1 and it is worth stating as a rule:
-**this project's geometries have small, highly loaded, strongly canted surfaces,
-and the default panel counts of both AeroSandbox solvers are too coarse for
-them.** The VLM defect was cosspace clustering at section boundaries; this one is
-four panels on a winglet. Both return a physically impossible sign and neither
-crashes.
+### 18.3 Refining the mesh was tried FIRST, and it is the wrong fix
 
-### 18.3 The fix: stations on the winglet, not resolution everywhere
+The obvious response to "four panels is too few" is more panels, and it was the
+first thing implemented: a third winglet station, which on the offending design
+gives +0.900 N against the converged +0.920, for four extra panels a side.
 
-Raising `spanwise_resolution` globally is the obvious fix and the wrong one: the
-NLP builds FOUR lifting-line graphs per solve (trim plus three static-margin
-alphas) and already peaks near 12 GB, so 4 -> 16 is roughly 4x the graph.
+**It failed in the very next solve, in two different ways.** The nominal solve
+died with `Invalid_Number_Detected` after 28 iterations — a NaN where there had
+been none — and the perturbed start converged to **222.12 min again**, on a
+DIFFERENT geometry (span 2.62, cant 78 deg instead of span 3.0, cant 86 deg).
 
-`WL_STATIONS = 3` puts the extra panels only where the error is. On the offending
-design that is **+0.900 N at the shipped resolution**, within 2% of the converged
-0.920, for **four extra panels a side** where reaching it through resolution
-would have cost 72. Subdividing the main wing instead reaches only +0.38, which
-confirms where the error lives.
+That is the lesson worth keeping: **refining the mesh moved the artefact rather
+than removing it.** More panels on a small canted surface is more chances of the
+near-coincident filaments that cause this, which is also why the NaN appeared.
+Regularizing the core attacks the mechanism instead, costs nothing in graph size
+on a solve that already peaks near 12 GB, and cannot relocate the problem
+because it removes the singularity everywhere rather than re-drawing where the
+panels fall.
 
-Nothing else moves: the planform, `s_ref`, `b_ref` and the winglet's mass are
-identical (the added station is a linear interpolation of a linear panel), and
-the 2026-08-01 champion's drag shifts 0.4%, well inside its own mesh spread.
+Evidence that it is the same failure at both places: both artefacts converge to
+**exactly 222.12 min and 0.02754 N of drag**. That number is not a coincidence
+and not an aircraft — it is this powertrain's IDLE-POWER CEILING, the endurance
+you get when drag goes to zero and the bus is carrying only the motor's no-load
+current. Any solve that reports it has stopped modelling an aeroplane.
 
 ### 18.4 And the champion is now checked against a finer mesh
 
-A fix for one geometry family is not a defence. `aero.mesh_convergence_check`
-re-runs the champion's operating point at 16 panels per section and compares:
-negative in-loop drag is never converged whatever the fine mesh says, and a
-disagreement over 10% flags the run in `run.json`, in the log, and in the report
-notes. Two lifting-line runs at one operating point, against a battery measured
-in hours.
+A fix for one mechanism is not a defence against the next one.
+`aero.mesh_convergence_check` re-runs the champion's operating point at 16 panels
+per section and compares: negative in-loop drag is never converged whatever the
+fine mesh says, and a disagreement over 10% flags the run in `run.json`, in the
+log, and in the report notes. Two lifting-line runs at one operating point,
+against a battery measured in hours.
 
 **What this does not do is make the in-loop model right** — it makes a wrong one
 say so. The honest statement of the model's status is: 4 panels per section is a
-deliberate economy bought against a 12 GB solve, and the champion is the only
-point re-checked at a resolution that would catch its failure.
+deliberate economy bought against a 12 GB solve, the core radius is what keeps
+that economy from being wrong, and the champion is the only point re-checked at a
+resolution that would catch a failure.
 
-### 18.5 What it means for the runs already on disk
+### 18.5 Verified on the solve that found it
 
-The 2026-08-01 battery was **stopped at its second flatness member** and its
-checkpoints discarded, because they were solved under the old winglet mesh.
+Three solves under the regularized core, and the third is the one that matters —
+it is `perturbed_0`'s start, which reached 222.12 min under BOTH the original
+model and the rejected station fix:
+
+| solve | objective | span | drag |
+|---|---|---|---|
+| 2.0 m sample (regression) | 119.93422 (was 120.12168, **-0.16%**) | 2.0000 | 0.832 N |
+| 3 m nominal | 126.20350 (was 126.35968, -0.12%) | 2.4751 | 0.751 N |
+| **3 m, the artefact-finding start** | **126.20350** | **2.4751** | **0.751 N** |
+
+The start that twice found a 222-minute aeroplane now lands on the same interior
+optimum as the nominal, to five decimals. Both regressions move ~0.15%, which is
+the size of a mesh correction rather than of a design change, and both move
+TOWARD the fine-mesh answer.
+
+### 18.6 A model-validity ceiling on L/D, as the next backstop
+
+The core radius fixes the hole that was found. A battery is ~24 solves and only
+the champion gets a fine-mesh cross-check, so the next hole would again be
+discovered by reading an implausible number hours later. `lift_to_drag_max = 45`
+is declared by the aircraft and enforced in the NLP — the same posture as
+speed_sample's `aspect_ratio_min`, a limit on what this model may be believed
+about rather than on the aeroplane. Both champions on record trim near L/D 25,
+so it cannot quietly cap a real design, and **a solve that lands ON it is a
+defect report rather than an optimum** — it will say so in `active_bounds`.
+
+One subtlety worth recording, because the natural form is wrong: it is written
+as a DRAG FLOOR, `drag * ld_max / W >= 1`, not as `L / drag <= ld_max`. The
+natural form is *satisfied* by negative drag — a negative number is comfortably
+below any ceiling — so it would have let the exact iterate this constraint exists
+to refuse walk straight through. Against WEIGHT rather than lift, because lift
+equals weight only at a converged point while weight is a sum of positive masses
+at every iterate.
+
+### 18.7 What it means for the runs already on disk
+
+The 2026-08-01 battery was stopped twice — once at its second flatness member,
+and again after the rejected station fix produced a NaN — and its checkpoints
+were discarded both times, because they were solved under a superseded model.
 
 Earlier runs are not retro-invalidated, but they are not cleared either — no run
 before this one recorded a mesh check. What can be said: every champion since
