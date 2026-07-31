@@ -275,31 +275,147 @@ def tripped_cd_delta(airplane, V: float, CL: float, rho=1.225, mu=1.81e-5) -> di
     return {"dcd_total": delta, "per_surface": detail}
 
 
-def vlm_induced_check(planes: dict, V: float, alphas=(2.0, 4.0, 6.0), rho=1.225) -> dict:
+# --- the induced-drag cross-check runs an ENSEMBLE of meshes, not one --------
+#
+# HANDOFF issue 0a: this check reported `k_induced = -0.50` on the 2026-07-31
+# champion — an inviscid wing whose drag FALLS as CL^2 rises, with CD = -0.54 in
+# the raw sweep. Two things were wrong, and only the first is a clean fix.
+#
+# 1. Spanwise spacing. AeroSandbox's default is cosspace applied WITHIN each
+#    wing section, so panels bunch against every section boundary. This project's
+#    wing has four sections of unequal width (eta 0 / 0.16 / 0.31 / 0.80 / 1.0),
+#    which leaves near-coincident horseshoes at those joints, a near-singular
+#    AIC, and a circulation that is simply wrong. Uniform spanwise panels remove
+#    the clustering and fix the champion outright. Chordwise cosspace is kept:
+#    it is the ordinary way to resolve the leading edge, and it is not the
+#    trigger.
+#
+# 2. It is still a fragile solve. With uniform spacing, INDIVIDUAL meshes on
+#    high-cant geometries continue to blow up sporadically — a 2026-07-31
+#    winglet plane returns k = 0.0226 / 0.0842 / 0.0219 at three neighbouring
+#    resolutions, and a polyhedral one returns CL = 113 at (24, 12). The blow-ups
+#    look perfectly physical in isolation (positive k, positive CD), so no
+#    single-mesh sanity test can catch them.
+#
+# Hence a small ensemble and a MAJORITY rule: the reported k is the consensus of
+# the meshes that agree with the median, and a configuration whose meshes cannot
+# agree is reported as unreliable rather than silently shipped. Cost is ~40 s per
+# configuration, once per run, against a winglet phase measured in minutes.
+VLM_MESHES = ((8, 8), (12, 10), (16, 10))  # (spanwise per section, chordwise)
+VLM_MESH_TOL = 0.15  # a mesh joins the consensus within this fraction of median
+VLM_MIN_CONSENSUS = 2  # ... and this many must, out of len(VLM_MESHES)
+#: How negative CD may go before a polar stops being a polar, as a fraction of
+#: its own largest CD. Not zero: the lowest-alpha point carries the least drag
+#: and the most truncation noise, and a mesh that returns CD = -9e-5 at CL 0.28
+#: while being clean everywhere else is a good solve with a rounding error, not
+#: a broken one. The failure this must still catch returned CD = -0.54.
+VLM_CD_NOISE_FRAC = 0.02
+
+
+def _vlm_polar(plane, V: float, alphas, mesh) -> tuple[list[float], list[float]]:
+    """Inviscid CL/CD at each alpha on a uniformly-spanwise-panelled mesh."""
+    spanwise, chordwise = mesh
+    cls, cds = [], []
+    for a in alphas:
+        r = asb.VortexLatticeMethod(
+            airplane=plane,
+            op_point=asb.OperatingPoint(velocity=V, alpha=float(a)),
+            xyz_ref=[0.0, 0.0, 0.0],
+            spanwise_resolution=spanwise,
+            spanwise_spacing_function=np.linspace,
+            chordwise_resolution=chordwise,
+        ).run()
+        cls.append(float(r["CL"]))
+        cds.append(float(r["CD"]))
+    return cls, cds
+
+
+def vlm_induced_check(
+    planes: dict, V: float, alphas=(0.0, 1.5, 3.0, 4.5, 6.0, 7.5), meshes=VLM_MESHES
+) -> dict:
     """Numeric second opinion on nonplanar induced drag (winglet study,
     MODEL_DETAILS 3.6): fit CD = CD0 + k*CL^2 to an inviscid VLM alpha sweep per
     configuration. LL is the in-loop model; comparing k across {winglet_on,
     winglet_off} checks the induced-drag delta with an independent method.
-    (LL was the conservative of the two in the feasibility test.)"""
+    (LL was the conservative of the two in the feasibility test.)
+
+    Every configuration carries `reliable` and, when False, `unreliable_reason`.
+    The failure mode this guards is not a crash but a plausible-looking number
+    (see the ensemble note above), so the guard is the load-bearing part: the
+    result is the consensus of `meshes`, per-mesh values are kept under
+    `per_mesh` for audit, and an ensemble that cannot agree ships flagged.
+
+    An inviscid solve has no viscous drag, so a mesh is admitted only if its
+    polar has the right SHAPE: a positive fit slope, and drag rising with lift
+    to within `VLM_CD_NOISE_FRAC`. `cd0_inviscid` is the fit intercept and
+    should be ~0 — its magnitude is the residual of a straight line through a
+    mildly nonlinear CD(CL^2), and a few 1e-4 is fit noise, not drag.
+    """
     out = {}
     for label, plane in planes.items():
-        cls, cds = [], []
-        for a in alphas:
-            r = asb.VortexLatticeMethod(
-                airplane=plane,
-                op_point=asb.OperatingPoint(velocity=V, alpha=float(a)),
-                xyz_ref=[0.0, 0.0, 0.0],
-            ).run()
-            cls.append(float(r["CL"]))
-            cds.append(float(r["CD"]))
-        k, cd0 = np.polyfit(np.array(cls) ** 2, np.array(cds), 1)
         ar = float(plane.b_ref**2 / plane.s_ref)
-        out[label] = {
-            "k_induced": float(k),
-            "cd0_inviscid": float(cd0),
+        per_mesh = []
+        for mesh in meshes:
+            cls, cds = _vlm_polar(plane, V, alphas, mesh)
+            k, cd0 = np.polyfit(np.array(cls) ** 2, np.array(cds), 1)
+            per_mesh.append({
+                "mesh": list(mesh), "k_induced": float(k), "cd0_inviscid": float(cd0),
+                # an inviscid polar that loses drag as it gains lift is not a
+                # result to average in — it is a broken solve, so it is dropped.
+                # The test is about the SHAPE of the polar (rising slope, drag
+                # rising with lift) rather than any single point, so that noise
+                # at the lowest-CL point cannot condemn an otherwise clean mesh.
+                "physical": bool(
+                    k > 0
+                    and cds == sorted(cds)
+                    and min(cds) > -VLM_CD_NOISE_FRAC * max(cds)
+                ),
+                "cl": cls, "cd": cds,
+            })
+
+        # Consensus: the median is the reference because it survives a single
+        # blow-up, which is exactly the failure this ensemble exists for.
+        # Everything within TOL of it votes, and the answer is the mean of the
+        # votes. A dropped or outvoted mesh is NOT by itself a failure — being
+        # outvoted is how the ensemble is supposed to absorb one bad solve.
+        usable = [m for m in per_mesh if m["physical"]]
+        agree = []
+        if usable:
+            median = float(np.median([m["k_induced"] for m in usable]))
+            agree = [m for m in usable
+                     if abs(m["k_induced"] - median) <= VLM_MESH_TOL * abs(median)]
+        reasons = []
+        averaged = agree
+        if len(agree) < VLM_MIN_CONSENSUS:
+            reasons.append(
+                f"fewer than {VLM_MIN_CONSENSUS} of {len(per_mesh)} meshes agree on "
+                "k_induced: " + ", ".join(
+                    f"{m['k_induced']:+.4g} at {tuple(m['mesh'])}"
+                    f"{'' if m['physical'] else ' (unphysical)'}" for m in per_mesh
+                )
+            )
+            # still report a best guess, so the flagged number can be argued
+            # with — but from everything usable, not from a "consensus" of one
+            averaged = usable or per_mesh
+
+        k = float(np.mean([m["k_induced"] for m in averaged]))
+        entry = {
+            "k_induced": k,
+            "cd0_inviscid": float(np.mean([m["cd0_inviscid"] for m in averaged])),
             # span efficiency wrt PROJECTED span — e > 1 is the nonplanar payoff
-            "e_projected_span": float(1 / (np.pi * ar * k)),
+            "e_projected_span": float(1 / (np.pi * ar * k)) if k else None,
+            "meshes_in_consensus": [tuple(m["mesh"]) for m in agree],
+            "meshes_averaged": [tuple(m["mesh"]) for m in averaged],
+            "meshes_dropped_unphysical": [
+                tuple(m["mesh"]) for m in per_mesh if not m["physical"]
+            ],
+            "alphas_deg": [float(a) for a in alphas],
+            "per_mesh": per_mesh,
+            "reliable": not reasons,
         }
+        if reasons:
+            entry["unreliable_reason"] = "; ".join(reasons)
+        out[label] = entry
     return out
 
 

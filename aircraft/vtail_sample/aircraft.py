@@ -32,6 +32,47 @@ from lwpla_a1 import (  # construction profiles
     LWPLA_A1_WINGLET,
 )
 
+def _folding_prop_candidates(diameter_max_in: float) -> dict[str, dict]:
+    """Every MEASURED, FOLDING table that fits the declared diameter limit.
+
+    Declared as a RULE rather than a list (2026-07-31, M5.3): the shortlist was
+    hand-maintained at 8 entries only because each candidate cost a full NLP
+    re-solve, and `discrete_screen` removed that cost. The rule is exactly the
+    one the hand-list followed:
+
+    - **measured**, because a rigid proxy table times a folding guess charges
+      the folding penalty twice — which is also why every derived candidate
+      declares `blade_derate = 1.00` (2026-07-29, worth +9.4 min at the same
+      nominal prop);
+    - **folding**, because a non-folding prop on a belly-landing airframe is a
+      prop you break on landing — a build judgement the model cannot see (user,
+      2026-07-29);
+    - **within the airframe's declared diameter limit**, so the study cannot
+      adopt a disc nobody agreed to hang on the nose.
+
+    Keys drop the `uiuc_` source prefix (`ancf_11x6`), so a key still names a
+    manufacturer series and a size the way the hand-written ones did.
+    """
+    from planeopt import propulsion
+
+    out = {}
+    for key, meta in propulsion.catalogue().items():
+        d_in = meta.get("diameter_in")
+        if not (meta.get("measured") and meta.get("folding") and d_in):
+            continue
+        if d_in > diameter_max_in + 1e-9:
+            continue
+        out[key.removeprefix("uiuc_")] = {
+            "name": meta.get("display_name", key),
+            "diameter_in": float(d_in),
+            "pitch_in": float(meta["pitch_in"]),
+            "proxy_table": key,
+            # measured folding data already contains the folding penalty
+            "blade_derate": 1.00,
+        }
+    return dict(sorted(out.items()))
+
+
 # --- spec numbers (DESIGN_SPEC.md) ---
 WING_X_LE = 0.390  # wing root LE station
 TAIL_ARM = 0.700  # wing AC -> tail AC
@@ -49,10 +90,40 @@ SPEC_WING_TWISTS = [0.0, 0.0, -2.0 / 3, -4.0 / 3, -2.0]
 
 
 class VTailSample:
-    name = "vtail_sample_v1.6"
+    # v1.7: root-chord cap 245 -> 275 mm (2026-07-31). The name carries the
+    # version because it names the run directory: two aircraft with different
+    # feasible sets must not answer to the same name, or a comparison across
+    # runs silently compares different aeroplanes.
+    name = "vtail_sample_v1.7"
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
     span_cap_m = 2.0  # manufacturing cap on PROJECTED (front-view y) span, winglet included
     # (2.2 -> 2.0 by user decision 2026-07-24, sixth session)
+    #: Root-chord cap, metres — a PRINT BED limit, and DECLARED rather than
+    #: buried in `design_variables` because it is a build decision the way
+    #: `span_cap_m` and `prop_diameter_max_in` are, and because every champion
+    #: since M0 has sat exactly on it (2026-07-31: `c_root` = 0.2450 at both
+    #: span 2.0 and 1.9). A number the optimizer is always pinned against is a
+    #: number that has to be easy to find and easy to change.
+    #:
+    #: The panel prints standing up — span along Z, so the bed footprint is
+    #: chord x thickness and Z height caps the segment LENGTH, not the chord.
+    #: Laid out at 45 deg on the Bambu A1's 256 mm square bed a chord c needs
+    #: (c + 0.092c)/sqrt(2) per axis, so 245 mm uses 189 mm of 256, 275 mm uses
+    #: 212 mm, and the geometric ceiling is ~332 mm. Axis-aligned the limit
+    #: would be a flat 256 mm, so the 45 deg rotation is what makes 275 mm
+    #: available at all — a yaw on the plate, not a tilt, so the airfoil still
+    #: sits flush and `LWPLA_A1` remains the right construction profile.
+    #:
+    #: 245 -> 275 mm (user decision, 2026-07-31). Worth +0.08 min at the
+    #: champion — five seconds — and that is the whole point: the cap was
+    #: suspected of strangling the design because `c_root` pinned against it in
+    #: every solve that ever converged, and it was not. What it WAS doing is
+    #: making three studies unanswerable: `motor_mount = pusher`,
+    #: `printed_mass_x1.10` and the 1.7/1.8 m flatness members had failed every
+    #: run since M4.8 and all four converge at 275 mm, on the static-margin
+    #: floor. SM is normalised by MAC, so a wing denied chord reports its
+    #: shortfall as a STABILITY failure (FINDINGS section 15).
+    c_root_max_m = 0.275
     winglet = True  # tip winglet as a separate asb.Wing (parametric designs only)
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
     # Outer-panel cant ceiling for the two-panel dihedral form. 60 deg is a
@@ -82,14 +153,25 @@ class VTailSample:
     tail_type = "vtail"  # spec layout; conventional/T priced by the study
     # Puller adopted as the permanent default (user decision 2026-07-24,
     # after the M4.8 study: +10.7 min over the pusher — FINDINGS section 10).
-    # The spec's pusher stays a candidate the study re-prices every run; the
-    # dv=None fixture keeps the spec pusher layout (validation continuity).
+    # The dv=None fixture keeps the spec pusher layout (validation continuity).
     motor_mount = "puller"
     # Declared order = greedy study order: the mount is the biggest CG lever,
     # so it is judged first (at the baseline) and topology/tail re-judge
     # under the adopted mount.
     discrete_options = {
-        "motor_mount": ["puller", "pusher"],
+        # PUSHER RETIRED as a candidate (user decision, 2026-07-31): pullers
+        # only from here. It is not being assumed away — it was priced, twice,
+        # and the second time was like-for-like. At the 245 mm chord cap the
+        # pusher could not even reach the 0.08 static-margin floor, so the M4.12
+        # comparison had to relax the floor to 0.05 to get a number at all
+        # (106.55 vs the puller's 119.89 at 0.08). At 275 mm it converges
+        # properly and still loses by 9.5 min at the SAME floor: 110.66 against
+        # 120.12, both landing on SM exactly 0.0800 (FINDINGS section 15).
+        # Re-pricing it every run cost ~5 min of solve for an answer that has
+        # not changed in three sessions. The mount stays a declared attribute,
+        # and the machinery for the study is untouched — putting "pusher" back
+        # in this list is all it takes to re-open the question.
+        "motor_mount": ["puller"],
         # Prop freed (user decision 2026-07-27): pitch is a real, cheap,
         # buy-it-and-bolt-it-on decision, so it is priced rather than declared.
         # Judged straight after the mount because the mount's installation
@@ -116,6 +198,20 @@ class VTailSample:
         # it rather than assuming it — same posture as tail type and topology.
         "wing_dihedral_form": ["curve", "polyhedral2"],
     }
+
+    #: Two-stage discrete studies (M5.3): `{attr: how many to re-solve in full}`.
+    #: Declaring an attribute here ASSERTS that changing it moves nothing the
+    #: airframe solve fixed — true of a propeller, false of a tail type — so the
+    #: framework may rank its candidates at the champion's operating point with
+    #: no NLP at all and hand the optimizer only the leaders
+    #: (`solve.screen_discrete`).
+    #:
+    #: 4, not 1: the screen holds the airframe FIXED, so it cannot see a
+    #: candidate that would repay its mass by reshaping the wing. Four full
+    #: re-solves cost ~20 minutes and cover the screen being somewhat wrong;
+    #: they also keep the incumbent priced, since it is re-solved as the
+    #: baseline whatever the screen thinks of it.
+    discrete_screen = {"prop_choice": 4}
     wing_dihedral_form = "curve"  # v3 incumbent; polyhedral2 re-priced every run
 
     # --- motor-mount installation effects (MODEL_DETAILS 2.4) — declared
@@ -153,53 +249,6 @@ class VTailSample:
     # operating point that swap alone is worth +9.4 min at the SAME nominal prop
     # (measured CAM 11x7 127.7 vs rigid-proxy 11x7 118.3).
     #
-    # Held to 11 in on purpose: the 190 g motor_prop point mass and the prop
-    # ground clearance both assume it, and neither is modelled as a function of
-    # diameter yet. Larger folders screen better still (12x10 at 143.1 min) —
-    # see HANDOFF section 5 before widening.
-    #
-    # Pitch spans 6 to 12 in, which brackets the screen's peak: 11x10 leads at
-    # 134.5 min and 11x12 falls back to 129.0, matching AIAA 2020-2762's finding
-    # that CAM gains continue only to p/D ~0.8-1.0.
-    PROP_CANDIDATES = {
-        # --- 11 in: the spec incumbent and the M4.11 champion, kept as the
-        # control rung so every widening is measured against a known number ---
-        "cam_11x6": {"name": "aeronaut_cam_11x6_folding", "diameter_in": 11.0,
-                     "pitch_in": 6.0, "proxy_table": "uiuc_ancf_11x6",
-                     "blade_derate": 1.00},
-        "cam_11x10": {"name": "aeronaut_cam_11x10_folding", "diameter_in": 11.0,
-                      "pitch_in": 10.0, "proxy_table": "uiuc_ancf_11x10",
-                      "blade_derate": 1.00},
-        # --- past the old 11 in cap (2026-07-30). The screen ranked these well
-        # above the incumbent at the champion's operating point: 12x10 at 143.1,
-        # 14x9 at 141.7, 13x11 at 139.9 against 11x10's 134.5. They now carry
-        # their own mass (prop_assembly_mass_kg), so a bigger disc has to pay
-        # for itself in nose weight and CG instead of arriving free. ---
-        "cam_12x9": {"name": "aeronaut_cam_12x9_folding", "diameter_in": 12.0,
-                     "pitch_in": 9.0, "proxy_table": "uiuc_ancf_12x9",
-                     "blade_derate": 1.00},
-        "cam_12x10": {"name": "aeronaut_cam_12x10_folding", "diameter_in": 12.0,
-                      "pitch_in": 10.0, "proxy_table": "uiuc_ancf_12x10",
-                      "blade_derate": 1.00},
-        "cam_13x10": {"name": "aeronaut_cam_13x10_folding", "diameter_in": 13.0,
-                      "pitch_in": 10.0, "proxy_table": "uiuc_ancf_13x10",
-                      "blade_derate": 1.00},
-        "cam_13x11": {"name": "aeronaut_cam_13x11_folding", "diameter_in": 13.0,
-                      "pitch_in": 11.0, "proxy_table": "uiuc_ancf_13x11",
-                      "blade_derate": 1.00},
-        "cam_14x9": {"name": "aeronaut_cam_14x9_folding", "diameter_in": 14.0,
-                     "pitch_in": 9.0, "proxy_table": "uiuc_ancf_14x9",
-                     "blade_derate": 1.00},
-        "cam_14x12": {"name": "aeronaut_cam_14x12_folding", "diameter_in": 14.0,
-                      "pitch_in": 12.0, "proxy_table": "uiuc_ancf_14x12",
-                      "blade_derate": 1.00},
-    }
-
-    # Fill the study's candidate list from the data above, in the class body so
-    # the two can never disagree. (discrete_options is already in the class
-    # namespace here; PROP_CANDIDATES was not yet defined where it is declared.)
-    discrete_options["prop_choice"] = list(PROP_CANDIDATES)
-
     #: Largest propeller the AIRFRAME will take, inches. **Declared, not
     #: predicted** — the same posture as `placard_speed_ms`.
     #:
@@ -217,6 +266,32 @@ class VTailSample:
     #: rather than quietly shipping an airframe nobody agreed to.
     prop_diameter_max_in = 14.0
 
+    # WIDENED TO THE WHOLE SHIPPED FOLDING CATALOGUE (2026-07-31, M5.3).
+    # This list was hand-maintained at 8 entries because every candidate cost a
+    # full ~5-minute NLP re-solve. It no longer does: `discrete_screen` below
+    # shortlists them at the champion's operating point with no NLP at all
+    # (solve.screen_discrete), so the candidate set can be everything the data
+    # supports and the run still pays for four solves.
+    #
+    # The selection rule is the same one the hand-list followed, now stated once
+    # instead of eight times: every MEASURED, FOLDING table that fits the
+    # declared airframe diameter limit. Measured, because a fitted rigid table
+    # times a folding guess charges the folding penalty twice (2026-07-29) —
+    # which is also why `blade_derate` is 1.00 for all of them. Folding, because
+    # a non-folding prop on a belly-landing airframe is a prop you break on
+    # landing (the user's call, 2026-07-29, and the model cannot see it).
+    #
+    # Deriving it also removes a real hazard the old comment worried about: two
+    # hand-maintained lists of the same thing drift, and the one that drifts
+    # silently is the one the study runs.
+    PROP_CANDIDATES = _folding_prop_candidates(prop_diameter_max_in)
+
+    # Fill the study's candidate list from the data above, in the class body so
+    # the two can never disagree. (discrete_options is already in the class
+    # namespace here; PROP_CANDIDATES was not yet defined where it is declared.)
+    discrete_options["prop_choice"] = list(PROP_CANDIDATES)
+
+
     # --- motor + propeller group mass (was one frozen 190 g point mass) ---
     # Split because the prop is now a DIAMETER choice, not a constant, and a
     # bigger disc that arrives weightless is a free lunch the optimizer would
@@ -231,14 +306,16 @@ class VTailSample:
     #: blade weights grow across 9-16 in. **Declared data, uncalibrated** — the
     #: honest way to improve it is to weigh two props, not to argue about it.
     PROP_MASS_DIAMETER_EXPONENT = 2.4
-    prop_choice = "cam_11x6"  # spec incumbent; the study re-prices it every run
+    #: Spec incumbent, re-priced by the study every run. The key changed with
+    #: the derived candidate list (was "cam_11x6") — it is the SAME propeller:
+    #: table `uiuc_ancf_11x6`, Aero-Naut CAM Folding 11x6, blade derate 1.00.
+    prop_choice = "ancf_11x6"
     PROP_DIAMETER_M = 0.2794  # 11 in — common to every candidate
-    # Folding blades cost ~5% of shaft power. Applied UNCONDITIONALLY today,
-    # which was fair while every candidate was a folder — it is not any more:
-    # the user confirmed 2026-07-29 that this prop does NOT have to fold, so a
-    # fixed-blade candidate is currently charged ~5% it would never pay. Make
-    # this a priced discrete option (see speed_sample's BLADE_DERATE) in the
-    # same pass that widens PROP_CANDIDATES; the two interact.
+    # Fallback only. Every shipped candidate is MEASURED folding data and
+    # declares blade_derate = 1.00, because the folding penalty is already in
+    # the measurement and applying a proxy derate on top charges it twice. This
+    # constant is what a candidate backed by a RIGID proxy table would pay, and
+    # nothing in the derived list is.
     PROP_FOLDING_DERATE = 0.95
 
     # Straight trailing edge on the tail (user preference, 2026-07-29). Applies
@@ -423,7 +500,7 @@ class VTailSample:
         Cruise-state vars live in solve, not here."""
         i = self.DV_DEFAULTS | (inits or {})
         bounds = {
-            "span": (1.5, self.span_cap_m), "c_root": (0.16, 0.245),
+            "span": (1.5, self.span_cap_m), "c_root": (0.16, self.c_root_max_m),
             # superellipse chord curve (section 9.1). taper = 1.0 is a
             # rectangular wing and fullness = 1.0 a straight taper, so both stay
             # exactly reachable rather than merely approachable; the upper
@@ -590,7 +667,8 @@ class VTailSample:
         # spans ten decades is what made the hard corners take hundreds of
         # iterations (FINDINGS §14.5). Keep new constraints dimensionless.
         opti.subject_to(1.225 * V * c_tip / 1.81e-5 / 90e3 >= 1.0)
-        # A1 print bed: chord already bounded by c_root upper bound (245 mm).
+        # Print bed: chord is already bounded by `c_root_max_m` (see the class
+        # attribute for the 45-degree bed-diagonal arithmetic behind the number).
         # (v3's "outer panels must exist" constraint is gone with center_width —
         # the break station's own bounds guarantee both regions are non-empty.)
         # manufacturing span cap on PROJECTED span: the dv "span" is material

@@ -13,6 +13,10 @@
   .status { padding: .6rem 1rem; border-radius: .5rem; background: color-mix(in srgb, orange 18%, transparent); }
   .meta { opacity: .7; font-size: .85rem; }
   .ok { color: #2c8a2c; font-weight: 600; } .bad { color: #c33; font-weight: 600; }
+  /* an ACTIVE BOUND is not a failure — it is the design asking for something it
+     is not allowed to have. Amber, not the red `.bad` uses, because seven red
+     rows in the design-variable table would read as seven errors. */
+  .pinned { color: #a06a00; font-weight: 600; }
   img { max-width: 100%; }
   .grid { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 </style>
@@ -48,13 +52,75 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 {% if r.performance.get("optimization") %}
 {% set opt = r.performance["optimization"] %}
 <h2>Optimization</h2>
+{# Which variables the champion is PINNED against, shown where the values are.
+   The 2026-07-31 champion sat on eight declared bounds and the session
+   discussed three, because reading them off meant comparing run.json against
+   the aircraft file by hand (HANDOFF issue 0b). #}
+{% set pinned = {} %}
+{% for b in opt["champion"].get("active_bounds") or [] %}
+{% set _ = pinned.update({b["variable"]: b}) %}
+{% endfor %}
 <table>
-<tr><th>design variable</th><th>champion</th></tr>
-{% for k, v in opt["champion"]["dv"].items() %}<tr><td>{{ k }}</td><td>{{ "%.4f"|format(v) }}</td></tr>{% endfor %}
-<tr><td>static margin (NLP)</td><td>{{ "%.3f"|format(opt["champion"].get("static_margin", 0)) }}</td></tr>
-<tr><td>multistart spread</td><td>{{ "%.3f"|format(opt.get("multistart_objective_spread", 0)) }}</td></tr>
-<tr><td>shadow price</td><td>{{ "%.4f"|format(opt.get("shadow_price_obj_per_gram", 0)) }} /g</td></tr>
+<tr><th>design variable</th><th>champion</th><th>declared box</th></tr>
+{% set boxes = opt["champion"].get("dv_bounds") or {} %}
+{% for k, v in opt["champion"]["dv"].items() %}<tr><td>{{ k }}</td><td>{{ "%.4f"|format(v) }}</td>
+{% if pinned.get(k) %}
+<td class="pinned">{{ "%.4g"|format(boxes.get(k, [None, None])[0] if boxes.get(k) else 0) }}
+&hellip; {{ "%.4g"|format(boxes.get(k, [None, None])[1] if boxes.get(k) else 0) }}
+— on its {{ pinned[k]["at"] }} bound</td>
+{% elif boxes.get(k) and boxes[k][0] is not none and boxes[k][1] is not none %}
+<td>{{ "%.4g"|format(boxes[k][0]) }} &hellip; {{ "%.4g"|format(boxes[k][1]) }}</td>
+{% else %}<td>—</td>{% endif %}</tr>{% endfor %}
+{# third cell on every row, including these three: the table gained a column and
+   a short row leaves it ragged — the same defect the re-solve battery table
+   carried for every run that had a failure #}
+<tr><td>static margin (NLP)</td><td>{{ "%.3f"|format(opt["champion"].get("static_margin", 0)) }}</td><td>—</td></tr>
+<tr><td>multistart spread</td><td>{{ "%.3f"|format(opt.get("multistart_objective_spread", 0)) }}</td><td>—</td></tr>
+<tr><td>shadow price</td><td>{{ "%.4f"|format(opt.get("shadow_price_obj_per_gram", 0)) }} /g</td><td>—</td></tr>
 </table>
+{% if pinned %}
+<p style="color:#9a9aa0;font-size:12px;">{{ pinned|length }} variable(s) sit on a
+declared bound — the design asking for something it is not allowed to have. That
+is a work list, not a defect: an active bound says nothing about its VALUE until
+it is moved. <code>c_root</code> was pinned in every solve this project ever ran
+and was worth 5 seconds when finally released — while being the difference
+between three studies being answerable or not.</p>
+{% endif %}
+{% if opt.get("flatness_span") %}
+{# The figure above plots only the spans that RETURNED a number, so a sweep
+   whose bottom half holds no aircraft renders as a two-point line with no hint
+   that four more spans were asked about. That is the more interesting half of
+   the answer, and it was reachable only from run.json. #}
+<h2>Flatness sweep (span fixed, everything else re-optimized)</h2>
+<p style="color:#9a9aa0;font-size:12px;">Sampled around the CHAMPION's span
+(down to {{ "%.0f"|format(100 * flatness_span_fraction) }}% of it, up to the
+cap) rather than from a fixed 1.5 m — the question is how flat this optimum is,
+which is a question about its neighbourhood. Flatness figures from runs before
+2026-07-31 cover a different set of spans and are not comparable.</p>
+<table>
+<tr><th>span (m)</th><th>objective</th><th>minutes</th><th>outcome</th></tr>
+{% for v in opt["flatness_span"] %}
+<tr><td>{{ "%.2f"|format(v["span"]) }}</td>
+{% if v.get("failed") %}
+{# a SKIPPED span carries no minutes because it was never attempted, and "0.0"
+   would read as a measured zero rather than as "not run" #}
+<td class="bad">—</td>
+<td>{% if v.get("solve_minutes") %}{{ "%.1f"|format(v["solve_minutes"]) }}{% else %}—{% endif %}</td>
+<td class="bad">{{ v["failed"] }}</td>
+{% else %}
+<td>{{ "%.1f"|format(v["objective_value"]) }}</td>
+<td>{{ "%.1f"|format(v.get("solve_minutes") or 0) }}</td>
+<td>converged</td>
+{% endif %}</tr>
+{% endfor %}
+</table>
+<p style="color:#9a9aa0;font-size:12px;">Swept downward. A span
+whose feasibility probe returns <code>Infeasible_Problem_Detected</code> holds no
+aircraft, and since feasibility in span is an interval up to the cap, every
+smaller span is then <code>Skipped_Below_Infeasible_Span</code> rather than
+re-derived. A probe that merely times out proves nothing and its member is solved
+in full.</p>
+{% endif %}
 {% if opt.get("resolve_battery") %}
 <h2>Re-solve battery (full re-optimizations)</h2>
 <table>
@@ -69,6 +135,53 @@ wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</
 <td>{{ "%.0f"|format(v["ballast_kg"]*1000) }}</td>{% endif %}</tr>
 {% endfor %}
 </table>
+{% endif %}
+{% for attr, st in (opt.get("discrete_studies") or {}).items() if st.get("screen") %}
+{# M5.3: what the no-NLP screen ranked, and therefore what the expensive stage
+   never saw. A shortlist that is not shown is a shortlist nobody can argue
+   with. #}
+<h2>{{ attr }} screen — {{ st["screen"]["ranking"]|length }} candidates ranked without solving</h2>
+<table>
+<tr><th>#</th><th>candidate</th><th>screened</th><th>powertrain only</th><th>mass</th><th>re-solved?</th></tr>
+{% for e in st["screen"]["ranking"][:12] %}
+<tr><td>{{ loop.index }}</td><td>{{ e["candidate"] }}</td>
+<td>{{ "%.1f"|format(e["screened_objective"]) }}</td>
+<td>{{ "%.1f"|format(e["powertrain_only"]) }}</td>
+<td>{{ "%+.0f"|format(e["mass_delta_g"]) }} g</td>
+<td>{% if e["candidate"] in st["screen"]["shortlist"] %}<span class="ok">yes</span>{% else %}—{% endif %}</td></tr>
+{% endfor %}
+</table>
+<p style="color:#9a9aa0;font-size:12px;">The airframe is held at the incumbent,
+so the screen cannot see a candidate that would repay its mass by reshaping the
+wing — it is a shortlister, and everything it returns is re-solved in full above.
+Mass is charged at this run's own measured shadow price
+({{ "%.4f"|format(st["screen"].get("shadow_price_obj_per_gram") or 0) }}/g);
+without that a bigger disc arrives weightless.
+{% if st["screen"].get("unreachable") %}{{ st["screen"]["unreachable"]|length }}
+candidate(s) could not reach the operating point at all and are not ranked.{% endif %}</p>
+{% endfor %}
+{% if opt.get("winglet_study", {}).get("vlm_check") %}
+{# The VLM second opinion, which until 2026-07-31 was not fit to print: it
+   returned a negative k_induced — an inviscid wing making thrust — in every run
+   since the first (FINDINGS §16.1). It is a CROSS-CHECK on the paired on/off
+   re-optimizations above, never the verdict itself, and it now carries whether
+   its own mesh ensemble agreed. #}
+<h2>Winglet cross-check (inviscid VLM, independent of the lifting-line model)</h2>
+<table>
+<tr><th>configuration</th><th>k induced</th><th>e (projected span)</th><th>mesh ensemble</th></tr>
+{% for cfg, v in opt["winglet_study"]["vlm_check"].items() %}
+{% if v is mapping and "k_induced" in v %}
+<tr><td>{{ cfg }}</td><td>{{ "%.5f"|format(v["k_induced"]) }}</td>
+<td>{{ "%.3f"|format(v["e_projected_span"]) if v.get("e_projected_span") else "—" }}</td>
+{% if v.get("reliable") %}<td class="ok">agreed ({{ v["meshes_in_consensus"]|length }} of {{ v["per_mesh"]|length }})</td>
+{% else %}<td class="bad">not reliable — {{ v.get("unreliable_reason", "") }}</td>{% endif %}</tr>
+{% endif %}
+{% endfor %}
+</table>
+<p style="color:#9a9aa0;font-size:12px;">e is referenced to <b>projected</b> span,
+so e&nbsp;&gt;&nbsp;1 is the nonplanar payoff rather than an error. A lower
+<code>k</code> with the winglet on is the winglet earning its keep on induced
+drag alone — the study's verdict above also charges its mass and profile drag.</p>
 {% endif %}
 {% if opt.get("tripped_polars") %}
 <p><b>Tripped polars:</b> ΔCD {{ "%.4f"|format(opt["tripped_polars"]["dcd_total"]) }}

@@ -7,6 +7,7 @@ arithmetic is pure and injected-fact based, and this is where it is pinned.
 """
 
 import json
+import sys
 
 import pytest
 
@@ -134,3 +135,52 @@ def test_measured_peak_beats_the_default():
 def test_nonpositive_budget_never_yields_zero_workers(budget):
     """A zero width would deadlock the batch loop."""
     assert plan(budget)[0] >= 1
+
+
+# --------------------------------------------------- per-solve, not per-batch
+# HANDOFF issue 0c: the 2026-07-31 run recorded 14.45 GB against both winglet
+# solves and the session read that as "the winglet pair costs 2.7 GB more than
+# everything else". It does not — the RSS high-water mark only ever rises, so
+# every member after the heaviest one inherits its number, and the step actually
+# happened two phases earlier in the tail-type study. The winglet solves are the
+# LIGHTEST in that run (27 design variables against the champion's 32).
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="/proc/self/clear_refs is Linux-only")
+def test_resetting_the_mark_makes_the_next_reading_per_solve():
+    """Allocate, reset, and the mark must forget the allocation."""
+    before = memory.peak_rss_gb()
+    big = bytearray(400 * 1024 * 1024)
+    raised = memory.peak_rss_gb()
+    assert raised > before + 0.3, "the allocation should move the high-water mark"
+    del big
+
+    assert memory.reset_peak_rss() is True
+    assert memory.peak_rss_gb() < raised - 0.3, "the mark still carries the old peak"
+
+
+def test_reset_reports_failure_rather_than_lying(monkeypatch):
+    """Where the reset is unavailable the caller must know, because the number
+    then means 'largest solve so far' and not 'this solve'."""
+    monkeypatch.setattr(memory.sys, "platform", "win32")
+    assert memory.reset_peak_rss() is False
+
+    monkeypatch.setattr(memory.sys, "platform", "linux")
+    def _refuse(*a, **kw):
+        raise OSError("permission denied")
+    monkeypatch.setattr(memory.Path, "write_text", _refuse)
+    assert memory.reset_peak_rss() is False
+
+
+def test_the_run_peak_survives_the_per_solve_resets():
+    """Resetting between solves means the process no longer knows the run's
+    peak at the end — the tracker is what keeps it, and it must keep the MAX."""
+    from planeopt import solve
+
+    solve.RUN_PEAK.reset()
+    assert solve.RUN_PEAK.gb == 0.0
+    for gb in (11.7, 14.45, 11.7, None):
+        solve.RUN_PEAK.observe(gb)
+    assert solve.RUN_PEAK.gb == 14.45
+    solve.RUN_PEAK.reset()
+    assert solve.RUN_PEAK.gb == 0.0

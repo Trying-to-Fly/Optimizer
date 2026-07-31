@@ -35,6 +35,12 @@ def render(result, run_dir: Path | None = None) -> str:
                         **{k: float(row[k]) for k in row if k.endswith(("_m", "_deg"))},
                         "station": int(row["station"]),
                     })
+    # Imported rather than restated: the sweep's range rule is described in the
+    # report, and a hardcoded percentage here would drift from the code that
+    # picks the spans (solve.FLATNESS_SPAN_FRACTION).
+    from ..solve import FLATNESS_SPAN_FRACTION
+
     return _env.get_template("report.html.j2").render(
-        r=result, figures=figures, has_3d=has_3d, stations=stations
+        r=result, figures=figures, has_3d=has_3d, stations=stations,
+        flatness_span_fraction=FLATNESS_SPAN_FRACTION,
     )

@@ -240,6 +240,103 @@ class _ConstraintLabels:
         return {r: src for start, n, src in self.spans for r in range(start, start + n)}
 
 
+#: A variable counts as sitting ON a bound within this fraction of its own box
+#: width. IPOPT converges onto a bound rather than to it (the 2026-07-31
+#: champion's span is 2.0000000199 against a 2.0 m cap), so an exact comparison
+#: would report nothing; 1e-6 of the box absorbs that and nothing wider.
+BOUND_ACTIVE_TOL = 1e-6
+
+
+class _DeclaredBounds:
+    """Records the box each design variable is declared with, while building.
+
+    Bounds live in the AIRCRAFT's `design_variables`, so the framework otherwise
+    has no idea what they are — which is why "the champion is pinned against its
+    span cap, its chord cap, its control-surface fraction and five more" was
+    something a person had to reconstruct by hand against the aircraft file
+    (HANDOFF issue 0b: the 2026-07-31 champion sat on EIGHT bounds, of which
+    three were ever discussed). An active bound is the design asking for
+    something it is not allowed to have; naming them costs one dict per
+    variable, and NOT naming them cost a session of looking at the wrong three.
+
+    Same discipline as _ConstraintLabels: the patch is bound to the INSTANCE, so
+    a build that raises cannot leave a global patch behind, and two live Opti
+    stacks cannot see each other's variables.
+    """
+
+    def __init__(self, opti):
+        import inspect
+
+        real = opti.variable  # already bound to this instance
+        sig = inspect.signature(real)
+        self.by_id: dict[int, tuple[float | None, float | None]] = {}
+        by_id = self.by_id
+
+        def traced(*a, **kw):
+            var = real(*a, **kw)
+            bound = sig.bind(*a, **kw)
+            bound.apply_defaults()
+            by_id[id(var)] = (
+                bound.arguments.get("lower_bound"),
+                bound.arguments.get("upper_bound"),
+            )
+            return var
+
+        opti.variable = traced
+        self._opti = opti
+
+    def stop(self) -> None:
+        """Hand the Opti back its own method; safe to call more than once."""
+        self._opti.__dict__.pop("variable", None)
+
+    def boxes(self, dv: dict) -> dict[str, list]:
+        """The declared box per design variable, `{name: [lo, hi]}`.
+
+        Recorded alongside the solution because a bound is only readable next to
+        the value it bounds — and because a phase that needs to stay inside the
+        box (the flatness sweep fixes `span`, which must land inside its own
+        declared range or IPOPT returns `Invalid_Problem_Definition`) otherwise
+        has no way to ask what the range is.
+        """
+        out = {}
+        for name, var in dv.items():
+            lo, hi = self.by_id.get(id(var), (None, None))
+            out[name] = [
+                None if lo is None or not np.isscalar(lo) else float(lo),
+                None if hi is None or not np.isscalar(hi) else float(hi),
+            ]
+        return out
+
+    def active(self, dv: dict, sol) -> list[dict]:
+        """Which design variables the solution sits on, worst-first by margin.
+
+        Reported rather than judged: an active bound is not a defect, and moving
+        one is not automatically worth anything — `c_root` was pinned in every
+        solve this project ever ran and was worth 14 seconds when finally
+        released (FINDINGS section 15). It is a WORK LIST, and the point is that
+        it should not have to be assembled by hand.
+        """
+        out = []
+        for name, var in dv.items():
+            lo, hi = self.by_id.get(id(var), (None, None))
+            try:
+                value = float(sol(var))
+            except (TypeError, RuntimeError):  # vector variable, or not in this solve
+                continue
+            for which, bound in (("lower", lo), ("upper", hi)):
+                if bound is None or not np.isscalar(bound):
+                    continue
+                width = (hi - lo) if (lo is not None and hi is not None and hi > lo) else 1.0
+                if abs(value - float(bound)) <= BOUND_ACTIVE_TOL * width:
+                    out.append({
+                        "variable": name, "value": value,
+                        "bound": float(bound), "at": which,
+                        "box": [None if lo is None else float(lo),
+                                None if hi is None else float(hi)],
+                    })
+        return sorted(out, key=lambda e: e["variable"])
+
+
 def _failure_record(exc: BaseException) -> dict:
     """The dict a failed job contributes to run.json."""
     rec = {"failed": str(exc)[:280]}
@@ -481,6 +578,47 @@ def run(
 M2_STATUS = "M3: full-vehicle optimization (wing + tail + balance + spars + trim) + numeric re-evaluation"
 
 
+#: What `--warm-start` has to ask IPOPT for, beyond seeding `inits`.
+#:
+#: Seeding primal values alone was measured as a WASH on this model, and the
+#: reason is in the champion: it sits on eight declared bounds. IPOPT's default
+#: `bound_push`/`bound_frac` of 0.01 shove any starting point 1% of each range
+#: away from its bounds, and `mu_init` 0.1 starts the barrier far from the
+#: boundary as well — so a seed whose whole value is that it already sits ON
+#: those bounds gets pushed off them before the first iteration, and the solver
+#: walks back. These are the options that make the seed actually be the starting
+#: point (IPOPT honours the `warm_start_*` family only when
+#: `warm_start_init_point` is on).
+#:
+#: **Measured 2026-07-31, and it still does not pay.** Same aircraft, same
+#: mission, seeded with the previous champion's own design vector — the most
+#: favourable case there is, since the seed IS the answer:
+#:
+#:     cold                                  5.35 min
+#:     warm, seed only                       6.78 min   (+27%)
+#:     warm, seed + these options            5.58 min   (+4%)
+#:
+#: All three return 120.12168 min to eight significant figures, so the seed is
+#: not changing WHERE it lands, only how long it takes to get there — and it
+#: does not get there faster. The fix is real (it recovers most of the loss the
+#: seed-only path was causing) and the honest conclusion is still: do not reach
+#: for `--warm-start` expecting speed. `_solve_nlp` logs that when it is used.
+#:
+#: Why it cannot do better: only the primal point is seeded, because a run
+#: artifact records `dv` and not IPOPT's multipliers. An interior-point method
+#: restarted without duals has to rebuild them, and on a problem sitting on
+#: eight active bounds that is most of the work.
+WARM_START_OPTIONS = {
+    "ipopt.warm_start_init_point": "yes",
+    "ipopt.warm_start_bound_push": 1e-6,
+    "ipopt.warm_start_bound_frac": 1e-6,
+    "ipopt.warm_start_slack_bound_push": 1e-6,
+    "ipopt.warm_start_slack_bound_frac": 1e-6,
+    "ipopt.warm_start_mult_bound_push": 1e-6,
+    "ipopt.mu_init": 1e-4,
+}
+
+
 def _solve_nlp(
     aircraft,
     mission,
@@ -490,6 +628,7 @@ def _solve_nlp(
     printed_scale: float = 1.0,
     eta_scale: float = 1.0,
     timeout_min: float = SOLVE_TIMEOUT_MIN,
+    warm_start: bool = False,
 ) -> dict:
     """One NLP solve. Returns the champion design + state, all numeric.
 
@@ -507,7 +646,13 @@ def _solve_nlp(
     # solve fails the artifact can name the constraint it could not satisfy
     # rather than a row index (_ConstraintLabels).
     labels = _ConstraintLabels(opti)
-    dv = aircraft.design_variables(opti, inits)
+    # Record the aircraft's declared box while it is being declared — the only
+    # moment the framework can see it (_DeclaredBounds).
+    declared = _DeclaredBounds(opti)
+    try:
+        dv = aircraft.design_variables(opti, inits)
+    finally:
+        declared.stop()
     bodies = aircraft.parasite_bodies(dv)  # may be symbolic (fuselage loft)
     # Operating-point box bounds. These are numerical brackets, not physics —
     # the physics is in the constraints below — but a bracket sized for a loiter
@@ -640,6 +785,9 @@ def _solve_nlp(
     # rejected point. It also drops 2 rows per design variable from the
     # Jacobian.
     labels.stop()
+    options = {"ipopt.max_wall_time": 60.0 * timeout_min}
+    if warm_start:
+        options |= WARM_START_OPTIONS
     try:
         sol = opti.solve(
             verbose=False,
@@ -651,12 +799,16 @@ def _solve_nlp(
             # bailing out of is exactly the one where it starts swapping and CPU
             # time falls behind the clock. What is being protected is the run's
             # wall clock, so that is what gets capped.
-            options={"ipopt.max_wall_time": 60.0 * timeout_min},
+            options=options,
         )
     except RuntimeError as e:
         raise SolveFailure(opti, e, labels.as_dict()) from None
     return {
         "dv": {k: float(sol(v)) for k, v in dv.items()},
+        # the variables this solution is PINNED against, and the box they were
+        # declared in — see _DeclaredBounds
+        "active_bounds": declared.active(dv, sol),
+        "dv_bounds": declared.boxes(dv),
         "V_ms": float(sol(V)),
         "alpha_deg": float(sol(alpha)),
         "deflection_deg": float(sol(defl)),
@@ -730,6 +882,112 @@ def _log_result(label: str, key, done: int, total: int, result: dict) -> None:
                  label, done, total, key, result["objective_value"], mins, ram)
 
 
+def screen_discrete(
+    aircraft, mission, attr: str, candidates: list, incumbent: dict,
+    top_n: int, shadow_per_g: float | None = None,
+) -> dict:
+    """Rank `candidates` without solving anything (M5.3, EXECUTION_PLAN §6).
+
+    A discrete study costs one full NLP re-solve per candidate, which is why the
+    prop study priced 3 of 443 shipped tables and adopted one that screened
+    119th of 441 (FINDINGS §12). The fix is not a longer shortlist, it is a
+    cheaper first pass: hold the champion's AIRFRAME and operating point fixed,
+    re-solve only the powertrain for each candidate (`propulsion.solve`, seconds,
+    no NLP), and hand the full optimizer just the top `top_n`.
+
+    **Opt-in per attribute, because the screen is only valid where the attribute
+    changes nothing the airframe solve fixed.** An aircraft declares
+    `discrete_screen = {attr: top_n}` and is asserting exactly that — true of a
+    propeller, false of a tail type. The framework cannot detect it: it would
+    have to know what an attribute means.
+
+    Two effects are priced, and they pull opposite ways:
+
+    - **Powertrain**, through the objective's own evaluator at the incumbent's
+      (V, thrust). This is what a bigger or coarser prop buys.
+    - **Mass**, through `fixed_equipment` and the run's OWN measured shadow
+      price (minutes per gram). Without it the screen is systematically biased
+      toward big propellers, because a 14 in disc arrives weightless — the exact
+      defect that kept the diameter cap at 11 in until 2026-07-30.
+
+    What it still cannot see is re-optimization: a candidate that would repay its
+    mass by reshaping the wing looks worse here than it is. So this is a
+    SHORTLISTER and never a verdict — the returned candidates are re-solved in
+    full, and the incumbent is always among them by construction.
+    """
+    from . import propulsion
+
+    objective = OBJECTIVES[mission.objective]
+    sign = 1 if objective.direction == "maximize" else -1
+    V, thrust = incumbent["V_ms"], incumbent["drag_n"]
+    dv = incumbent.get("dv")
+
+    def equipment_mass_kg() -> float:
+        try:
+            return sum(e.mass_kg for e in aircraft.fixed_equipment(dv))
+        except Exception:  # noqa: BLE001 — a screen must never sink a run
+            return 0.0
+
+    original = getattr(aircraft, attr)
+    base_mass = equipment_mass_kg()
+    ranked, failed = [], {}
+    try:
+        for cand in candidates:
+            setattr(aircraft, attr, cand)
+            try:
+                pt = aircraft.powertrain()
+                pr = propulsion.solve(V, thrust, pt)
+                value = objective.evaluator(V, pr["P_elec_w"], mission, pt)
+                dm_g = (equipment_mass_kg() - base_mass) * 1000.0
+                penalty = (shadow_per_g or 0.0) * dm_g
+                ranked.append({
+                    "candidate": cand,
+                    "screened_objective": float(value + penalty),
+                    "powertrain_only": float(value),
+                    "mass_delta_g": float(dm_g),
+                })
+            except (ValueError, FileNotFoundError, KeyError) as e:
+                # A prop too fine or too coarse for this design at this speed is
+                # a legitimate screen result, not an error: it is how the screen
+                # says "not this one".
+                failed[cand] = str(e)[:160]
+    finally:
+        setattr(aircraft, attr, original)
+
+    ranked.sort(key=lambda r: -sign * r["screened_objective"])
+    return {
+        "ranking": ranked,
+        "unreachable": failed,
+        "shortlist": [r["candidate"] for r in ranked[:top_n]],
+        "shadow_price_obj_per_gram": shadow_per_g,
+        "note": "airframe held fixed at the incumbent; mass priced at the run's "
+                "own shadow price; top candidates are re-solved in full",
+    }
+
+
+class _PeakTracker:
+    """Largest per-solve RSS peak seen so far, in GB.
+
+    Process-global on purpose: the thing it tracks (the kernel's RSS high-water
+    mark) is process-global too. It exists because the in-process path now
+    RESETS that mark between solves to get honest per-solve numbers — which
+    means the run-level peak can no longer be read off the process at the end,
+    since the mark then only reflects the last solve.
+    """
+
+    def __init__(self) -> None:
+        self.gb = 0.0
+
+    def reset(self) -> None:
+        self.gb = 0.0
+
+    def observe(self, gb: float | None) -> None:
+        self.gb = max(self.gb, gb or 0.0)
+
+
+RUN_PEAK = _PeakTracker()
+
+
 def _solve_many(
     aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None,
     label: str = "solve", timeout_min: float = SOLVE_TIMEOUT_MIN,
@@ -765,6 +1023,13 @@ def _solve_many(
                 continue
             if prep is not None:
                 prep(key)
+            # In-process, the RSS high-water mark only ever rises, so without a
+            # reset every member inherits the largest solve that ran before it
+            # (memory.reset_peak_rss — this is what made the 2026-07-31 winglet
+            # solves look 2.7 GB heavier than the rest of the run when they are
+            # the lightest in it). Where the reset is unavailable the number
+            # keeps its old watermark meaning and SAYS so.
+            per_solve_peak = memory.reset_peak_rss()
             t_job = time.monotonic()
             try:
                 results[key] = _solve_nlp(aircraft, mission, **kw)
@@ -774,10 +1039,10 @@ def _solve_many(
                 if restore is not None:
                     restore()
             results[key]["solve_minutes"] = round((time.monotonic() - t_job) / 60.0, 2)
-            # In-process, the high-water mark spans the whole batch rather than
-            # this one solve — an over-estimate of a single peak, which is the
-            # safe direction for a number that later sizes a parallel width.
             results[key]["peak_rss_gb"] = memory.peak_rss_gb()
+            RUN_PEAK.observe(results[key]["peak_rss_gb"])
+            if not per_solve_peak:
+                results[key]["peak_rss_is_batch_watermark"] = True
             _log_result(label, key, len(results), total, results[key])
             if cache is not None:
                 cache.put(label, key, results[key])
@@ -819,6 +1084,8 @@ def _solve_many(
                 results[key] = {"failed": "worker died before reporting (OOM?)"}
             proc.join()
             rx.close()
+            # a forked worker did exactly one solve, so its mark IS that solve's
+            RUN_PEAK.observe(results[key].get("peak_rss_gb"))
             _log_result(label, key, len(results), total, results[key])
             if cache is not None:
                 cache.put(label, key, results[key])
@@ -830,6 +1097,171 @@ def _solve_many(
                 f"of this phase are checkpointed"
             )
     return results
+
+
+#: What the sweep records against a span it never attempted, and against a span
+#: the solver certified holds no aircraft. Read by the report and by anyone
+#: asking why a span has no objective value.
+SKIPPED_STATUS = "Skipped_Below_Infeasible_Span"
+PROVEN_INFEASIBLE_STATUS = "Infeasible_Problem_Detected"
+
+#: Wall-clock ceiling for ONE FLATNESS MEMBER, minutes — well below
+#: `SOLVE_TIMEOUT_MIN`, because a span perturbation that is going to converge on
+#: this model converges quickly. Every converged flatness member on record, both
+#: runs and both chord caps, took **4.6 to 6.0 minutes** (6 of them); the ones
+#: that fail run to whatever ceiling they are given, 87-88 iterations without
+#: closing. 20 minutes is over 3x the slowest flatness convergence.
+#:
+#: And more clock is measured, three separate times, to buy nothing on a member
+#: that is not converging: pusher at 25 vs 60 minutes reached the same `inf_pr`
+#: plateau (FINDINGS §14.5.7), and a feasibility-only solve at span 1.8 m reached
+#: no verdict at either 5 or 20 minutes (2026-07-31, 42 then 157 iterations).
+#:
+#: SCOPED TO FLATNESS DELIBERATELY, and the scope is load-bearing. An earlier
+#: version of this comment claimed no solve on this model lands between 5.3 and
+#: 30 minutes. **That was false when written** — it came from a survey that
+#: listed multistart, flatness, the battery, the prop candidates and the champion
+#: and simply missed the tail-type studies, which are the slowest converging
+#: solves here: `conventional` took 10.6 min at the 245 mm cap and **21.5 min**
+#: at 275 mm. So this model CAN converge well past 12 minutes, and the reason
+#: that does not sink this cap is that a tail-topology swap is a different
+#: problem from a span perturbation — not that slow convergence never happens.
+#:
+#: The exposure that remains: a genuinely slow flatness member would be recorded
+#: as `Maximum_WallTime_Exceeded` and its span silently lost.
+#:
+#: **20.0, not 12.0 — user decision, 2026-07-31.** 12 was 2x the slowest flatness
+#: convergence ever seen (6.0 min), which sounds like margin until you notice
+#: that the one solve known to converge past it took 21.5 minutes. The exposure
+#: is asymmetric: a wrongly-timed-out member silently drops a span from the curve
+#: the sweep exists to draw, while the cost of being generous is bounded and
+#: visible — roughly 16 min per run at the two members that currently fail. The
+#: evidence for "slow members do not converge" stays exactly as strong as it was;
+#: this buys the margin to find out where it stops being true.
+FLATNESS_TIMEOUT_MIN = 20.0
+
+
+#: How far BELOW the incumbent span the sweep reaches, as a fraction of it.
+#: The sweep answers "how flat is this optimum?", which is a question about the
+#: optimum's NEIGHBOURHOOD — see `flatness_sweep`.
+FLATNESS_SPAN_FRACTION = 0.85
+
+
+def flatness_sweep(
+    batch, span_cap: float, n: int = 6, span_min: float | None = None,
+    member_timeout_min: float = FLATNESS_TIMEOUT_MIN,
+    run_timeout_min: float = SOLVE_TIMEOUT_MIN,
+    incumbent_span: float | None = None,
+    span_floor: float | None = None,
+) -> list[dict]:
+    """Re-optimize everything else at each of `n` fixed spans around the optimum.
+
+    **The range is tied to the incumbent span, not to a constant** (2026-07-31,
+    HANDOFF issue 0f). It used to be `linspace(1.5, cap, 6)`, which dates from a
+    2.2 m cap with an interior optimum. Once the optimum sat ON the cap, four of
+    the six spans were 10-25% below it in a region that had been shown to hold no
+    aircraft — so the sweep spent most of a run's time re-deriving that the
+    bottom of its own range was empty, and the question it exists to answer is
+    about the neighbourhood of the optimum, which 1.5 m is not in for a 2.0 m
+    design. It now samples `[FLATNESS_SPAN_FRACTION x s*, cap]`, where `s*` is
+    the incumbent's span, which is the same range whether the optimum is on the
+    cap or interior.
+
+    What that costs, stated plainly: **the flatness figure is no longer
+    comparable across runs with different champions**, because it is no longer
+    the same set of spans. That is why this was deferred twice. It is worth it
+    because the alternative is a sweep whose samples are chosen by a constant
+    from a retired cap.
+
+    `span_min` overrides the derived floor (tests, and a deliberate wide sweep);
+    `span_floor` is the span variable's own declared lower bound, which the
+    derived range is never allowed to go under.
+
+    Swept DOWNWARD from the cap, short-circuited when a span is PROVED to hold
+    no aircraft, and bounded so that a span which proves nothing cannot cost the
+    run an hour. Each part carries its own weight:
+
+    **Downward**, because feasibility in span is an interval [s_min, cap] on this
+    class of model — shrinking span at a fixed wing area drives CL up and makes
+    the stall, gust and stability constraints harder, never easier. So an
+    infeasible member licenses an inference about SMALLER spans only, and
+    sweeping up from the bottom licenses nothing at all: 1.5 m being infeasible
+    says nothing about 1.6 m.
+
+    **Only on a PROOF**, because `Infeasible_Problem_Detected` is the solver
+    certifying that there is no aircraft there, whereas a timeout certifies
+    nothing — cascading a timeout would silently discard spans that are merely
+    slow, which is the same mistake in the other direction.
+
+    **And bounded**, because on THIS model that proof has never arrived. Gating
+    the cascade on the status alone (as of 2026-07-30) did nothing whatsoever:
+    every failure ever recorded, in every run, is `Maximum_WallTime_Exceeded`,
+    so the 2026-07-31 sweep spent 130.6 minutes on four spans and skipped none.
+    The single observation the gate was designed against (FINDINGS §14.5.8) came
+    from a diagnostic with the static-margin floor relaxed to 0.05, which is not
+    the configuration the sweep runs in.
+
+    Trying to MAKE the proof arrive was the obvious next move and it failed on
+    measurement: a feasibility-only solve (constant objective, same constraints)
+    reached no verdict at span 1.8 m in either 5 or 20 minutes, and at 20 minutes
+    sat FURTHER from lift equilibrium (0.356) than the full member did at 30
+    (0.030). Removing the objective does not regularise this problem, it flattens
+    it. So the cascade stays — it is correct, and it costs six lines — but what
+    actually reclaims the time is refusing to pay the full 30-minute run ceiling
+    for an answer a shorter member budget gives just as well.
+    See `FLATNESS_TIMEOUT_MIN`.
+
+    `run_timeout_min` is the run-wide ceiling (`--solve-timeout-min`), and it is
+    a true CEILING: lowering it lowers the member budget with it, because that
+    flag is documented as the limit for one member solve and a phase that
+    silently ignored it would be lying. Raising it is the asymmetric case — that
+    does not undo a budget set from evidence about this phase specifically.
+
+    `batch(label, jobs)` runs a list of `(key, kwargs)` member solves; injected
+    rather than imported so the sweep is testable without a solver.
+    """
+    member_timeout_min = min(member_timeout_min, run_timeout_min)
+    if span_min is None:
+        # Below the incumbent, never above the cap: the cap is a declared
+        # manufacturing limit and a member past it is not an aircraft anyone
+        # agreed to build.
+        span_min = FLATNESS_SPAN_FRACTION * min(incumbent_span or span_cap, span_cap)
+        if span_floor is not None:
+            # never below the variable's own declared floor: a `fixed` value
+            # outside the box is an INVALID problem, not an infeasible one, and
+            # the member would come back as a solver error rather than a span
+            span_min = max(span_min, float(span_floor))
+    spans = sorted((float(s) for s in np.linspace(span_min, span_cap, n)), reverse=True)
+    fr: dict[float, dict] = {}
+    floor: float | None = None
+    for span in spans:
+        if floor is not None:
+            fr[span] = {
+                "failed": f"skipped: {floor:.2f} m proved infeasible and span "
+                "feasibility is an interval up to the cap",
+                "return_status": SKIPPED_STATUS,
+            }
+            log.info("  flatness sweep: %.2f m skipped (below the infeasible %.2f m)",
+                     span, floor)
+            continue
+        fr[span] = batch("flatness sweep", [
+            (span, {"fixed": {"span": span}, "timeout_min": member_timeout_min})
+        ])[span]
+        if fr[span].get("return_status") == PROVEN_INFEASIBLE_STATUS:
+            floor = span
+            log.info("  flatness sweep: %.2f m proved infeasible — smaller spans "
+                     "will be skipped", span)
+
+    return [
+        {"span": s, "objective_value": None, **_failed_entry(fr[s])}
+        if "failed" in fr[s]
+        else {
+            "span": s,
+            "objective_value": fr[s]["objective_value"],
+            "solve_minutes": fr[s].get("solve_minutes"),
+        }
+        for s in sorted(spans)
+    ]
 
 
 def optimize(
@@ -895,6 +1327,7 @@ def optimize(
             "" if per else f" (no measured peak yet — assuming {memory.DEFAULT_PER_SOLVE_GB:.0f} GB)",
         )
     check_parallel(parallel)
+    RUN_PEAK.reset()  # per-solve marks are reset as the run goes; this keeps the max
     t_start = time.monotonic()
     total_gb, avail_gb = memory.machine_ram()
     log.info(
@@ -906,8 +1339,15 @@ def optimize(
     if warm_start:
         log.info("warm start: seeding the nominal solve and every study candidate "
                  "from %s (all variables stay free — this is an initial guess, "
-                 "not a constraint)", warm_start_from or "a previous champion")
-    warm = {"inits": dict(warm_start)} if warm_start else {}
+                 "not a constraint). NOTE: measured as no faster than a cold "
+                 "solve even when seeded with the answer itself (5.58 vs 5.35 "
+                 "min, 2026-07-31) — use it for provenance, not for speed.",
+                 warm_start_from or "a previous champion")
+    # `warm_start=True` alongside the seed: without it IPOPT pushes the starting
+    # point off every bound before iterating, which on a champion pinned against
+    # eight of them throws away most of what the seed was worth
+    # (WARM_START_OPTIONS).
+    warm = {"inits": dict(warm_start), "warm_start": True} if warm_start else {}
 
     # Where the hours actually went. Reconstructing this from the progress log
     # after the fact is what turned up the 2026-07-29 finding that 87% of a
@@ -979,47 +1419,16 @@ def optimize(
     flat = []
     span_cap = getattr(aircraft, "span_cap_m", 3.0)
     if flatness:
-        # Swept DOWNWARD from the cap, and short-circuited when a member proves
-        # infeasible. Both halves matter:
-        #
-        # Downward, because feasibility in span is an interval [s_min, cap] on
-        # this class of model — shrinking span at a fixed wing area drives CL up
-        # and makes the stall, gust and stability constraints harder, never
-        # easier. Sweeping up from the bottom licenses no inference at all: 1.5 m
-        # being infeasible says nothing about 1.6 m.
-        #
-        # Only on a PROOF, because `Infeasible_Problem_Detected` is the solver
-        # certifying there is no aircraft there, whereas a timeout certifies
-        # nothing — cascading a timeout would silently discard spans that are
-        # merely slow. The 2026-07-30 sweep spent ~2 hours re-deriving that its
-        # bottom end is empty (FINDINGS §14.5.8).
-        spans = sorted((float(s) for s in np.linspace(1.5, span_cap, 6)), reverse=True)
-        fr, floor = {}, None
-        for span in spans:
-            if floor is not None:
-                fr[span] = {
-                    "failed": f"skipped: {floor:.2f} m proved infeasible and span "
-                    "feasibility is an interval up to the cap",
-                    "return_status": "Skipped_Below_Infeasible_Span",
-                }
-                log.info("  flatness sweep: %.2f m skipped (below the infeasible %.2f m)",
-                         span, floor)
-                continue
-            one = batch("flatness sweep", [(span, {"fixed": {"span": span}})])
-            fr[span] = one[span]
-            if fr[span].get("return_status") == "Infeasible_Problem_Detected":
-                floor = span
-        spans = sorted(spans)
-        flat = [
-            {"span": s, "objective_value": None, **_failed_entry(fr[s])}
-            if "failed" in fr[s]
-            else {
-                "span": s,
-                "objective_value": fr[s]["objective_value"],
-                "solve_minutes": fr[s].get("solve_minutes"),
-            }
-            for s in spans
-        ]
+        # The declared span floor is a hard limit on what the sweep may sample:
+        # a `fixed` value outside a variable's own box is not an infeasible
+        # aircraft, it is an invalid problem, and IPOPT says so
+        # (`Invalid_Problem_Definition`) rather than reporting a span.
+        span_box = (champion.get("dv_bounds") or {}).get("span") or [None, None]
+        flat = flatness_sweep(
+            batch, span_cap, run_timeout_min=solve_timeout_min,
+            incumbent_span=champion["dv"].get("span"),
+            span_floor=span_box[0],
+        )
 
     # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization
     battery_jobs = [
@@ -1057,6 +1466,29 @@ def optimize(
         discrete_originals[attr] = baseline
         study = {"baseline": baseline, "alternatives": {}, "adopted": baseline}
         cands = [c for c in candidates if c != baseline]
+        # M5.3: shortlist a large candidate set with a no-NLP screen before
+        # spending ~5 minutes of solve on each (screen_discrete). Opt-in per
+        # attribute, and the full ranking is kept in the artifact so the
+        # shortlist can be second-guessed without re-running anything.
+        top_n = (getattr(aircraft, "discrete_screen", None) or {}).get(attr)
+        if top_n and len(cands) > top_n:
+            screen = screen_discrete(
+                aircraft, mission, attr, cands, champion, top_n, shadow_per_g,
+            )
+            study["screen"] = screen
+            log.info(
+                "study %s: screened %d candidates without solving — shortlist %s",
+                attr, len(cands), ", ".join(screen["shortlist"]),
+            )
+            cands = screen["shortlist"]
+        if not cands:
+            # A single-candidate option is a DECLARED choice, not a study: the
+            # aircraft is saying "this is the mount", the way `span_cap_m` says
+            # "this is the cap". Recorded so the artifact still names what was
+            # used, but not run as a phase — an empty phase in the progress log
+            # and an empty block in the report both read as a study that failed.
+            discrete_studies[attr] = study
+            continue
         # alternatives within one attr are independent solves (each candidate's
         # solve depends only on its own attr value, not on the champion), so
         # they may run concurrently; adoption below is order-identical to the
@@ -1153,6 +1585,17 @@ def optimize(
                 "caveat": "Schrenk stall stations include the canted region — "
                 "indicative only; the spar-fit constraint also binds high cant",
             }
+
+    # What the champion is PINNED against, in the progress log as well as the
+    # artifact: this is the "what to relax next" list, and the run it was added
+    # for had eight entries where the session discussed three (issue 0b).
+    if champion.get("active_bounds"):
+        log.info(
+            "champion sits on %d bound(s): %s",
+            len(champion["active_bounds"]),
+            ", ".join(f"{b['variable']}={b['value']:.4g} ({b['at']})"
+                      for b in champion["active_bounds"]),
+        )
 
     # numeric re-evaluation of the champion through the full M1 pipeline
     # (winglet-free when the study rejected it — champion is the off-solve then)
@@ -1269,9 +1712,11 @@ def optimize(
     )
     # Measured per-solve peak, so the NEXT run's memory budget divides by data
     # rather than by the folklore 13 GB. Children cover the forked (parallel)
-    # path, self covers the in-process one; whichever ran, the other reads 0.
+    # path; RUN_PEAK covers the in-process one, where the mark is reset between
+    # solves and so cannot be read off the process at the end. `peak_rss_gb()`
+    # on self remains as a floor for anything that ran outside a batch.
     result.diagnostics["peak_rss_gb"] = round(
-        max(memory.peak_rss_gb(children=True), memory.peak_rss_gb()), 2
+        max(memory.peak_rss_gb(children=True), memory.peak_rss_gb(), RUN_PEAK.gb), 2
     )
     result.diagnostics["parallel_width"] = parallel
     result.diagnostics["solve_timeout_min"] = solve_timeout_min

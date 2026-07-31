@@ -310,7 +310,22 @@ The model lets the NLP referee that trade:
 - **Induced-drag fidelity**: LL sees the nonplanar benefit (k_induced fell ~7.5%
   for a 0.15 m winglet in the feasibility test) but is *conservative* vs an
   inviscid VLM fit (~12%). Champions get a numeric VLM second opinion
-  (`aero.vlm_induced_check`, CD = CD0 + k·CL² fit, on/off comparison).
+  (`aero.vlm_induced_check`, CD = CD0 + k·CL² fit over a 6-alpha sweep, on/off
+  comparison).
+
+  **That second opinion is an ENSEMBLE of three meshes, and it self-certifies.**
+  AeroSandbox's default spanwise spacing (`cosspace` within each wing section)
+  bunches panels against section boundaries; on this wing's four unequal sections
+  that leaves near-coincident horseshoes, a near-singular AIC and a circulation
+  that is simply wrong — every run before 2026-07-31 reported a NEGATIVE
+  `k_induced`, i.e. an inviscid wing producing thrust (FINDINGS §16.1). Uniform
+  spanwise panels fix it, but individual meshes still blow up sporadically on
+  high-cant geometries, and a blown-up mesh looks perfectly physical on its own.
+  So the reported value is the consensus of the meshes that agree with the
+  median, `per_mesh` carries all three for audit, and a configuration whose
+  meshes cannot agree ships with `reliable: false` and a reason rather than a
+  number. `cd0_inviscid` is the fit intercept and should be ~0: an inviscid solve
+  has no viscous drag, so its magnitude is fit residual, not drag.
 - **Exclusions, all conservative**: winglet contributes nothing to the Schrenk
   critical-section stall model, the effective-dihedral floor, or s_ref. Its own
   stall risk is handled by a toe bound (±3 deg) and a 60k mean-chord Re floor

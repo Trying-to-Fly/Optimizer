@@ -59,6 +59,33 @@ def available_props() -> list[str]:
     return keys
 
 
+@functools.lru_cache(maxsize=1)
+def catalogue() -> dict[str, dict]:
+    """Every resolvable table's METADATA, keyed by proxy-table key.
+
+    An aircraft that wants to derive its candidate list from the data rather
+    than restate it by hand (two lists of the same thing drift, and the one that
+    drifts silently is the one the study runs) needs to ask what ships. Reading
+    all 661 tables costs ~3 s, hence the cache and hence metadata only — the
+    polynomial coefficients are the bulk and a selection rule never wants them.
+    """
+    out: dict[str, dict] = {}
+    for d in props_search_path():
+        if not d.is_dir():
+            continue
+        for path in sorted(d.glob("*.json")):
+            if path.stem in out:  # nearest override wins, as everywhere else
+                continue
+            try:
+                blob = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue  # a corrupt table must not break every selection rule
+            out[path.stem] = {
+                k: v for k, v in blob.items() if k not in ("ct_coeffs", "cp_coeffs")
+            }
+    return out
+
+
 def find_prop_table(key: str) -> Path:
     for d in props_search_path():
         candidate = d / f"{key}.json"

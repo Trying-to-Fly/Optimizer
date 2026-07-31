@@ -124,6 +124,33 @@ def swap_gb() -> float:
 # --- what a solve actually took -------------------------------------------
 
 
+def reset_peak_rss() -> bool:
+    """Reset this process's RSS high-water mark. Returns whether it worked.
+
+    Without this, the in-process path reports a WATERMARK as if it were a
+    per-solve peak: the mark only ever rises, so every later member of a battery
+    inherits the largest solve that ran before it. That is not a harmless
+    over-estimate — it misattributes memory to whichever phase happened to run
+    afterwards. The 2026-07-31 run recorded 14.45 GB against both winglet
+    solves and the whole session read that as "the winglet pair costs 2.7 GB
+    more than everything else"; the step actually happened two phases earlier,
+    in the tail-type study, and the winglet solves are the SMALLEST in the run
+    (27 design variables against the champion's 32).
+
+    Linux only: `/proc/self/clear_refs` with the magic value 5 clears the peak
+    (kernel >= 4.0). Everywhere else — and if the write is refused — the caller
+    keeps the watermark behaviour and says so, because a number that silently
+    changes meaning per platform is worse than one that is always conservative.
+    """
+    if sys.platform != "linux":
+        return False
+    try:
+        Path("/proc/self/clear_refs").write_text("5", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 def peak_rss_gb(children: bool = False) -> float:
     """High-water mark of this process (or of its reaped children) in GB.
 

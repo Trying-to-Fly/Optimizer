@@ -149,3 +149,111 @@ def test_diagnostics_never_replace_the_real_failure():
             raise ValueError("no")
 
     assert solve._worst_violations(Hostile(), {}) == []
+
+
+# ------------------------------------------------- which bounds a solution sits on
+# HANDOFF issue 0b: the 2026-07-31 champion was pinned against EIGHT declared
+# bounds and only three of them were ever discussed, because nothing reported
+# them — the box lives in the aircraft's `design_variables` and the framework
+# never saw it. These pin the recorder that now does.
+
+
+def _boxed(**kwargs):
+    """A toy Opti whose optimum sits on x's upper bound and y's lower bound."""
+    opti = asb.Opti()
+    declared = solve._DeclaredBounds(opti)
+    dv = {
+        "x": opti.variable(init_guess=1.0, lower_bound=0.0, upper_bound=2.0),
+        "y": opti.variable(init_guess=1.0, lower_bound=0.5, upper_bound=4.0),
+        "z": opti.variable(init_guess=1.0, lower_bound=-5.0, upper_bound=5.0),
+    }
+    declared.stop()
+    for key, value in kwargs.items():
+        opti.subject_to(dv[key] == value)
+    # pushes x up, y down, and leaves z interior
+    opti.minimize(-dv["x"] + dv["y"] + (dv["z"] - 1.0) ** 2)
+    return opti, dv, declared
+
+
+def test_active_bounds_are_named():
+    opti, dv, declared = _boxed()
+    sol = opti.solve(verbose=False, max_iter=200, detect_simple_bounds=True)
+    active = declared.active(dv, sol)
+
+    assert [(b["variable"], b["at"]) for b in active] == [("x", "upper"), ("y", "lower")]
+    assert active[0]["bound"] == 2.0 and active[0]["box"] == [0.0, 2.0]
+    # z is interior and must not be reported — a list that names everything is
+    # the same as a list that names nothing
+    assert "z" not in [b["variable"] for b in active]
+
+
+def test_a_bound_is_active_when_ipopt_lands_just_past_it():
+    """IPOPT converges ONTO a bound, not to it: the champion's span is
+    2.0000000199 against a 2.0 m cap. An exact comparison reports nothing."""
+    opti, dv, declared = _boxed()
+    opti.solve(verbose=False, max_iter=200, detect_simple_bounds=True)
+
+    class _JustPast:
+        def __call__(self, var):
+            return {id(dv["x"]): 2.0 + 2e-8, id(dv["y"]): 0.5 - 1e-9,
+                    id(dv["z"]): 1.0}[id(var)]
+
+    assert {b["variable"] for b in declared.active(dv, _JustPast())} == {"x", "y"}
+
+
+def test_the_recorder_is_removed_and_is_per_instance():
+    """Same discipline as the constraint labeller: no global patch may survive.
+
+    A leaked patch would make every later solve in the process record bounds
+    against the wrong Opti — and a battery runs dozens of solves in one process.
+    """
+    opti = asb.Opti()
+    declared = solve._DeclaredBounds(opti)
+    other = asb.Opti()
+    assert "variable" not in other.__dict__, "patch leaked to another Opti"
+    declared.stop()
+    assert "variable" not in opti.__dict__
+    declared.stop()  # idempotent
+
+
+def test_fixing_a_variable_adds_no_constraint_row():
+    """`fixed` values are handed to IPOPT as BOUNDS, not as an extra equality.
+
+    HANDOFF issue 1 called for plumbing `fixed` into `design_variables` because
+    `subject_to(dv[k] == v)` on a variable ALREADY at that bound declares the
+    same constraint twice — LICQ violated by construction, multipliers
+    non-unique. `detect_simple_bounds=True` (added the session before) already
+    does it: CasADi hoists `x == v` into lbx/ubx and eliminates the variable.
+    Measured on the real model the same day: fixing span at its own lower bound
+    took it from 36 variables / 4 equalities / 34 inequalities to 35 / 4 / 34.
+
+    This test is what stops that from silently regressing if the flag is ever
+    dropped — the symptom would be a diverging `inf_du` in the flatness sweep,
+    which costs a session to diagnose.
+    """
+    free, _, _ = _boxed()
+    free.solve(verbose=False, max_iter=200, detect_simple_bounds=True)
+    baseline = list(free.stats()["detect_simple_bounds_is_simple"])
+    assert all(baseline), "the declared box itself should already be bounds"
+
+    for value, where in ((1.0, "interior"), (0.0, "on its own lower bound")):
+        opti, dv, _ = _boxed(x=value)
+        sol = opti.solve(verbose=False, max_iter=200, detect_simple_bounds=True)
+        is_simple = list(opti.stats()["detect_simple_bounds_is_simple"])
+        # CasADi flags every row it hoisted out of `g` into lbx/ubx. The row the
+        # `fixed` value added must be among them: one more row than the free
+        # problem, and all of them simple.
+        assert len(is_simple) == len(baseline) + 1, where
+        assert all(is_simple), f"{where}: `fixed` survived as a constraint row"
+        assert float(sol(dv["x"])) == pytest.approx(value), where
+
+
+def test_the_declared_box_is_recorded_next_to_the_values():
+    """A bound is only readable next to the value it bounds — and the flatness
+    sweep needs to ask what the span box IS, because a `fixed` value outside it
+    is an invalid problem rather than an infeasible aircraft."""
+    opti, dv, declared = _boxed()
+    boxes = declared.boxes(dv)
+    assert boxes == {"x": [0.0, 2.0], "y": [0.5, 4.0], "z": [-5.0, 5.0]}
+    # every declared variable appears, whether or not its bound is active
+    assert set(boxes) == set(dv)
