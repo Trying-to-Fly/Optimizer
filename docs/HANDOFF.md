@@ -82,7 +82,16 @@ a wrong conclusion in a previous session's notes.
   the 275 mm chord cap promoted into `VTailSample` with both variant packages
   deleted.
 
-Suite is **243 passing** (was 214), plus one `slow`-marked end-to-end VLM test.
+- **The in-loop lifting-line returned negative drag at high winglet cant, and a
+  solve exploited it** — found by running the 3 m battery, not by review. The
+  winglet had four panels (AeroSandbox's default is per SECTION); it now has
+  three stations, which is the converged answer for four more panels a side.
+  Every champion is now re-checked at 16 panels/section
+  (`aero.mesh_convergence_check`) and the run says so if the in-loop drag is
+  negative or more than 10% off. **FINDINGS §18** — read it before trusting any
+  objective from a geometry with a strongly canted surface.
+
+Suite is **251 passing** (was 214), plus one `slow`-marked end-to-end VLM test.
 
 The aircraft is **`vtail_sample_v1.7`** — the version moves with the chord cap
 because it names the run directory, and two aircraft with different feasible sets
@@ -105,21 +114,39 @@ exactly on its floor together say the design is CG-limited, which the whole
 span-vs-chord discussion missed. `le_shear = 1.0` and `washout_tip = 0.0` are
 departures from DESIGN_SPEC that have never been questioned.
 
-## THE RUN IN FLIGHT
+## THE 3 m RUN, AND WHAT IT FOUND IN TWENTY MINUTES
 
-A full battery is running against `aircraft/vtail_span300/` — the sample with
-`span_cap_m` at **3.0 m** (user ask: "what does it end at after all the updates").
-It is an EXPERIMENT package, one number different, the same pattern that answered
-the chord cap. Watch three things in its artifacts:
+The battery against `aircraft/vtail_span300/` (`span_cap_m` = 3.0 m, user ask)
+**was stopped at its second flatness member and its checkpoints discarded.** It
+had already produced two results, and they are opposite in kind:
 
-1. **Where span lands.** It has sat on its cap in every run this project has ever
-   done, so the curve has never been allowed to turn over. §15.8 extrapolated
-   2.0 -> 2.2 m at ~1-1.5 min from a +0.79 min/100 mm slope; this tests that.
-2. **`spar_od_center`**, already pinned at 14 mm at 2.0 m. If it is still pinned
-   at 3 m, the answer is a property of the declared spar stock, not of the
-   aerodynamics — the same trap `c_root` set at the print bed.
-3. **The prop screen**, running for the first time in a real battery: 65
-   candidates ranked, 4 re-solved.
+**1. The span question is answered, and it is the first honest answer.** Span
+landed **INTERIOR at 2.4925 m** — three multistarts identical to four decimals,
+126.36 min against 120.12 at the 2.0 m cap. Span has sat on its cap in every run
+this project has ever done, so this is the first time the curve has been allowed
+to turn over. `c_root` went interior too (0.2174 against the 275 mm cap), which
+supports §15's reading that chord was compensating for span it could not have.
+The 2.0 m cap costs **~6.2 min**, well above the 1-1.5 min §15.8 extrapolated
+from a slope measured against a wall.
+
+**2. The in-loop aero model returns NEGATIVE DRAG, and the optimizer found it.**
+The flatness member at 3.0 m reported 222 min, 0.0275 N of total drag and an L/D
+of 889, because a 52 mm winglet canted 86 degrees contributed about -0.93 N at
+AeroSandbox's default four panels per section. **FINDINGS §18** has the chain.
+Fixed by giving the winglet a third station (four more panels a side, converged
+answer, planform and mass byte-identical), and guarded by
+`aero.mesh_convergence_check`, which re-runs the champion at 16 panels/section
+and flags the run if the in-loop drag is negative or off by more than 10%.
+
+The champion at 2.49 m is mesh-converged (0.700 / 0.715 / 0.724 across
+resolutions) and was never contaminated — but the run has to be redone, because
+its checkpoints were solved under the old mesh.
+
+**Re-running it is the next action.** Watch, besides span: `spar_od_center`,
+already pinned at its 14 mm maximum at 2.5 m — if it stays pinned, the answer is
+a property of the declared spar stock rather than of the aerodynamics, the same
+trap `c_root` set at the print bed. And the prop screen, which has not yet run
+in a real battery.
 
 > **The three "infeasible corners" were a CHORD-STARVED WING, not infeasible.**
 > `c_root` was pinned on its 245 mm print-bed cap in every solve that ever

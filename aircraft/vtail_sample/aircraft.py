@@ -125,6 +125,11 @@ class VTailSample:
     #: shortfall as a STABILITY failure (FINDINGS section 15).
     c_root_max_m = 0.275
     winglet = True  # tip winglet as a separate asb.Wing (parametric designs only)
+    #: Spanwise STATIONS on the winglet, not panels: AeroSandbox's LiftingLine
+    #: puts `spanwise_resolution` panels in each section, so 3 stations is 8
+    #: panels a side instead of 4. Two was too few and produced negative drag at
+    #: high cant — see the winglet block in `geometry` and FINDINGS section 18.
+    WL_STATIONS = 3
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
     # Outer-panel cant ceiling for the two-panel dihedral form. 60 deg is a
     # MODEL limit, not a structural one: past it a Schrenk station on a
@@ -897,6 +902,17 @@ class VTailSample:
         # stations, dihedral proxy, and Wing.span() of the main wing stay clean;
         # LiftingLine picks up the nonplanar induced benefit either way
         # (verified against VLM, MODEL_DETAILS 3.6).
+        #
+        # WL_STATIONS, and it is not cosmetic. AeroSandbox's LiftingLine puts
+        # `spanwise_resolution` (4) panels in each SECTION, so a two-station
+        # winglet is four panels of a small, highly loaded, near-vertical
+        # surface — and at high cant that discretization returns NEGATIVE drag.
+        # It bit on 2026-08-01: a span-3.0 m solve reported 0.0275 N of total
+        # drag (L/D 889) and 222 min of endurance, because the optimizer found
+        # the corner where the winglet's own contribution went to about -0.93 N.
+        # The converged answer is +0.92 N, and the extra stations recover it for
+        # four more panels a side — where reaching it through
+        # `spanwise_resolution` would have cost 72 (FINDINGS section 18).
         winglet = None
         if self.winglet and parametric:
             c_tip = chords[-1]
@@ -907,18 +923,21 @@ class VTailSample:
             x0 = WING_X_LE + le_x[-1] + c_tip - wl_cr
             dy = dv["wl_len"] * np.cosd(dv["wl_cant"])
             dz = dv["wl_len"] * np.sind(dv["wl_cant"])
+            fracs = np.linspace(0.0, 1.0, self.WL_STATIONS)
             winglet = asb.Wing(
                 name="winglet",
                 symmetric=True,
                 xsecs=[
                     asb.WingXSec(
-                        xyz_le=[x0, ys[-1], zs[-1]], chord=wl_cr,
+                        xyz_le=[
+                            x0 + f * 0.25 * dv["wl_len"],
+                            ys[-1] + f * dy,
+                            zs[-1] + f * dz,
+                        ],
+                        chord=wl_cr + f * (wl_ct - wl_cr),
                         twist=dv["wl_toe"], airfoil=wing_af,
-                    ),
-                    asb.WingXSec(
-                        xyz_le=[x0 + 0.25 * dv["wl_len"], ys[-1] + dy, zs[-1] + dz],
-                        chord=wl_ct, twist=dv["wl_toe"], airfoil=wing_af,
-                    ),
+                    )
+                    for f in fracs
                 ],
             )
 

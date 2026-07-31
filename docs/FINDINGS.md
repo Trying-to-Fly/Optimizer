@@ -1540,3 +1540,102 @@ The cost is stated rather than hidden: **flatness figures are no longer
 comparable against runs before 2026-08-01**, because they are no longer the same
 spans. That is precisely why it was deferred — and the alternative was a sweep
 whose samples were chosen by a constant from a cap that has been retired twice.
+
+## 18. The IN-LOOP model made thrust, and the optimizer went looking for it (2026-08-01)
+
+Found by running the 3 m span-cap battery, twenty minutes in, and it is the most
+serious defect this project has had — not because the error is large but because
+of WHERE it is. §16.1's VLM defect was a second opinion that gated nothing. This
+one is inside the NLP, so the optimizer is not merely misinformed by it; it is
+attracted to it.
+
+### 18.1 The symptom: 222 minutes and an L/D of 889
+
+The flatness member at span 3.0 m returned **222.1 min** against a champion of
+126.4. A flatness member re-optimizes everything at a FIXED span, so a number
+that far above the free optimum is a contradiction on its face: the free solve
+could have gone to 3.0 m and did not.
+
+    drag_n            0.0275 N        (champion: 0.749 N)
+    P_elec            9.79 W          (champion: 19.49 W)
+    AUW               2.495 kg        -> L/D = 889
+
+Re-evaluated numerically through the M1 path, the same design gives the same
+drag, so this was not a symbolic-vs-numeric mismatch. The model itself believed
+it. Decomposed by surface:
+
+| configuration | drag |
+|---|---|
+| wing alone | +0.826 N |
+| wing + vtail | +0.902 N |
+| **wing + winglet** | **-0.108 N** |
+| all three (as solved) | -0.033 N |
+
+The winglet — 52 mm long, canted 86 degrees — was contributing about **-0.93 N**.
+And the neighbourhood is discontinuous, which is the tell that this is numerics
+rather than physics: at `washout_tip` -3.0 deg the drag is +0.86 N, at -3.854
+(the solved value) it is -0.03, and at -4.0 it is **-5.33**.
+
+### 18.2 The cause: four panels on a near-vertical surface
+
+`spanwise_resolution` in AeroSandbox's LiftingLine is panels per SECTION, and it
+defaults to **4**. The winglet was two stations — one section — so the whole
+surface was four panels. Sweeping the resolution on the offending design:
+
+| spanwise resolution | 4 (shipped) | 6 | 8 | 12 | 16 | 24 |
+|---|---|---|---|---|---|---|
+| drag (N) | **-0.033** | +0.905 | +0.889 | +0.914 | +0.923 | +0.921 |
+
+Every mesh except the shipped one agrees on ~0.92 N. The champion at 2.49 m, by
+contrast, gives 0.700 / 0.715 / 0.724 across the same range — converged, and
+therefore never contaminated.
+
+This is the same failure family as §16.1 and it is worth stating as a rule:
+**this project's geometries have small, highly loaded, strongly canted surfaces,
+and the default panel counts of both AeroSandbox solvers are too coarse for
+them.** The VLM defect was cosspace clustering at section boundaries; this one is
+four panels on a winglet. Both return a physically impossible sign and neither
+crashes.
+
+### 18.3 The fix: stations on the winglet, not resolution everywhere
+
+Raising `spanwise_resolution` globally is the obvious fix and the wrong one: the
+NLP builds FOUR lifting-line graphs per solve (trim plus three static-margin
+alphas) and already peaks near 12 GB, so 4 -> 16 is roughly 4x the graph.
+
+`WL_STATIONS = 3` puts the extra panels only where the error is. On the offending
+design that is **+0.900 N at the shipped resolution**, within 2% of the converged
+0.920, for **four extra panels a side** where reaching it through resolution
+would have cost 72. Subdividing the main wing instead reaches only +0.38, which
+confirms where the error lives.
+
+Nothing else moves: the planform, `s_ref`, `b_ref` and the winglet's mass are
+identical (the added station is a linear interpolation of a linear panel), and
+the 2026-08-01 champion's drag shifts 0.4%, well inside its own mesh spread.
+
+### 18.4 And the champion is now checked against a finer mesh
+
+A fix for one geometry family is not a defence. `aero.mesh_convergence_check`
+re-runs the champion's operating point at 16 panels per section and compares:
+negative in-loop drag is never converged whatever the fine mesh says, and a
+disagreement over 10% flags the run in `run.json`, in the log, and in the report
+notes. Two lifting-line runs at one operating point, against a battery measured
+in hours.
+
+**What this does not do is make the in-loop model right** — it makes a wrong one
+say so. The honest statement of the model's status is: 4 panels per section is a
+deliberate economy bought against a 12 GB solve, and the champion is the only
+point re-checked at a resolution that would catch its failure.
+
+### 18.5 What it means for the runs already on disk
+
+The 2026-08-01 battery was **stopped at its second flatness member** and its
+checkpoints discarded, because they were solved under the old winglet mesh.
+
+Earlier runs are not retro-invalidated, but they are not cleared either — no run
+before this one recorded a mesh check. What can be said: every champion since
+M4.8 sits at a winglet cant of 55 degrees or has the winglet rejected outright,
+and at 55 degrees the model is converged (0.700 / 0.715 / 0.724 across
+resolutions). The corner that fails is high cant, which is where the
+`continuous_cant` study member goes by construction — so that member is the one
+to distrust in any pre-2026-08-01 artifact, and it has never won a study.

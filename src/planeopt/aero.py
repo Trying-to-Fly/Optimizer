@@ -55,6 +55,51 @@ def _run_ll(airplane, V, alpha, deflection, x_cg, control_name="ruddervator"):
     ).run()
 
 
+#: Resolution the champion's drag is re-checked at, and how far the in-loop
+#: answer may sit from it. The NLP runs LiftingLine at AeroSandbox's default 4
+#: panels per section because it builds four of those graphs and each solve
+#: already peaks near 12 GB — this is the cheap second opinion on that economy.
+LL_CHECK_RESOLUTION = 16
+LL_CHECK_TOL = 0.10
+
+
+def mesh_convergence_check(
+    airplane, V: float, alpha: float, deflection: float, x_cg: float,
+    control_name: str = "ruddervator",
+) -> dict:
+    """Is the champion's drag a property of the aircraft or of the panel count?
+
+    The in-loop model is a discretization, and a discretization can be WRONG in
+    a way that flatters a design — which is not hypothetical here. On
+    2026-08-01 a span-3.0 m solve reported 0.0275 N of total drag, an L/D of
+    889 and 222 minutes of endurance, because at 4 panels per section a
+    high-cant winglet contributed about -0.93 N: the optimizer had found a
+    corner where the mesh, not the aeroplane, produced thrust (FINDINGS §18).
+
+    Nothing catches that except asking a finer mesh. It costs two lifting-line
+    runs at one operating point, against a battery measured in hours, and it
+    turns "the model was wrong here" from something a person has to notice in a
+    number into something the run says about itself.
+    """
+    plane = airplane.with_control_deflections({control_name: float(deflection)})
+    op = asb.OperatingPoint(velocity=V, alpha=float(alpha))
+    out = {}
+    for label, res in (("in_loop", 4), ("fine", LL_CHECK_RESOLUTION)):
+        r = asb.LiftingLine(
+            airplane=plane, op_point=op, xyz_ref=[x_cg, 0, 0], spanwise_resolution=res
+        ).run()
+        out[label] = {"spanwise_resolution": res, "D_n": float(r["D"]),
+                      "L_n": float(r["L"]), "CL": float(r["CL"])}
+    d_loop, d_fine = out["in_loop"]["D_n"], out["fine"]["D_n"]
+    out["delta_frac"] = (d_loop - d_fine) / d_fine if d_fine else None
+    # Both conditions matter: a NEGATIVE in-loop drag is impossible whatever the
+    # fine mesh says, and a large disagreement means the number is the mesh's.
+    out["converged"] = bool(
+        d_loop > 0 and d_fine > 0 and abs(out["delta_frac"]) <= LL_CHECK_TOL
+    )
+    return out
+
+
 def trim(
     airplane, V: float, weight_n: float, x_cg: float, bodies: list[dict], rho=1.225,
     control_name: str = "ruddervator",

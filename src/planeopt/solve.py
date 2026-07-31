@@ -1668,6 +1668,32 @@ def optimize(
             "un-cross-checked. Treat them as provisional."
         )
 
+    # Is the champion's drag a property of the aircraft or of the panel count?
+    # Two lifting-line runs at one operating point against a battery measured in
+    # hours — and the failure it guards produced a 222-minute aeroplane with an
+    # L/D of 889 on 2026-08-01 (aero.mesh_convergence_check, FINDINGS §18).
+    if best is not None:
+        mesh = aero.mesh_convergence_check(
+            champ_plane, best["V_ms"], best["alpha_deg"], best["deflection_deg"],
+            result.masses["x_cg_m"],
+            control_name=getattr(aircraft, "pitch_control_name", "ruddervator"),
+        )
+        result.diagnostics["aero_mesh_check"] = mesh
+        if not mesh["converged"]:
+            log.warning(
+                "champion drag is MESH-DEPENDENT: %.5f N in the loop vs %.5f N at "
+                "%d panels/section — the objective is not trustworthy",
+                mesh["in_loop"]["D_n"], mesh["fine"]["D_n"], aero.LL_CHECK_RESOLUTION,
+            )
+            result.notes.append(
+                f"CHAMPION DRAG IS MESH-DEPENDENT: {mesh['in_loop']['D_n']:.5f} N at "
+                f"the in-loop resolution against {mesh['fine']['D_n']:.5f} N at "
+                f"{aero.LL_CHECK_RESOLUTION} panels/section "
+                f"({100 * mesh['delta_frac']:+.1f}%). The optimizer may have found a "
+                "discretization artefact rather than an aircraft — do not report "
+                "this objective until it is understood (FINDINGS §18)."
+            )
+
     tripped = None
     if best is not None:
         trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
