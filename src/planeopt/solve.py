@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import aero, geometry, massmodel, memory, propulsion
+from . import aero, fingerprint, geometry, massmodel, memory, propulsion
 from .mission import OBJECTIVES
 from .report import assemble, figures, geometry_export, manufacturing
 from .report import html as report_html
@@ -80,18 +80,52 @@ class _SolveCache:
 
     A battery is a few dozen INDEPENDENT solves spread over hours, which is what
     makes this tractable: each member's result is pure data, so finishing one is
-    progress that never has to be repeated. The cache is keyed by
-    (phase label, member key) — the sequence is deterministic for a given
-    aircraft and mission, so that is enough to line a resumed run up with the
-    one it continues.
+    progress that never has to be repeated. Entries are keyed by
+    (phase label, member key), which lines a resumed run up with the one it
+    continues — the sequence is deterministic for a given aircraft and mission.
+
+    **But the sequence lining up is not the same as the PHYSICS lining up.**
+    (label, key) says nothing about the model that produced the number, so a
+    resume after the model moved silently mixes two models into one artifact,
+    every member of which converged. A battery was discarded for exactly that on
+    2026-08-01 (FINDINGS section 18.7). Entries therefore live in a
+    per-fingerprint subdirectory (`fingerprint.model_fingerprint`): a changed
+    model starts a fresh set beside the old one, so a stale entry is not found
+    rather than not trusted. Nothing is deleted and nothing has to be remembered.
 
     It deliberately does NOT try to checkpoint a solve in progress; see
     `optimize`'s docstring for why that is not possible.
     """
 
-    def __init__(self, directory: Path):
-        self.dir = Path(directory)
+    def __init__(self, directory: Path, fingerprint: str):
+        self.root = Path(directory)
+        self.fingerprint = fingerprint
+        self.dir = self.root / fingerprint
         self.dir.mkdir(parents=True, exist_ok=True)
+        self._report_supersession()
+
+    def _report_supersession(self) -> None:
+        """Say, once, that older checkpoint sets are being passed over.
+
+        Otherwise the only visible symptom of a model change is that a resume
+        re-solves everything, which reads as a bug in the resume rather than as
+        the guard doing its job.
+        """
+        others = sorted(
+            p.name for p in self.root.iterdir()
+            if p.is_dir() and p.name != self.fingerprint
+        )
+        # Entries written before this guard existed sit loose in the parent.
+        legacy = any(p.suffix == ".json" for p in self.root.iterdir() if p.is_file())
+        if legacy:
+            others.append("(unfingerprinted, pre-2026-08-04)")
+        if others:
+            log.info(
+                "checkpoint set %s is new; %s on disk %s a different model and "
+                "will not be resumed from (kept, not deleted)",
+                self.fingerprint, ", ".join(others),
+                "carries" if len(others) == 1 else "carry",
+            )
 
     def _path(self, label: str, key) -> Path:
         safe = "".join(c if c.isalnum() or c in "-._" else "_" for c in f"{label}__{key}")
@@ -1379,8 +1413,9 @@ def optimize(
     # belongs in the artifact, next to what each phase concluded.
     phase_minutes: dict[str, float] = {}
 
-    cache = _SolveCache(checkpoint_dir) if checkpoint_dir is not None else None
-    if cache is not None:
+    cache = None
+    if checkpoint_dir is not None:
+        cache = _SolveCache(checkpoint_dir, fingerprint.model_fingerprint(aircraft, mission))
         log.info("checkpointing members to %s%s", cache.dir,
                  f"; create {pause_file} to pause at the next member boundary"
                  if pause_file is not None else "")
@@ -1770,6 +1805,12 @@ def optimize(
     )
     result.diagnostics["parallel_width"] = parallel
     result.diagnostics["solve_timeout_min"] = solve_timeout_min
+    # Which MODEL produced these numbers. Recorded unconditionally, not only when
+    # checkpointing, because the question it answers — "is this run comparable
+    # with that one?" — is asked of finished artifacts far more often than of
+    # checkpoint directories, and until now the only way to answer it was to date
+    # the run against the commit log by hand.
+    result.diagnostics["model_fingerprint"] = fingerprint.model_fingerprint(aircraft, mission)
     phase_minutes["re-eval + artifacts"] = round(
         (time.monotonic() - t_start) / 60.0 - sum(phase_minutes.values()), 1
     )

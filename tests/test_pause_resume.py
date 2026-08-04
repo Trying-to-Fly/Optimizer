@@ -18,6 +18,12 @@ import pytest
 
 from planeopt import solve
 
+#: Stand-in for `fingerprint.model_fingerprint(aircraft, mission)`. These tests
+#: are about the batch runner, so the fingerprint only has to be A value; what it
+#: means, and that a changed model produces a different one, is
+#: `tests/test_fingerprint.py`.
+FP = "0123456789ab"
+
 
 @pytest.fixture()
 def fake_solves(monkeypatch):
@@ -46,7 +52,7 @@ def _jobs(n):
 # ------------------------------------------------------------------ the cache
 
 def test_a_finished_member_is_not_solved_twice(tmp_path, fake_solves):
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     first = solve._solve_many(None, None, _jobs(3), label="phase", cache=cache)
     assert len(fake_solves) == 3
 
@@ -60,7 +66,7 @@ def test_a_finished_member_is_not_solved_twice(tmp_path, fake_solves):
 def test_cached_results_survive_the_json_round_trip(tmp_path, fake_solves):
     """A checkpoint that reloads a float as the string 'np.float64(9.5)' is
     worse than no checkpoint — every consumer downstream does arithmetic."""
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     solve._solve_many(None, None, _jobs(1), label="phase", cache=cache)
     reloaded = solve._solve_many(None, None, _jobs(1), label="phase", cache=cache)["m0"]
 
@@ -72,18 +78,18 @@ def test_cached_results_survive_the_json_round_trip(tmp_path, fake_solves):
 def test_cache_keys_are_filesystem_safe(tmp_path):
     """Member keys are floats (flatness spans) and free text (study candidates),
     neither of which is guaranteed to be a legal filename."""
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     for label, key in [("flatness sweep", 1.5), ("study motor_mount", "pusher"),
                        ("re-solve battery", "printed_mass_x1.10")]:
         cache.put(label, key, {"objective_value": 1.0})
         assert cache.get(label, key) == {"objective_value": 1.0}
-    assert len(list(tmp_path.glob("*.json"))) == 3
+    assert len(list(cache.dir.glob("*.json"))) == 3
 
 
 def test_a_corrupt_checkpoint_is_ignored_not_fatal(tmp_path, fake_solves):
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     solve._solve_many(None, None, _jobs(1), label="phase", cache=cache)
-    next(tmp_path.glob("*.json")).write_text("{not json", encoding="utf-8")
+    next(cache.dir.glob("*.json")).write_text("{not json", encoding="utf-8")
 
     solve._solve_many(None, None, _jobs(1), label="phase", cache=cache)
     assert len(fake_solves) == 2, "an unreadable entry should just re-solve"
@@ -92,10 +98,10 @@ def test_a_corrupt_checkpoint_is_ignored_not_fatal(tmp_path, fake_solves):
 def test_a_half_written_checkpoint_is_never_read(tmp_path):
     """Written via a .part file and renamed, so a run killed mid-write cannot
     leave something the next run trusts."""
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     cache.put("phase", "m0", {"objective_value": 1.0})
-    assert list(tmp_path.glob("*.json.part")) == []
-    assert len(list(tmp_path.glob("*.json"))) == 1
+    assert list(cache.dir.glob("*.json.part")) == []
+    assert len(list(cache.dir.glob("*.json"))) == 1
 
 
 # ------------------------------------------------------------------ the pause
@@ -103,7 +109,7 @@ def test_a_half_written_checkpoint_is_never_read(tmp_path):
 def test_pause_stops_at_the_next_member_boundary(tmp_path, fake_solves):
     pause = tmp_path / "PAUSE"
     pause.write_text("", encoding="utf-8")
-    cache = solve._SolveCache(tmp_path / "ckpt")
+    cache = solve._SolveCache(tmp_path / "ckpt", FP)
 
     with pytest.raises(solve.RunPaused):
         solve._solve_many(None, None, _jobs(4), label="phase",
@@ -115,7 +121,7 @@ def test_pause_stops_at_the_next_member_boundary(tmp_path, fake_solves):
 
 def test_paused_work_is_kept_and_resumed(tmp_path, fake_solves):
     pause = tmp_path / "PAUSE"
-    cache = solve._SolveCache(tmp_path / "ckpt")
+    cache = solve._SolveCache(tmp_path / "ckpt", FP)
     pause.write_text("", encoding="utf-8")
     with pytest.raises(solve.RunPaused):
         solve._solve_many(None, None, _jobs(3), label="phase",
@@ -130,7 +136,7 @@ def test_paused_work_is_kept_and_resumed(tmp_path, fake_solves):
 
 
 def test_no_pause_file_means_no_pause(tmp_path, fake_solves):
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     results = solve._solve_many(None, None, _jobs(3), label="phase",
                                 cache=cache, pause_file=tmp_path / "absent")
     assert len(results) == 3
@@ -150,7 +156,7 @@ def test_a_failed_member_is_checkpointed_too(tmp_path, monkeypatch):
         raise RuntimeError("Infeasible_Problem_Detected after 131 iterations")
 
     monkeypatch.setattr(solve, "_solve_nlp", boom)
-    cache = solve._SolveCache(tmp_path)
+    cache = solve._SolveCache(tmp_path, FP)
     first = solve._solve_many(None, None, _jobs(1), label="phase", cache=cache)
     assert "failed" in first["m0"]
 
