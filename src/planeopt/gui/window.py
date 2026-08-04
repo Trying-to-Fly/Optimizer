@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QFont
+from PySide6.QtGui import QAction, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from . import runindex
+from . import queuestore, runindex
 from .jobs import Job, JobState
 from .newrun import NewRunDialog
 from .runner import RunQueue
@@ -142,6 +142,7 @@ class MainWindow(QMainWindow):
 
         self.queue = RunQueue(self)
         self.queue.queue_changed.connect(self._refresh_queue)
+        self.queue.queue_changed.connect(self._save_queue)
         self.queue.job_output.connect(self._on_output)
         self.queue.job_finished.connect(self._on_job_finished)
 
@@ -155,6 +156,7 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
         self.reload()
+        self._restore_queue()
 
     # --- construction ------------------------------------------------------
 
@@ -392,7 +394,49 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Could not write mission", str(e))
             return
         self.queue.submit(job)
-        self.log.appendPlainText(f"queued: {job.title}")
+        self._log_line(f"queued: {job.title}")
+
+    # --- queue persistence -------------------------------------------------
+
+    def _save_queue(self) -> None:
+        queuestore.save(self.workspace.runs_dir, self.queue.jobs)
+
+    def _restore_queue(self) -> None:
+        """Bring back a paused run from a previous session.
+
+        Pausing exists to give the machine back, and the next thing anyone does
+        with a machine they have just been given back is close the app — which
+        used to lose the job while its checkpoints sat on disk with nothing left
+        pointing at them.
+        """
+        restored = queuestore.load(self.workspace.runs_dir)
+        if not restored:
+            return
+        self.queue.restore(restored)
+        count = f"{len(restored)} job" + ("" if len(restored) == 1 else "s")
+        self._log_line(
+            f"-- restored {count} from the previous session. Nothing starts on its "
+            f"own: select one and press “{RESUME_LABEL}”. --"
+        )
+
+    def _log_line(self, text: str) -> None:
+        """Append to the progress pane, keeping the view at the LEFT margin.
+
+        `appendPlainText` leaves the cursor at the end of what it wrote, and the
+        pane does not wrap (by design — absolute paths would become a wall of
+        text), so one long line scrolled the view right and the next lines
+        arrived with their beginnings off-screen. Vertical auto-scroll is what a
+        log tail wants; horizontal auto-scroll is not.
+
+        Done by moving the CURSOR to the start of the line rather than by setting
+        the scrollbar: Qt's own `ensureCursorVisible` runs at the next layout and
+        would undo a scrollbar written here, so the fix has to be the thing Qt is
+        about to scroll to.
+        """
+        self.log.appendPlainText(text)
+        cursor = self.log.textCursor()
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        self.log.setTextCursor(cursor)
 
     def _refresh_queue(self) -> None:
         previous = {i.data(0, Qt.UserRole) for i in self.queue_tree.selectedItems()}
@@ -444,22 +488,22 @@ class MainWindow(QMainWindow):
             return
         if job.state is JobState.PAUSED:
             if self.queue.resume(job):
-                self.log.appendPlainText(f"-- resuming {job.title} from {job.checkpoint_dir} --")
+                self._log_line(f"-- resuming {job.title} from {job.checkpoint_dir} --")
             return
         if not self.queue.pause(job):
             return
         self.pause_button.setEnabled(False)
-        self.log.appendPlainText(
+        self._log_line(
             "-- pause requested: the run will stop after the member solve in "
             "flight and keep everything finished so far --"
         )
 
     def _on_output(self, job: Job, line: str) -> None:
         if job is self.queue.running:
-            self.log.appendPlainText(line)
+            self._log_line(line)
 
     def _on_job_finished(self, job: Job) -> None:
-        self.log.appendPlainText(f"— {job.title}: {job.state.value}")
+        self._log_line(f"— {job.title}: {job.state.value}")
         if job.state is JobState.FAILED:
             self.statusBar().showMessage(f"{job.title} failed (exit {job.exit_code})", 10000)
         elif job.state is JobState.PAUSED:
@@ -467,10 +511,10 @@ class MainWindow(QMainWindow):
             # list and the only feedback would otherwise be a row changing mark.
             # Two lines, because the log pane does not wrap (by design, line 260):
             # the instruction has to fit unscrolled, and the absolute path cannot.
-            self.log.appendPlainText(
+            self._log_line(
                 f"-- paused. Select the job and press “{RESUME_LABEL}” to continue. --"
             )
-            self.log.appendPlainText(f"   finished members are in {job.checkpoint_dir}")
+            self._log_line(f"   finished members are in {job.checkpoint_dir}")
             self.statusBar().showMessage(
                 f"Paused — select the job and press “{RESUME_LABEL}” to continue", 20000
             )

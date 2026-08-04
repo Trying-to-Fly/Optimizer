@@ -57,6 +57,17 @@ class RunQueue(QObject):
         self.queue_changed.emit()
         self._start_next()
 
+    def restore(self, jobs: list[Job]) -> None:
+        """Adopt jobs read back from disk, WITHOUT starting any of them.
+
+        The one difference from `submit`, and the reason this is a separate
+        method rather than a flag: opening the window must never be what commits
+        the machine to a two-hour solve. `queuestore.load` brings everything back
+        PAUSED, so the Resume button is the only thing that starts one.
+        """
+        self.jobs.extend(jobs)
+        self.queue_changed.emit()
+
     def pause(self, job: Job) -> bool:
         """Ask a running job to stop at its next member boundary.
 

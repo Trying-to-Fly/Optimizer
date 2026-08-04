@@ -438,3 +438,95 @@ def test_every_job_state_has_a_mark(tmp_path):
     # ⏸ (U+23F8) had no font on this machine and rendered as tofu; the marks all
     # have to come from blocks that actually resolve.
     assert "⏸" not in "".join(_STATE_MARK.values())
+
+
+# --------------------------------------------------- the queue across a restart
+
+def test_a_paused_job_survives_closing_the_app(tmp_path):
+    """Pausing exists to give the machine back, and the next thing anyone does
+    with a machine they were just given back is close the app. That used to lose
+    the job while its checkpoints sat on disk with nothing pointing at them."""
+    from planeopt.gui import queuestore
+
+    job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt",
+               pause_file=tmp_path / "ckpt" / "m.PAUSE",
+               multistart=5, flatness=False, solve_timeout_min=45.0,
+               memory_budget_gb=20.0)
+    job.state = jobs.JobState.PAUSED
+    queuestore.save(tmp_path, [job])
+
+    restored, = queuestore.load(tmp_path)
+    assert restored.mission == job.mission and restored.aircraft == job.aircraft
+    assert restored.checkpoint_dir == job.checkpoint_dir
+    assert restored.pause_file == job.pause_file
+    # the settings have to come back too — a resumed job that quietly dropped
+    # --multistart would produce one artifact from two configurations
+    assert (restored.multistart, restored.flatness) == (5, False)
+    assert (restored.solve_timeout_min, restored.memory_budget_gb) == (45.0, 20.0)
+
+
+def test_nothing_starts_on_its_own_at_launch(tmp_path):
+    """Opening the window must never be what commits the machine to a two-hour
+    solve, so every restored job comes back PAUSED — including one that was
+    QUEUED and had not begun, and one that was RUNNING when the window closed."""
+    from planeopt.gui import queuestore
+
+    for state in (jobs.JobState.QUEUED, jobs.JobState.RUNNING, jobs.JobState.PAUSED):
+        job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt")
+        job.state = state
+        queuestore.save(tmp_path, [job])
+        assert queuestore.load(tmp_path)[0].state is jobs.JobState.PAUSED
+
+
+def test_finished_jobs_are_not_carried_forward(tmp_path):
+    """They cannot be acted on, and the runs list already records every finished
+    run — keeping them would grow the queue forever across sessions."""
+    from planeopt.gui import queuestore
+
+    keep, drop = [], []
+    for state in jobs.JobState:
+        job = _job(tmp_path)
+        job.state = state
+        (keep if state in queuestore.RESTORABLE else drop).append(job)
+    queuestore.save(tmp_path, keep + drop)
+    assert len(queuestore.load(tmp_path)) == len(keep) == 3
+
+
+def test_a_corrupt_queue_file_is_an_empty_queue_not_a_dead_window(tmp_path):
+    """The part that took hours is the checkpoints, not this file. Losing it must
+    never be what stops the app opening."""
+    from planeopt.gui import queuestore
+
+    queuestore.path_for(tmp_path).write_text("{not json", encoding="utf-8")
+    assert queuestore.load(tmp_path) == []
+
+    queuestore.path_for(tmp_path).write_text('[{"mission": "only-this"}]', encoding="utf-8")
+    assert queuestore.load(tmp_path) == [], "an entry missing required fields is dropped"
+
+    assert queuestore.load(tmp_path / "no-such-dir") == []
+
+
+def test_the_queue_file_is_written_atomically(tmp_path):
+    """A crash mid-write must not leave a half file that the next launch parses
+    into a job with a missing aircraft."""
+    from planeopt.gui import queuestore
+
+    queuestore.save(tmp_path, [_job(tmp_path)])
+    assert list(tmp_path.glob("*.json.part")) == []
+    assert queuestore.path_for(tmp_path).is_file()
+
+
+def test_restore_does_not_start_anything(tmp_path, monkeypatch):
+    """`restore` exists separately from `submit` for exactly this."""
+    from planeopt.gui import runner
+
+    queue = runner.RunQueue.__new__(runner.RunQueue)
+    queue.jobs, queue._current, queue._process = [], None, None
+    started = []
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: started.append(1))
+
+    job = _job(tmp_path)
+    job.state = jobs.JobState.PAUSED
+    queue.restore([job])
+    assert queue.jobs == [job] and started == []
