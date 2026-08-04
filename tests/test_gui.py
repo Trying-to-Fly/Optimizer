@@ -20,6 +20,24 @@ from planeopt.types import MissionSpec
 REPO = Path(__file__).resolve().parent.parent
 
 
+class _Signal:
+    """Stands in for a Qt Signal on an un-__init__'d QObject.
+
+    `RunQueue` is built with `__new__` in these tests so no event loop is needed,
+    which leaves its class-level Signals unbound. Emitting is not what is under
+    test — the state transitions are — so a no-op that records is enough.
+    """
+
+    def __init__(self):
+        self.emitted = []
+
+    def __get__(self, obj, owner=None):
+        return self
+
+    def emit(self, *args):
+        self.emitted.append(args)
+
+
 def _write_run(root: Path, stamp: str, **overrides) -> Path:
     run_dir = root / f"{stamp}-endurance_sample-fixture"
     run_dir.mkdir(parents=True)
@@ -288,3 +306,135 @@ def test_resolve_still_returns_something_when_nothing_qualifies(tmp_path, monkey
     workspace = resolve()
     assert not workspace.is_usable  # the UI asks the user rather than dying
     assert workspace.root == tmp_path
+
+
+# --------------------------------------------------------------- pause -> resume
+
+def _paused_queue(tmp_path, stdout: str = "PAUSED — stopped at a member boundary"):
+    """A RunQueue whose child has just exited 0 with the sentinel still on disk.
+
+    Built without a Qt event loop: `_on_finished` is the whole of what the queue
+    does when a child ends, and it is pure state.
+    """
+    from planeopt.gui import runner
+
+    queue = runner.RunQueue.__new__(runner.RunQueue)
+    pause_path = tmp_path / "ckpt" / "m.PAUSE"
+    pause_path.parent.mkdir(parents=True, exist_ok=True)
+    job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt", pause_file=pause_path)
+    queue.jobs = [job]
+    queue._current, queue._process, queue._stdout = job, None, stdout
+    job.state = jobs.JobState.RUNNING
+    return queue, job, pause_path
+
+
+def test_a_paused_job_is_not_reported_as_done(tmp_path, monkeypatch):
+    """The child EXITS 0 on a pause — deliberately, so a shell loop does not read
+    it as a crash — so without a state of its own a paused battery showed the
+    same '✓ done' as a finished one, with no way back to it."""
+    from planeopt.gui import runner
+
+    queue, job, pause_path = _paused_queue(tmp_path)
+    pause_path.write_text("pause requested", encoding="utf-8")
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "job_finished", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: None)
+
+    queue._on_finished(0, None)
+    assert job.state is jobs.JobState.PAUSED
+    assert job.run_dir is None
+
+
+def test_a_finished_job_is_still_done_even_if_a_pause_was_requested_late(tmp_path, monkeypatch):
+    """The sentinel alone is not enough: a pause asked for after the last member
+    started leaves the file behind on a run that finished and wrote artifacts.
+    That run has a run directory, and a run directory means DONE."""
+    from planeopt.gui import runner
+
+    run_dir = tmp_path / "20260804T120000-endurance_sample-fixture"
+    run_dir.mkdir(parents=True)
+    queue, job, pause_path = _paused_queue(tmp_path, stdout=f"status: M3\n{run_dir}\n")
+    pause_path.write_text("pause requested", encoding="utf-8")
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "job_finished", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: None)
+
+    queue._on_finished(0, None)
+    assert job.state is jobs.JobState.DONE
+    assert job.run_dir == run_dir
+
+
+def test_an_ordinary_finish_is_not_mistaken_for_a_pause(tmp_path, monkeypatch):
+    """No sentinel on disk — `cli.optimize` unlinks it at startup — so a run that
+    was never paused must not acquire the state."""
+    from planeopt.gui import runner
+
+    queue, job, _ = _paused_queue(tmp_path, stdout="status: M3\n")
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "job_finished", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: None)
+
+    queue._on_finished(0, None)
+    assert job.state is jobs.JobState.DONE
+
+
+def test_resume_requeues_the_same_job_rather_than_a_new_one(tmp_path, monkeypatch):
+    """Resuming has to reuse the Job — same mission, aircraft and checkpoint
+    directory. Re-filling the New Run dialog by hand is the alternative, and a
+    field typed differently would not fail loudly; it would produce one artifact
+    from two configurations."""
+    from planeopt.gui import runner
+
+    queue, job, _ = _paused_queue(tmp_path)
+    job.state, job.exit_code = jobs.JobState.PAUSED, 0
+    started = []
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: started.append(self.jobs[0]))
+
+    assert queue.resume(job) is True
+    assert job.state is jobs.JobState.QUEUED
+    assert job.exit_code is None
+    assert started == [job], "resume must hand the SAME job back to the runner"
+
+
+def test_only_a_paused_job_can_be_resumed(tmp_path, monkeypatch):
+    from planeopt.gui import runner
+
+    queue, job, _ = _paused_queue(tmp_path)
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: None)
+    for state in (jobs.JobState.RUNNING, jobs.JobState.DONE, jobs.JobState.FAILED,
+                  jobs.JobState.QUEUED, jobs.JobState.CANCELLED):
+        job.state = state
+        assert queue.resume(job) is False
+
+
+def test_resume_leaves_the_sentinel_for_the_cli_to_clear(tmp_path, monkeypatch):
+    """One owner for that file. `cli.optimize` unlinks it at startup and says so,
+    which is what makes a CLI resume and a GUI resume behave identically."""
+    from planeopt.gui import runner
+
+    queue, job, pause_path = _paused_queue(tmp_path)
+    pause_path.write_text("pause requested", encoding="utf-8")
+    job.state = jobs.JobState.PAUSED
+    monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
+    monkeypatch.setattr(runner.RunQueue, "_start_next", lambda self: None)
+
+    queue.resume(job)
+    assert pause_path.exists()
+    # ...and the CLI is what removes it, so that claim is pinned too
+    assert "pause_file.unlink()" in (
+        REPO / "src" / "planeopt" / "cli.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_every_job_state_has_a_mark(tmp_path):
+    """The queue row is f"{mark} {state}", so a state without a mark is a
+    KeyError in the refresh — i.e. a broken queue list, not a missing glyph."""
+    pytest.importorskip("PySide6.QtWidgets")
+    from planeopt.gui.window import _STATE_MARK
+
+    assert set(_STATE_MARK) == set(jobs.JobState)
+    # ⏸ (U+23F8) had no font on this machine and rendered as tofu; the marks all
+    # have to come from blocks that actually resolve.
+    assert "⏸" not in "".join(_STATE_MARK.values())

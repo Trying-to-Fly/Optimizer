@@ -15,6 +15,27 @@ from PySide6.QtCore import QObject, QProcess, Signal
 from .jobs import Job, JobState, parse_run_dir, program_and_args
 
 
+def _was_paused(job: Job) -> bool:
+    """Did this exit-0 child stop on request rather than finish?
+
+    Read from the SENTINEL FILE rather than from the child's output. `cli.optimize`
+    unlinks the sentinel at startup, so its presence when the child exits is a
+    record that a pause was asked for and honoured — where stdout can interleave
+    with hours of solver chatter, and a distinct exit code would break the
+    contract the CLI documents for shell users ("a pause is a successful outcome,
+    not a failure: exit 0").
+
+    `run_dir is None` is the second half, and it covers the one case the sentinel
+    alone gets wrong: a pause requested so late that the battery finished its
+    last member anyway. That run produced artifacts, so it is DONE.
+    """
+    return (
+        job.pause_file is not None
+        and job.run_dir is None
+        and job.pause_file.exists()
+    )
+
+
 class RunQueue(QObject):
     """Owns the pending jobs and the one child process that may be running."""
 
@@ -50,6 +71,27 @@ class RunQueue(QObject):
             return False
         job.pause_file.parent.mkdir(parents=True, exist_ok=True)
         job.pause_file.write_text("pause requested from the GUI\n", encoding="utf-8")
+        return True
+
+    def resume(self, job: Job) -> bool:
+        """Put a paused job back in the queue, continuing where it stopped.
+
+        Everything needed is already on the Job — same mission, same aircraft,
+        same checkpoint directory — so resuming is re-queuing it, not filling the
+        New Run dialog in again from memory and hoping every field matches. A
+        mismatched field would not fail loudly; it would produce a run whose
+        members came from two different configurations.
+
+        The pause sentinel is deliberately NOT cleared here. `cli.optimize`
+        unlinks it at startup and says so in its output, which keeps one owner
+        for that file and makes a CLI resume behave identically to this one.
+        """
+        if job.state is not JobState.PAUSED:
+            return False
+        job.state = JobState.QUEUED
+        job.exit_code = None
+        self.queue_changed.emit()
+        self._start_next()
         return True
 
     def cancel(self, job: Job) -> None:
@@ -127,9 +169,11 @@ class RunQueue(QObject):
 
         job.exit_code = exit_code
         if job.state is not JobState.CANCELLED:
-            job.state = JobState.DONE if exit_code == 0 else JobState.FAILED
-        if job.state is JobState.DONE:
-            job.run_dir = parse_run_dir(self._stdout, job.runs_dir)
+            if exit_code == 0:
+                job.run_dir = parse_run_dir(self._stdout, job.runs_dir)
+                job.state = JobState.PAUSED if _was_paused(job) else JobState.DONE
+            else:
+                job.state = JobState.FAILED
 
         self.queue_changed.emit()
         self.job_finished.emit(job)

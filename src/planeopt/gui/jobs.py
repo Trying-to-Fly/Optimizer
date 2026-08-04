@@ -19,6 +19,11 @@ class JobState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
+    #: Stopped at a member boundary on request, with everything finished so far
+    #: on disk. A state of its own because the child EXITS 0 for it (a pause is a
+    #: successful outcome, not a crash), so without this it was indistinguishable
+    #: from DONE — a paused battery read "✓ done" and offered no way back.
+    PAUSED = "paused"
     FAILED = "failed"
     CANCELLED = "cancelled"
 

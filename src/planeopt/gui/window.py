@@ -43,9 +43,28 @@ _STATE_MARK = {
     JobState.QUEUED: "·",
     JobState.RUNNING: "▶",
     JobState.DONE: "✓",
+    # "▮▮" (U+25AE), not "⏸" (U+23F8): no font on this machine carries the
+    # Miscellaneous-Technical pause glyph and it rendered as a tofu box. U+25AE
+    # is in Geometric Shapes, the same block as the ▶ above it, so it renders
+    # wherever that one does and matches its weight.
+    JobState.PAUSED: "▮▮",
     JobState.FAILED: "✗",
     JobState.CANCELLED: "—",
 }
+
+PAUSE_LABEL = "Pause running job"
+PAUSE_TIP = (
+    "Stop after the member solve currently in flight, keeping everything "
+    "finished so far and freeing the memory. It is not instant: a solve in "
+    "progress holds ~13 GB of solver state that cannot be saved, so the wait "
+    "is up to one member."
+)
+RESUME_LABEL = "Resume paused job"
+RESUME_TIP = (
+    "Continue this job from its checkpoint directory. Members already solved "
+    "are read from disk rather than re-solved, and the run picks up at the one "
+    "it stopped before."
+)
 
 STYLE = """
 QMainWindow, QWidget { background: #1c1c1f; color: #e4e4e7; }
@@ -200,15 +219,15 @@ class MainWindow(QMainWindow):
 
         # Pause before Cancel: they look alike but one keeps the work and the
         # other throws away hours of it, so the safe one reads first.
-        self.pause_button = QPushButton("Pause running job")
+        #
+        # ONE button for pause and resume, because they are the same affordance
+        # applied to the same job and can never both be available: a job is either
+        # running or paused. Its LABEL always names the action it will take, so
+        # there is nothing to infer at the moment of clicking — and a third
+        # button in this stack would sit disabled almost all of the time.
+        self.pause_button = QPushButton(PAUSE_LABEL)
         self.pause_button.setEnabled(False)
-        self.pause_button.setToolTip(
-            "Stop after the member solve currently in flight, keeping everything "
-            "finished so far and freeing the memory. Re-queue the same job to "
-            "continue. It is not instant: a solve in progress holds ~13 GB of "
-            "solver state that cannot be saved, so the wait is up to one member."
-        )
-        self.pause_button.clicked.connect(self._pause_selected)
+        self.pause_button.clicked.connect(self._pause_or_resume_selected)
         layout.addWidget(self.pause_button)
 
         self.cancel_button = QPushButton("Cancel selected job")
@@ -396,11 +415,16 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(
             job is not None and job.state in (JobState.QUEUED, JobState.RUNNING)
         )
-        # only the running job can be paused, and only if it was queued with a
-        # checkpoint to resume from
-        self.pause_button.setEnabled(
+        # The one button says which of the two it will do. Pause needs the
+        # running job and a checkpoint to resume from; resume needs a paused one,
+        # which by construction already has both.
+        can_pause = (
             job is not None and job.state is JobState.RUNNING and bool(job.pause_file)
         )
+        can_resume = job is not None and job.state is JobState.PAUSED
+        self.pause_button.setEnabled(can_pause or can_resume)
+        self.pause_button.setText(RESUME_LABEL if can_resume else PAUSE_LABEL)
+        self.pause_button.setToolTip(RESUME_TIP if can_resume else PAUSE_TIP)
 
     def _selected_job(self) -> Job | None:
         items = self.queue_tree.selectedItems()
@@ -414,9 +438,15 @@ class MainWindow(QMainWindow):
         if job is not None:
             self.queue.cancel(job)
 
-    def _pause_selected(self) -> None:
+    def _pause_or_resume_selected(self) -> None:
         job = self._selected_job()
-        if job is None or not self.queue.pause(job):
+        if job is None:
+            return
+        if job.state is JobState.PAUSED:
+            if self.queue.resume(job):
+                self.log.appendPlainText(f"-- resuming {job.title} from {job.checkpoint_dir} --")
+            return
+        if not self.queue.pause(job):
             return
         self.pause_button.setEnabled(False)
         self.log.appendPlainText(
@@ -432,6 +462,18 @@ class MainWindow(QMainWindow):
         self.log.appendPlainText(f"— {job.title}: {job.state.value}")
         if job.state is JobState.FAILED:
             self.statusBar().showMessage(f"{job.title} failed (exit {job.exit_code})", 10000)
+        elif job.state is JobState.PAUSED:
+            # A pause produces no run directory, so nothing appears in the runs
+            # list and the only feedback would otherwise be a row changing mark.
+            # Two lines, because the log pane does not wrap (by design, line 260):
+            # the instruction has to fit unscrolled, and the absolute path cannot.
+            self.log.appendPlainText(
+                f"-- paused. Select the job and press “{RESUME_LABEL}” to continue. --"
+            )
+            self.log.appendPlainText(f"   finished members are in {job.checkpoint_dir}")
+            self.statusBar().showMessage(
+                f"Paused — select the job and press “{RESUME_LABEL}” to continue", 20000
+            )
         # A finished run means a new directory to browse; give the filesystem a
         # moment so the artifacts are all present when we re-scan. Then show it:
         # the result you just waited hours for should not need hunting for.
