@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -160,6 +161,18 @@ class MainWindow(QMainWindow):
         self.run_tree.setRootIsDecorated(False)
         self.run_tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.run_tree.itemSelectionChanged.connect(self._on_selection)
+        # WHICH column is allowed to run out of room, decided here rather than by
+        # whichever happens to be last. Sizing all three to their contents
+        # overflowed the panel and clipped `Result` — the objective value, the one
+        # number the list exists to show, rendered as "150." — while the aircraft
+        # name, which the detail pane repeats in full, kept every pixel it asked
+        # for. So: the ends size to their contents and the middle absorbs the
+        # squeeze, eliding with a tooltip.
+        run_header = self.run_tree.header()
+        run_header.setStretchLastSection(False)
+        run_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        run_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        run_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         layout.addWidget(self.run_tree, 1)
 
         self.new_run_button = QPushButton("New run…")
@@ -176,6 +189,12 @@ class MainWindow(QMainWindow):
         self.queue_tree.setHeaderLabels(["Job", "State"])
         self.queue_tree.setRootIsDecorated(False)
         self.queue_tree.setMaximumHeight(150)
+        # Same rule as the runs list: the title elides, the state does not.
+        # "running" vs "failed" is what the row is read for.
+        queue_header = self.queue_tree.header()
+        queue_header.setStretchLastSection(False)
+        queue_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        queue_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.queue_tree.itemSelectionChanged.connect(self._on_queue_selection)
         layout.addWidget(self.queue_tree)
 
@@ -286,6 +305,9 @@ class MainWindow(QMainWindow):
                 ]
             )
             item.setData(0, Qt.UserRole, str(summary.path))
+            # The aircraft column is the one that elides (see _build_left), so it
+            # is the one that has to carry its full text somewhere.
+            item.setToolTip(1, summary.aircraft or "—")
             if summary.error:
                 item.setForeground(2, Qt.gray)
             elif summary.violated_constraints:
@@ -293,8 +315,6 @@ class MainWindow(QMainWindow):
             if str(summary.path) in selected:
                 item.setSelected(True)
             self.run_tree.addTopLevelItem(item)
-        for column in range(3):
-            self.run_tree.resizeColumnToContents(column)
         self.runs_label.setText(f"Runs ({len(self.summaries)})")
         self._update_workspace_state()
         self._on_selection()
@@ -367,7 +387,6 @@ class MainWindow(QMainWindow):
             # which is exactly when you want to reach for it.
             if id(job) in previous or (not previous and job is self.queue.running):
                 item.setSelected(True)
-        self.queue_tree.resizeColumnToContents(0)
         running = self.queue.running
         self.log_label.setText(f"Progress — {running.title}" if running else "Progress")
         self._on_queue_selection()
