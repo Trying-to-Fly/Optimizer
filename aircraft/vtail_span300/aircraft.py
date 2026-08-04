@@ -1,11 +1,28 @@
 """`vtail_sample` with the projected-span cap moved 2.0 m -> 3.0 m.
 
+**RETIRED 2026-08-04 — it ran, it answered, and the answer was NOT adopted.**
+`runs/20260801T043954-endurance_sample-vtail_sample_v1-7_span300` found the curve
+turning over at **2.497 m interior** (150.53 min), and the user kept the 2.0 m
+cap anyway: the cap is a build decision — transport, storage, hand-launch, print
+— and this model prices none of that. The reasoning below is preserved because
+the question is re-openable, not because it is open. Running this package again
+is one command and still valid; what it must NOT do is quietly become the sample.
+FINDINGS section 19 has the result; `VTailSample.span_cap_m` carries the decision
+and its measured price.
+
+Every question this file posed was answered, and the answers are in section 19:
+the spar STAYED pinned at 14 mm, the flatness sweep DID find an interior optimum
+(6 of 6 members converged, both sides of the curve drawn), and the 1-1.5 min
+extrapolation it was built to test was **wrong by a factor of four** — 2.0 -> 2.5 m
+is worth ~6.3 min at the incumbent prop. That is the fourth time this project has
+extrapolated a slope measured against a wall and been wrong about it.
+
 An EXPERIMENT, not a design change, and deliberately a large one: the user asked
 "what does it end at" with the cap effectively out of the way. Everything except
 the cap is inherited from `vtail_sample`, so any difference is attributable to
 the cap alone — which is why this is a subclass rather than a copy.
 
-WHY IT IS WORTH RUNNING
+WHY IT WAS WORTH RUNNING
 
 `span` has sat exactly on its cap in every solve this project has ever done, at
 2.2 m and at 2.0 m, and the span sweep has always been climbing into the bound.
@@ -62,7 +79,10 @@ finally:
 
 
 class VTailSpan300(_base.VTailSample):
-    name = "vtail_sample_v1.7_span300"
+    #: DERIVED from the base name rather than restated, so a retired package
+    #: cannot drift into claiming a version whose feasible set it no longer
+    #: shares. The version is the sample's; the suffix is the one difference.
+    name = _base.VTailSample.name + "_span300"
     #: The only change. The root-chord cap stays at the promoted 275 mm so this
     #: run differs from the current sample in exactly one number.
     span_cap_m = 3.0

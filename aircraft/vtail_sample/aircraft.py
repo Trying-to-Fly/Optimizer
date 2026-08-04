@@ -96,8 +96,39 @@ class VTailSample:
     # runs silently compares different aeroplanes.
     name = "vtail_sample_v1.7"
     wing_airfoil = "sd7037"  # discrete outer-loop candidate (MODEL_DETAILS 6.3)
-    span_cap_m = 2.0  # manufacturing cap on PROJECTED (front-view y) span, winglet included
-    # (2.2 -> 2.0 by user decision 2026-07-24, sixth session)
+    #: Manufacturing cap on PROJECTED (front-view y) span, winglet included.
+    #: 2.2 -> 2.0 by user decision 2026-07-24, sixth session.
+    #:
+    #: **RETAINED at 2.0 m by user decision 2026-08-04, with the price now
+    #: MEASURED rather than extrapolated.** `aircraft/vtail_span300/` ran the cap
+    #: out to 3.0 m and the curve turned over on its own at **2.497 m interior**
+    #: — the first span figure this project has produced that is a property of
+    #: the aeroplane rather than of its cap (FINDINGS section 19). What 2.0 m
+    #: costs against that optimum:
+    #:
+    #:   - **~6.3 min** at the incumbent `ancf_11x6` (119.93 against 126.20,
+    #:     same configuration, both post-vortex-core-fix)
+    #:   - **~8.5 min** at the 12x10 the 2.5 m run adopted (142.09 against
+    #:     150.53; the 2.0 figure predates the vortex-core fix by -0.16%, so
+    #:     the true gap is nearer 8.7)
+    #:
+    #: The cap stays because it is a BUILD decision — transport, storage,
+    #: hand-launch, print bed — and nothing in this model prices any of that. It
+    #: is the same posture as `c_root_max_m` and `prop_diameter_max_in`: declared,
+    #: not derived, so raising it is one number and a run rather than a rewrite.
+    #:
+    #: Two consequences of capping here rather than at the optimum, both of which
+    #: an earlier session read the wrong way round:
+    #:
+    #:   - **The optimum is flat to +-180 mm** (under 1 min across 2.28-2.64 m),
+    #:     so the buildability call had real room to spend. 2.0 m is outside that
+    #:     flat region, which is exactly why it costs minutes rather than seconds.
+    #:   - **A capped span pushes the design into the winglet.** At 2.5 m the
+    #:     winglet was retained with `wl_cant` on its 55 deg LOWER bound — the
+    #:     optimizer asking for a span extension the projected cap forbids. With
+    #:     the cap back at 2.0 m that pressure is stronger, not weaker, so read
+    #:     any winglet adoption here as a span request first (FINDINGS 19.3).
+    span_cap_m = 2.0
     #: Root-chord cap, metres — a PRINT BED limit, and DECLARED rather than
     #: buried in `design_variables` because it is a build decision the way
     #: `span_cap_m` and `prop_diameter_max_in` are, and because every champion

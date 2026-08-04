@@ -1,11 +1,33 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-01, thirteenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-04, fourteenth session)
 
-**Champion 150.53 min** — `runs/20260801T043954-endurance_sample-vtail_sample_v1-7_span300`,
-the 3 m span-cap experiment, which landed **interior at 2.497 m** and is the first
-run in this project whose span figure is a property of the aeroplane rather than
-of its cap. (Previous champion: 142.09 min at the 2.0 m cap.)
+> ## THE SPAN CAP IS BACK AT 2.0 m (user decision, 2026-08-04)
+>
+> The 3 m experiment ran, the curve turned over at **2.497 m interior**, and the
+> cap **stays at 2.0 m anyway** — it is a BUILD decision (transport, storage,
+> hand-launch, print bed) and this model prices none of that. What is different
+> from before the experiment is that the price is now MEASURED: **~6.3 min** at
+> the incumbent prop, **~8.5 min** at the 12x10 the 2.5 m run adopted. The
+> reasoning lives in `VTailSample.span_cap_m`'s comment.
+>
+> **So the 150.53 min champion is no longer in the sample's feasible set** — it
+> is a 2.497 m aeroplane. `aircraft/vtail_span300/` is KEPT and marked RETIRED
+> (its name now derives from the base so it cannot drift into claiming a version
+> it does not share); re-opening the question is one command.
+>
+> **There is currently no guard-checked champion at 2.0 m.** The best 2.0 m
+> number on record is **142.09 min**
+> (`runs/20260731T152208-…-vtail_sample_v1-6_chord275`, same 12x10 prop) and it
+> predates BOTH the vortex-core fix (expect ~-0.16%, so ~141.9) and the mesh /
+> VLM ensemble guards. **A fresh 2.0 m battery is the next action** — user
+> approved 2026-08-04. Watch: whether the winglet is rejected again (it was at
+> 2.0 m, retained at 2.5 m), and whether the prop screen still picks the 12x10
+> at the 2.0 m operating point.
 
-This session closed every open issue the twelfth session left, and **five of them
+**Champion of record: 142.09 min at the 2.0 m cap**, pending that re-run —
+`runs/20260731T152208-endurance_sample-vtail_sample_v1-6_chord275`. The 150.53
+figure below is retained as the answer to the span question, not as a design.
+
+The thirteenth session closed every open issue the twelfth session left, and **five of them
 turned out to be measurement defects rather than physics** — three found by
 auditing artifacts, and two more found by RUNNING, including one inside the
 optimizer's own model that a solve was actively exploiting (FINDINGS §16 and
@@ -22,7 +44,30 @@ not comparable at all — the sweep now samples a different set of spans.
 > packages (`aircraft/vtail_chord275/`, `aircraft/vtail_span180/`) are deleted;
 > their reasoning lives in `VTailSample.c_root_max_m`'s comment and FINDINGS §15.
 
-## FIXED this session
+## FIXED this session (fourteenth, 2026-08-04)
+
+Nothing in the model moved; this was a decision-and-hygiene session. The audit of
+everything committed since the last run found the code and the run artifacts
+clean — 257 passing, `run.json` reporting mesh check converged, both VLM
+configurations reliable, stall clear, NLP-vs-re-eval gap 0.0000 — and three
+defects in the write-up itself:
+
+- **`docs/HANDOFF.md` carried a 103-line VERBATIM DUPLICATE.** The 2026-08-01
+  write-up commit inserted its new section along with a second copy of the two
+  sections above it, so "FIXED this session" and "WHAT IS STILL OPEN" each
+  appeared twice, identical. Removed. Worth naming because the duplicate was
+  *correct* text — nothing read wrong, it just read twice, which is precisely the
+  kind of thing a reader skims past and a diff hides.
+- **A completed action was still written as the next one.** The aborted first
+  attempt's section said "Re-running it is the next action" and "the run has to
+  be redone" after it had been redone. It is now marked superseded, and says
+  which of the things it told the reader to watch actually happened.
+- **Issue 0b's active-bound table was silently the PREVIOUS champion's.** It is
+  now labelled as the chord275 champion's, and points at FINDINGS §19.4 for the
+  2.5 m one — three rows differ, which is itself the lesson: a bound list is a
+  property of one solve, not of the aeroplane.
+
+## FIXED in the thirteenth session (2026-08-01)
 
 - **`aero.vlm_induced_check` was reporting an inviscid wing that made thrust**
   (issue 0a). `k_induced = -0.5035` at the champion, and the raw sweep — which no
@@ -156,110 +201,11 @@ FINDINGS §19 has the full reading; the four things that matter:
 clear, SM exactly on its floor, mesh check converged, both VLM configurations
 reliable, peak RSS 14.64 GB (the tail-type study, correctly attributed).
 
-## FIXED this session
+## THE 3 m RUN'S FIRST ATTEMPT, AND WHAT IT FOUND IN TWENTY MINUTES
 
-- **`aero.vlm_induced_check` was reporting an inviscid wing that made thrust**
-  (issue 0a). `k_induced = -0.5035` at the champion, and the raw sweep — which no
-  run had ever printed — showed `CD = -0.54` at α=2°. **It was the VLM MESH, not
-  the fit.** AeroSandbox's default spanwise `cosspace` bunches panels against
-  every wing-section boundary; on this wing's four unequal sections that leaves a
-  near-singular AIC. Uniform spanwise panels take the champion to `k = +0.0267`,
-  `e = 1.27`, and a winglet that finally *reduces* induced drag (−9.6%).
-  **But one mesh is still not enough** — individual meshes blow up sporadically
-  on high-cant geometries and look physical when they do — so the check now runs
-  a **three-mesh ensemble, reports the consensus, and flags configurations whose
-  meshes disagree** rather than shipping a number. FINDINGS §16.1 has the chain.
-  The chronic slightly-negative `cd0_inviscid` **is benign fit noise**, as the
-  issue suspected; the sweep uses 6 alphas now instead of 3.
-- **`fixed` is already applied as a bound — that work item was already done**
-  (issue 1's remaining half). `detect_simple_bounds=True`, added the session
-  before for an unrelated reason, makes CasADi hoist `x == v` into `lbx`/`ubx`
-  and *eliminate the variable*. Measured on the real model: fixing span at its
-  own lower bound goes 36 variables → **35**, with equality and inequality row
-  counts unchanged. The SVD that motivated the item predates the flag. Pinned by
-  a test against CasADi's own `detect_simple_bounds_is_simple`, because the
-  symptom if the flag is dropped is a diverging `inf_du` in the flatness sweep.
-- **The winglet solves never cost 2.7 GB** (issue 0c). `peak_rss_gb` was a
-  process high-water mark that only rises, so every member after the heaviest
-  one inherited its number. The 11.7 → 14.45 GB step is the **tail-type study**
-  (35 design variables and a separate fin surface, against 32); the winglet
-  solves are the LIGHTEST in the run at 27. The in-process path now resets the
-  mark between members, and where it cannot the member says so
-  (`peak_rss_is_batch_watermark`). Also: 0c's "~15 GB WSL cap" was stale —
-  `.wslconfig` has granted 26 GB since 2026-07-24, so the margin is ~10 GB.
-- **Active bounds are reported instead of reconstructed by hand** (issue 0b).
-  Every solve records `active_bounds`, the progress log names them, and the
-  report marks each pinned design variable. The champion sat on eight and the
-  session discussed three, because the box lives in the aircraft's
-  `design_variables` and no artifact ever saw it. Pricing which one to relax
-  still needs runs — an active bound tells you nothing about its value until you
-  move it.
-- **M5.3 two-stage discrete studies — BUILT** (issue 3). `solve.screen_discrete`
-  ranks candidates at the champion's operating point with no NLP at all, so the
-  candidate set can be the catalogue and the run still pays for four solves.
-  Validated against the 2026-07-31 battery, whose answer is known: it ranks 65
-  candidates in **0.5 s**, puts the same prop first that eight full re-solves
-  adopted, and prices it at **141.56 min against their 141.43**. Mass is charged
-  at the run's own shadow price — without that a bigger disc arrives weightless.
-  `PROP_CANDIDATES` is now a RULE over the shipped catalogue (every measured
-  folding table inside the declared diameter limit, **66** of them, was 8), and
-  the incumbent key moved `cam_11x6` -> `ancf_11x6` for the same propeller.
-  FINDINGS §17.
-- **The flatness sweep samples the optimum's neighbourhood** (issue 0f, deferred
-  twice). `[0.85 x champion span, cap]` instead of a constant 1.5 m floor.
-  **Flatness figures are no longer comparable with runs before 2026-08-01** —
-  that is the cost, and it is why it was deferred; at a 3 m cap the old range
-  would have spent most of the sweep on spans 50% below the optimum.
-- **`--warm-start` was fixed AND measured, and still does not pay** (issue 5).
-  It now asks IPOPT for a warm start rather than only seeding values — without
-  `warm_start_init_point` the default `bound_push`/`bound_frac` shove the
-  starting point 1% off every bound before the first iteration, and this
-  champion sits on eight of them. Measured with the previous champion's own
-  design vector as the seed, which is the most favourable case there is:
-  **cold 5.35 min, seed-only 6.78 (+27%), seed + options 5.58 (+4%)** — all
-  returning 120.12168. It is a provenance tool, not a speed one, and it now says
-  so in the log. FINDINGS §16.5.
-- **Pusher retired as a candidate** (user decision): pullers only. Priced twice,
-  lost twice — at 275 mm it converges properly and still loses by 9.5 min at the
-  same SM floor (110.66 vs 120.12). The mount attribute and the pusher model are
-  untouched; putting `"pusher"` back in the list re-opens the question.
-- **User decisions taken** (issue 0d): `FLATNESS_TIMEOUT_MIN` **12 → 20**, and
-  the 275 mm chord cap promoted into `VTailSample` with both variant packages
-  deleted.
-
-- **The in-loop lifting-line returned negative drag at high winglet cant, and a
-  solve exploited it** — found by running the 3 m battery, not by review. The
-  winglet had four panels (AeroSandbox's default is per SECTION); it now has
-  three stations, which is the converged answer for four more panels a side.
-  Every champion is now re-checked at 16 panels/section
-  (`aero.mesh_convergence_check`) and the run says so if the in-loop drag is
-  negative or more than 10% off. **FINDINGS §18** — read it before trusting any
-  objective from a geometry with a strongly canted surface.
-
-Suite is **251 passing** (was 214), plus one `slow`-marked end-to-end VLM test.
-
-The aircraft is **`vtail_sample_v1.7`** — the version moves with the chord cap
-because it names the run directory, and two aircraft with different feasible sets
-must not answer to the same name.
-
-## WHAT IS STILL OPEN
-
-**Issue 2 — static-margin FIDELITY — and it cannot be closed in this app.** The
-two-estimator artefact is long gone; what remains is that `sm_local_slopes` goes
-negative at the cruise alpha, i.e. Cm(CL) is nonlinear enough over +-2 deg that
-"the" static margin depends on the window it is measured over. A regression slope
-is a defensible summary of that and still a summary. **flow5 (or equivalent)
-should own the stability verdict before anything is built** — an external tool,
-not a code change, and it gates BUILDING rather than running.
-
-**Issue 0b's second half** — which of the seven active bounds is worth relaxing —
-is now a question with a printed work list rather than a hidden one, and it needs
-solves rather than edits. Start with `x_battery`: it, `ballast_kg = 0` and SM
-exactly on its floor together say the design is CG-limited, which the whole
-span-vs-chord discussion missed. `le_shear = 1.0` and `washout_tip = 0.0` are
-departures from DESIGN_SPEC that have never been questioned.
-
-## THE 3 m RUN, AND WHAT IT FOUND IN TWENTY MINUTES
+> **Superseded by the section above** — this is the ABORTED first attempt, kept
+> because the defect it found is the reason the model moved. The re-run it calls
+> for is `runs/20260801T043954-…`, which is done.
 
 The battery against `aircraft/vtail_span300/` (`span_cap_m` = 3.0 m, user ask)
 **was stopped at its second flatness member and its checkpoints discarded.** It
@@ -314,14 +260,14 @@ both the original model and the rejected station fix now converges to
 size of a mesh correction, and both move toward the fine-mesh answer.
 
 The champion at 2.49 m is mesh-converged (0.700 / 0.715 / 0.724 across
-resolutions) and was never contaminated — but the run has to be redone, because
+resolutions) and was never contaminated — but the run had to be redone, because
 its checkpoints were solved under the old mesh.
 
-**Re-running it is the next action.** Watch, besides span: `spar_od_center`,
-already pinned at its 14 mm maximum at 2.5 m — if it stays pinned, the answer is
-a property of the declared spar stock rather than of the aerodynamics, the same
-trap `c_root` set at the print bed. And the prop screen, which has not yet run
-in a real battery.
+**It was redone** — `runs/20260801T043954-…`, the section above. Both things this
+paragraph said to watch happened: `spar_od_center` stayed pinned at its 14 mm
+maximum, so part of that answer is the tube you can buy rather than the
+aerodynamics; and the prop screen ran in a real battery for the first time and
+was worth four times the span.
 
 > **The three "infeasible corners" were a CHORD-STARVED WING, not infeasible.**
 > `c_root` was pinned on its 245 mm print-bed cap in every solve that ever
@@ -381,7 +327,7 @@ default — pusher returns 106.55 min even with the stability window relaxed to
 FINDINGS §14.5 carries the full chain, including three intermediate diagnoses
 that were tested and refuted — read those before re-deriving them.
 
-## FIXED this session
+## FIXED in the eleventh session (2026-07-30)
 
 - **The model was being evaluated outside its own variable bounds.**
   `detect_simple_bounds` was at CasADi's default `False`, so every declared
@@ -465,7 +411,11 @@ it was "an inviscid solver cannot produce this sign".
 
 Every solve records `active_bounds`, the log names them, the report marks them.
 What is NOT done is the part that needs solves: **which of them is worth
-relaxing.** The champion's list, for whoever picks this up:
+relaxing.** The table below is the **2026-07-31 chord275 champion's** list, at the
+2.0 m cap. For the 2.5 m champion's eight, read **FINDINGS §19.4** instead — three
+rows moved (`span` and `c_root` went interior, `wl_cant` and `t_dihedral` arrived),
+which is itself the point: a bound list is a property of one solve, not of the
+aeroplane.
 
 | variable | value | bound | reading |
 |---|---|---|---|

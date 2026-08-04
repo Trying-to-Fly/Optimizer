@@ -1789,3 +1789,55 @@ wing wants a longer tail arm and the boom buys it cheaply), V-tail over
 conventional (-4.36) and T-tail (-6.20), smooth dihedral curve over polyhedral
 (-4.19). Static margin exactly on its 0.08 floor, stall clear, NLP-vs-re-eval gap
 **0.0000**.
+
+### 19.6 …and the cap stays at 2.0 m anyway (user decision, 2026-08-04)
+
+The experiment answered its question and the answer was **not adopted**. That is
+the correct outcome for this kind of run and it is worth writing down as such,
+because the tempting reading — "the optimizer found 2.5 m, so build 2.5 m" — is
+wrong on this project's own terms: `span_cap_m` is a BUILD decision, in the same
+class as `c_root_max_m` and `prop_diameter_max_in`, and nothing in this model
+prices transport, storage, hand-launch or the print bed.
+
+What changed is not the number but its **standing**. Before the run, 2.0 m was a
+decision with an extrapolated price (§15.8: 1-1.5 min for 2.0 -> 2.2 m, read off
+a slope measured against a wall). After it, 2.0 m is a decision with a measured
+one:
+
+| against the 2.5 m optimum | cost of capping at 2.0 m |
+|---|---|
+| at the incumbent `ancf_11x6` | **~6.3 min** (119.93 vs 126.20, both post-§18) |
+| at the `12x10` the 2.5 m run adopted | **~8.5 min** (142.09 vs 150.53) |
+
+The second row is the one a builder should be quoted, and it is the larger of the
+two: a coarser prop and a longer wing want each other, so pricing the cap at the
+incumbent prop **understates it by a third**. The 142.09 figure predates the
+vortex-core fix by -0.16%, so the true gap is nearer 8.7 min.
+
+Three consequences that outlive the decision:
+
+1. **The §15.8 extrapolation was wrong by a factor of four or five**, in the
+   direction of underestimating span. That is the fourth time a slope measured
+   against an active bound has misled this project (§14.5, §15.1, §16.1 are the
+   others), and the pattern is now specific enough to state as a rule: **a
+   gradient at a bound predicts the objective only over distances small compared
+   with how far the bound is from the interior optimum.** Here the bound was
+   500 mm away and the extrapolation was run 200 mm.
+2. **The 150.53 min champion is out of the sample's feasible set.** It is a
+   2.497 m aeroplane. The best 2.0 m number is 142.09 min from the chord275 run,
+   which predates both this fix and the mesh/VLM guards — so at the moment of
+   this decision the project has **no guard-checked champion at its own cap**,
+   and a fresh 2.0 m battery is owed.
+3. **Capping span raises the pressure on the winglet, it does not lower it.** At
+   2.5 m — interior, no cap binding — the winglet was retained with `wl_cant`
+   already on its 55 deg LOWER bound (§19.3). Back at 2.0 m the projected-span
+   cap binds directly, so any winglet the optimizer adopts there should be read
+   as a span request that found a door, and priced against span before it is
+   believed. The 2.0 m champion of record rejected the winglet; if the re-run
+   adopts it, that reversal is the finding, not a footnote.
+
+`aircraft/vtail_span300/` is **kept and marked RETIRED** rather than deleted (the
+`chord275` precedent went the other way because that experiment was *adopted*, so
+its package would have been a duplicate of the sample). Its `name` now derives
+from `VTailSample.name` instead of restating it, so a retired package cannot
+drift into claiming a version whose feasible set it no longer shares.
