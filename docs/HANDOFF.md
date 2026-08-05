@@ -1,4 +1,4 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-05, sixteenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-06, seventeenth session)
 
 > ## THE SPAN CAP IS BACK AT 2.0 m (user decision, 2026-08-04)
 >
@@ -65,7 +65,95 @@ not comparable at all — the sweep now samples a different set of spans.
 > packages (`aircraft/vtail_chord275/`, `aircraft/vtail_span180/`) are deleted;
 > their reasoning lives in `VTailSample.c_root_max_m`'s comment and FINDINGS §15.
 
-## NEW this session (sixteenth, 2026-08-05): equipment is a MANIFEST now
+## NEW this session (seventeenth, 2026-08-06): the first rcv2 battery ran, and it is the evidence
+
+> ## ONE DECISION IS WAITING FOR YOU, AND IT IS THE ONE THIS BATTERY EXISTED TO SETTLE
+>
+> **The free-station measurement now exists and it has fired.** On the champion:
+> **all 10 placed items sit on their FORWARD stop, and 7 of the 10 are boxed in
+> on both sides.** The three that are not — battery (201 mm of room aft), buzzer
+> (43.8 mm), esc (16.5 mm) — are held forward by the OBJECTIVE, not by a row.
+>
+> Forward-most derived packing would therefore reproduce this layout exactly.
+> What it would give up is the pricing of that choice. `EQUIPMENT_PLAN.md` said
+> "measured, then deleted"; the measuring is done and the deleting is yours.
+>
+> Two of the ten are held by rows a lane-end check would have missed, which is
+> why the naive version of this test would have been wrong: `gps_compass` by its
+> 100 mm RF separation from the SiK, `airspeed_board` by the shelf being exactly
+> full.
+
+**The battery: `runs/20260806T031736-endurance_sample-vtail_sample_v1-7_rcv2`,
+417.5 min, champion 120.52 min, AUW 2.119 kg.** Ten of 22 members failed, all
+`Maximum_WallTime_Exceeded`, and **287.7 of the 417.5 minutes (69%) went to
+members that produced nothing** — the same shape as the 2026-07-29 finding that
+87% of a 405-minute run bought nothing. Three studies returned NO verdict (tail
+type, both candidates; fuselage topology; wing dihedral) and the flatness sweep
+reported **2 of its 6 spans**.
+
+**Why they fail, settled with the instrument rather than argued.**
+`tools/degeneracy.py` on `printed_mass_x1.10`: **3 active rows, condition number
+2.49, smallest singular value 0.41.** LICQ holds comfortably — *there is no
+degeneracy*, the same verdict §14.5.8 reached and for the same reason. What is
+there instead is **18 rows violated at once, total 0.42**, dominated by lift
+equilibrium (0.268) and the static-margin floor (0.047), then spar stress
+(0.024) and the nose-holds-the-motor row (0.018). These are **over-constrained
+corners**. The `inf_du` blow-up to 1e18 is the symptom of grinding against one,
+not the cause, and §14.5.7 already measured that more clock does not convert it.
+
+> **`c_root` is back ON its cap, and the battery is now pinned FORWARD.** Both
+> are reversals of what "WHAT IS STILL OPEN" records for the 2026-08-05 sample
+> champion (`c_root` 0.251 off the cap, `x_battery` at its AFT limit). On rcv2
+> `c_root` is at 0.275 in 12 of 13 converged members and the battery is hard
+> against its `bay_floor` lane front — the manifest put the chord starvation of
+> FINDINGS §15 back, and flipped which way the balance knob is stuck. **The
+> remedy is a cap, and a cap is a user decision**: raise chord or span, widen the
+> SM window, or carry less kit. Nothing here should move one on its own.
+
+**What was fixed (all committed, 437 tests green).**
+
+- **A decision rode on a measurement `active_bounds` could never make.** The
+  plan's test read declared BOXES; a placement variable's box is the wide
+  `PLACEMENT_BOX` backstop and its real bounds are symbolic lane rows, so it was
+  silent on all ten and always would have been. `equipment.placement_activity`
+  measures slack PER DIRECTION — "at a row" and "determined by the rows" are
+  different claims — and the report renders it.
+- **A champion that meets its stability window was reported as missing it.**
+  `sm_in_range: False`, SM 0.0629 against [0.08, 0.15], for a design that meets
+  0.0800 at the speed it was solved for. The NLP enforces the SM window and it
+  is what sets cruise speed here (9.709 m/s over a 9.5 m/s floor); the
+  re-evaluation's sweep filter carries the wind floor, gust margin,
+  advance-ratio cap and throw limit but NOT the SM window, so it reads the
+  margin at a different speed. Eleven runs hid this because the NLP optimum sat
+  ON `v_min`, exactly where the sweep's peak is. Same split explains
+  `nlp_vs_reeval_gap` going 2e-05 -> **-0.433** (all of it 0.084 W of `P_elec`,
+  which back-solves `P_avionics` to 3.008 W against the model's 3.0).
+  **Reporting only** — `constraints.sm_read_at` names both speeds and why.
+  Which point is "best" is a decision, not a fix.
+- **A failure recorded no dual side**, so "stuck" and "cut off" were
+  indistinguishable. `solve._convergence_trace` records `inf_du`, the plateau
+  and a three-way reading. Validated against all nine of this run's failures
+  with zero false positives on the fourteen that converged.
+- **The ordering packing row was raw metres** (0.047 -> 1.05 at the initial
+  point). The two CONTAINMENT rows were tried the same way and measured WORSE
+  (0.18 -> 60-75, because a 200 mm clearance over a 3 mm margin is 67 and not
+  1), so they stay raw and say why. Regression confirmed on the re-run:
+  `multistart__nominal` returns 104.5651, identical to the pre-change run.
+- **`tools/degeneracy.py` could only look at `vtail_sample`** — now
+  `--aircraft` and `--set attr=value`, default unchanged.
+
+> **Do not edit model source while a battery is running.** Constraint labels
+> capture line NUMBERS at build time and read the source TEXT from disk at
+> report time, so ~50 added lines in `solve.py` made the last few checkpoints
+> print `solve.py:1000 opti = asb.Opti()` for the lift row. Results are
+> unaffected (the process holds the old bytecode); only the labels lie, and
+> they can be decoded against the pre-edit file.
+
+**A re-run is in flight** under fingerprint `8e5d4a32f187` with identical
+settings, started 2026-08-06 ~04:05. It is expected to lose the same ~10 members
+— the fixes make the run report honestly, they do not move any cap.
+
+## NEW in the sixteenth session (2026-08-05): equipment is a MANIFEST now
 
 The user supplied `Planes/RC/RC v2/ELECTRONICS_SPEC.xlsx` and asked for every
 part in it to be placed by the optimizer. That turned out to be less a feature
@@ -345,6 +433,15 @@ departures from DESIGN_SPEC that have never been questioned.
 > with SM exactly on 0.0800. The binding pair is now battery travel and the SM
 > floor, and nothing else. That is the next bound worth relaxing, and unlike the
 > chord cap it is a mounting question rather than a print-bed one.
+>
+> > **BOTH HALVES OF THAT REVERSE ON `vtail_rcv2` (2026-08-06).** `c_root` is
+> > back at 0.275 in 12 of 13 converged members, so the chord starvation is
+> > back — the manifest's equipment put it there — and `x_battery` is pinned
+> > FORWARD against its `bay_floor` lane front rather than aft against its box.
+> > The paragraph above is still true of `vtail_sample`; it is not true of the
+> > aeroplane the RC v2 BOM describes, and the ten failed members of that
+> > battery are over-constrained corners with lift equilibrium and the SM floor
+> > as their two dominant misses. See the seventeenth-session section.
 
 **Issue 3 (2026-08-05) — the fuselage drag model could not see shape, and the
 champion was exploiting that. TIER 1 IS NOW BUILT** — see the next section for
