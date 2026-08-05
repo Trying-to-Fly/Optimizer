@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+import planeopt
+
 from . import aero, fingerprint, geometry, massmodel, memory, propulsion
 from .mission import OBJECTIVES
 from .report import assemble, figures, geometry_export, manufacturing
@@ -1201,12 +1203,31 @@ def parallel_available() -> bool:
 
 
 def check_parallel(parallel: int) -> None:
-    """Reject an impossible width up front, not after the first batch."""
+    """Reject an impossible width up front, not after the first batch.
+
+    Two ways a width can be impossible, and both are worth catching here rather
+    than hours in: no `fork` at all (Windows), or a macOS process whose
+    Accelerate BLAS was already multi-threaded when the fork happened. The
+    second is the nastier one — it does not refuse, it segfaults every worker,
+    and `_solve_many` can only see that the child died without reporting, which
+    it attributes to the OOM killer (`planeopt._make_fork_safe_on_macos`).
+    """
     if parallel > 1 and not parallel_available():
         raise RuntimeError(
             f"parallel={parallel} needs the 'fork' start method, which this platform "
             "(Windows) does not have — the aircraft definition cannot be pickled for "
             "a spawned worker. Run with parallel=1; solves then run one at a time."
+        )
+    if parallel > 1 and planeopt._FORK_SAFE_MACOS is False:
+        raise RuntimeError(
+            f"parallel={parallel} is unsafe in this process: NumPy was imported before "
+            "planeopt, so Apple's Accelerate BLAS had already started its dispatch "
+            "pool and VECLIB_MAXIMUM_THREADS=1 came too late to stop it. Forked "
+            "workers would segfault on their first matrix multiply, and would be "
+            "reported as 'worker died before reporting (OOM?)' — a memory problem "
+            "this is not. Either import planeopt before NumPy, or set "
+            "VECLIB_MAXIMUM_THREADS=1 in the environment before launching. Run with "
+            "parallel=1 to solve one at a time."
         )
 
 

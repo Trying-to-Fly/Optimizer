@@ -15,14 +15,40 @@ Everything here is stdlib-only and works on a frozen Windows build. psutil
 would do the same job and is a perfectly good library, but a packaging-sensitive
 app (packaging/README.md) is better off not adding a compiled dependency for
 ~40 lines of platform code.
+
+**macOS is a third memory model, not a variant of the other two.** Three
+differences change what the numbers here mean, and all three are handled below
+rather than papered over:
+
+1. There is no `/proc`, so every figure comes from Mach (`host_statistics64`,
+   `task_info`) or `sysctl` through `ctypes` — the same approach the Windows
+   path already takes with `GlobalMemoryStatusEx`.
+2. Swap is **dynamic**: macOS creates and deletes swap files on demand instead
+   of using a fixed partition, so there is no `SwapTotal` to read. `swap_gb`
+   reports what is provisioned right now, which under-states the true ceiling —
+   the safe direction, and the one this module always chooses.
+3. Memory is **compressed** before it is swapped, and RSS does not count
+   compressed pages. A solve whose pages get compressed under pressure would
+   show a *falling* RSS while still owning the memory, so the per-solve peak is
+   measured as `phys_footprint` (what Activity Monitor calls Memory, and what
+   the kernel bills the process) rather than as RSS.
+
+The failure mode differs too, which is worth knowing when reading the warnings
+below: Linux has an OOM killer that takes the process outright, while macOS
+grows swap until the disk fills and only then reports "system has run out of
+application memory". A too-optimistic budget on a Mac therefore shows up as a
+battery that thrashes for hours rather than one that dies quickly.
 """
 
 from __future__ import annotations
 
+import ctypes
 import json
 import logging
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 log = logging.getLogger("planeopt")
@@ -44,6 +70,308 @@ DEFAULT_PER_SOLVE_GB = 14.5
 #: and the page cache all need room, and a machine that swaps while IPOPT
 #: factorizes is slower than solving one at a time.
 RESERVE_GB = 2.0
+
+
+# --- macOS: the Mach layer -------------------------------------------------
+#
+# Structure layouts are from <mach/vm_statistics.h>, <mach/task_info.h> and
+# <sys/sysctl.h>. They are public kernel interfaces and stable, but a layout
+# that ever did drift would produce nonsense rather than an error, so every
+# caller sanity-checks the result against a bound it knows independently and
+# reports "unknown" rather than a wrong number. `tests/test_memory.py` pins the
+# readings against `vm_stat`, `sysctl` and `ru_maxrss` on any Mac that runs
+# them.
+
+_natural_t = ctypes.c_uint32
+_integer_t = ctypes.c_int32
+
+_HOST_VM_INFO64 = 4
+_TASK_VM_INFO = 22
+
+
+class _VMStatistics64(ctypes.Structure):
+    """`vm_statistics64_data_t` — the counts behind `vm_stat`."""
+
+    _fields_ = [
+        ("free_count", _natural_t),
+        ("active_count", _natural_t),
+        ("inactive_count", _natural_t),
+        ("wire_count", _natural_t),
+        ("zero_fill_count", ctypes.c_uint64),
+        ("reactivations", ctypes.c_uint64),
+        ("pageins", ctypes.c_uint64),
+        ("pageouts", ctypes.c_uint64),
+        ("faults", ctypes.c_uint64),
+        ("cow_faults", ctypes.c_uint64),
+        ("lookups", ctypes.c_uint64),
+        ("hits", ctypes.c_uint64),
+        ("purges", ctypes.c_uint64),
+        ("purgeable_count", _natural_t),
+        ("speculative_count", _natural_t),
+        ("decompressions", ctypes.c_uint64),
+        ("compressions", ctypes.c_uint64),
+        ("swapins", ctypes.c_uint64),
+        ("swapouts", ctypes.c_uint64),
+        ("compressor_page_count", _natural_t),
+        ("throttled_count", _natural_t),
+        ("external_page_count", _natural_t),
+        ("internal_page_count", _natural_t),
+        ("total_uncompressed_pages_in_compressor", ctypes.c_uint64),
+    ]
+
+
+class _TaskVMInfo(ctypes.Structure):
+    """`task_vm_info_data_t`, truncated at `phys_footprint`.
+
+    The kernel appends fields to the tail of this structure between releases and
+    fills only as many as the caller asks for, so a prefix is the portable way
+    to read it: `task_info` is told the size of what is passed, not the size the
+    kernel knows about.
+    """
+
+    _fields_ = [
+        ("virtual_size", ctypes.c_uint64),
+        ("region_count", _integer_t),
+        ("page_size", _integer_t),
+        ("resident_size", ctypes.c_uint64),
+        ("resident_size_peak", ctypes.c_uint64),
+        ("device", ctypes.c_uint64),
+        ("device_peak", ctypes.c_uint64),
+        ("internal", ctypes.c_uint64),
+        ("internal_peak", ctypes.c_uint64),
+        ("external", ctypes.c_uint64),
+        ("external_peak", ctypes.c_uint64),
+        ("reusable", ctypes.c_uint64),
+        ("reusable_peak", ctypes.c_uint64),
+        ("purgeable_volatile_pmap", ctypes.c_uint64),
+        ("purgeable_volatile_resident", ctypes.c_uint64),
+        ("purgeable_volatile_virtual", ctypes.c_uint64),
+        ("compressed", ctypes.c_uint64),
+        ("compressed_peak", ctypes.c_uint64),
+        ("compressed_lifetime", ctypes.c_uint64),
+        ("phys_footprint", ctypes.c_uint64),
+    ]
+
+
+class _XswUsage(ctypes.Structure):
+    """`struct xsw_usage` — what `sysctl vm.swapusage` prints."""
+
+    _fields_ = [
+        ("xsu_total", ctypes.c_uint64),
+        ("xsu_avail", ctypes.c_uint64),
+        ("xsu_used", ctypes.c_uint64),
+        ("xsu_pagesize", ctypes.c_uint32),
+        ("xsu_encrypted", ctypes.c_ubyte),
+    ]
+
+
+def _libsystem():
+    """libSystem, loaded once and cached. None anywhere it is not macOS."""
+    if sys.platform != "darwin":
+        return None
+    lib = getattr(_libsystem, "_cached", None)
+    if lib is None:
+        try:
+            lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            lib.mach_task_self.restype = ctypes.c_uint
+            lib.mach_host_self.restype = ctypes.c_uint
+        except OSError as e:  # a RAM probe must never break a solve
+            log.debug("libSystem unavailable: %s", e)
+            lib = False
+        _libsystem._cached = lib
+    return lib or None
+
+
+def _vm_statistics() -> tuple[_VMStatistics64, int] | None:
+    """(counts, page_size) from Mach, or None if the call fails."""
+    lib = _libsystem()
+    if lib is None:
+        return None
+    st = _VMStatistics64()
+    count = ctypes.c_uint(ctypes.sizeof(st) // ctypes.sizeof(_natural_t))
+    if lib.host_statistics64(
+        lib.mach_host_self(), _HOST_VM_INFO64, ctypes.byref(st), ctypes.byref(count)
+    ) != 0:
+        return None
+    return st, os.sysconf("SC_PAGE_SIZE")
+
+
+def _darwin_ram() -> tuple[float, float] | None:
+    """(total, available) GB on macOS.
+
+    `available` is the macOS analogue of Linux's MemAvailable and is assembled
+    the same way and for the same reason: free pages alone read catastrophically
+    low on a Mac, because the kernel deliberately keeps almost nothing free and
+    parks everything reclaimable in `inactive`. Free + inactive + speculative +
+    purgeable is what a new allocation can claim without pushing anything to
+    swap. Active, wired and compressor pages are excluded — the compressor's
+    pages are memory that is already spoken for, merely stored small.
+    """
+    got = _vm_statistics()
+    if got is None:
+        return None
+    st, page = got
+    total = os.sysconf("SC_PHYS_PAGES") * page / GB
+    available = (
+        st.free_count + st.inactive_count + st.speculative_count + st.purgeable_count
+    ) * page / GB
+    if not 0 < total < 1e6 or not 0 <= available <= total:
+        return None  # a layout that drifted; say nothing rather than something wrong
+    return total, available
+
+
+def compressed_gb() -> float:
+    """Memory currently held compressed, in GB. 0.0 off macOS.
+
+    Reported by `planeopt info` because it is the one line of a Mac's memory
+    picture that has no counterpart on the platforms this app grew up on, and
+    because it explains an otherwise baffling reading: a machine can show very
+    little free memory, no swap in use, and still run a 14.5 GB solve, because
+    several GB of what everything else owns is sitting compressed.
+    """
+    got = _vm_statistics()
+    if got is None:
+        return 0.0
+    st, page = got
+    return st.compressor_page_count * page / GB
+
+
+def _darwin_swap() -> float:
+    """Swap provisioned right now, GB. See the module docstring: on macOS this
+    grows on demand, so it is a floor on the ceiling rather than the ceiling."""
+    lib = _libsystem()
+    if lib is None:
+        return 0.0
+    usage = _XswUsage()
+    size = ctypes.c_size_t(ctypes.sizeof(usage))
+    if lib.sysctlbyname(
+        b"vm.swapusage", ctypes.byref(usage), ctypes.byref(size), None, 0
+    ) != 0:
+        return 0.0
+    total = usage.xsu_total / GB
+    return total if 0 <= total < 1e6 else 0.0
+
+
+def _darwin_footprint_gb() -> float:
+    """This process's `phys_footprint` in GB — what the kernel bills it.
+
+    Not RSS: on macOS RSS omits compressed pages, so a process under memory
+    pressure appears to shrink while owning exactly as much as before. Footprint
+    is what Activity Monitor shows and what the memory limits are enforced
+    against, so it is the number worth dividing a budget by.
+    """
+    lib = _libsystem()
+    if lib is None:
+        return 0.0
+    info = _TaskVMInfo()
+    count = ctypes.c_uint(ctypes.sizeof(info) // ctypes.sizeof(_natural_t))
+    if lib.task_info(
+        lib.mach_task_self(), _TASK_VM_INFO, ctypes.byref(info), ctypes.byref(count)
+    ) != 0:
+        return 0.0
+    return info.phys_footprint / GB
+
+
+class _FootprintSampler:
+    """macOS stand-in for `/proc/self/clear_refs`: a per-solve peak by sampling.
+
+    Linux can zero the kernel's high-water mark between solves, so a later
+    reading means "this solve". macOS has no such call — `ru_maxrss` and
+    `resident_size_peak` only ever rise — and a watermark misattributes memory
+    to whichever phase happened to run after the heavy one (the 2026-07-31
+    winglet reading, see `reset_peak_rss`). Sampling the current footprint on a
+    background thread reconstructs the same quantity from the other side: reset
+    the running maximum at the start of a solve, and what it holds at the end is
+    that solve's peak.
+
+    The sampling interval is chosen against what is being measured. A solve
+    takes minutes and climbs to ~14.5 GB as IPOPT builds and factorizes, which
+    is a seconds-scale ramp, so a quarter-second sample cannot miss the peak by
+    anything that matters — and one `task_info` call four times a second is free
+    next to the solve it is watching.
+
+    Fork safety is the delicate part, and it needs both halves of what is below.
+    A fork carries the memory but only the calling thread, so a child inherits
+    this object with its sampler dead, its recorded peak belonging to the
+    parent, and — if the fork landed while the sampler held it — **a locked lock
+    that nothing will ever release**. Since `_solve_worker` calls
+    `peak_rss_gb()` on itself, that is a solve worker deadlocking at the moment
+    it tries to report, on a window of a few microseconds, thousands of times a
+    battery. So:
+
+    - the pid is checked BEFORE the lock is taken, which keeps a forked child
+      off it entirely on the one path a child actually uses, and
+    - `os.register_at_fork` replaces the lock outright in the child, so even a
+      caller that does reach for it finds a fresh one.
+
+    Neither alone is enough: the pid check leaves `restart` exposed, and the
+    at-fork hook only runs for forks that Python itself performs. The child
+    loses nothing by being locked out — it performs exactly one solve, so its
+    own `ru_maxrss` is already the per-solve peak this class exists to recover.
+    """
+
+    INTERVAL_S = 0.25
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._peak = 0.0
+        self._started = False
+        self._pid = os.getpid()
+        self._thread: threading.Thread | None = None
+        if hasattr(os, "register_at_fork"):  # POSIX only; Windows never forks
+            os.register_at_fork(after_in_child=self._reset_after_fork)
+
+    def _reset_after_fork(self) -> None:
+        """Drop the parent's lock, thread and reading — none of them survived."""
+        self._lock = threading.Lock()
+        self._peak = 0.0
+        self._started = False
+        self._thread = None
+        self._pid = os.getpid()
+
+    def restart(self) -> None:
+        with self._lock:
+            self._peak = _darwin_footprint_gb()
+            self._started = True
+            self._pid = os.getpid()
+            if self._thread is not None and self._thread.is_alive():
+                return
+            # daemon: a sampler must never be the reason a run does not exit
+            self._thread = threading.Thread(
+                target=self._run, name="planeopt-footprint", daemon=True
+            )
+            self._thread.start()
+
+    def _run(self) -> None:  # pragma: no cover — timing-dependent background loop
+        while True:
+            now = _darwin_footprint_gb()
+            with self._lock:
+                if os.getpid() != self._pid:
+                    return  # forked child: this thread is a ghost of the parent
+                self._peak = max(self._peak, now)
+            time.sleep(self.INTERVAL_S)
+
+    def peak_gb(self) -> float:
+        """The largest footprint seen since `restart`, or 0.0 if unusable.
+
+        0.0 rather than the current footprint when the sampler was never
+        started, because the caller's question is "how big did this get", and a
+        spot reading answers a different one — quietly substituting it would
+        report a solve that has just released its memory as tiny.
+
+        The two guards are read before the lock, not inside it: this is the call
+        a forked worker makes, and a child that took a lock inherited from its
+        parent mid-update would never come back out of it.
+        """
+        if not self._started or os.getpid() != self._pid:
+            return 0.0
+        with self._lock:
+            return max(self._peak, _darwin_footprint_gb())
+
+
+#: Process-global for the same reason `solve.RUN_PEAK` is: the thing it samples
+#: is process-global. Only ever started on macOS, and only by `reset_peak_rss`.
+_SAMPLER = _FootprintSampler()
 
 
 # --- what the machine has -------------------------------------------------
@@ -95,8 +423,18 @@ def _meminfo() -> tuple[float, float] | None:
 
 
 def machine_ram() -> tuple[float, float]:
-    """(total_gb, available_gb). Falls back to (0, 0) if the platform hides it."""
-    probe = _windows_status if sys.platform == "win32" else _meminfo
+    """(total_gb, available_gb). Falls back to (0, 0) if the platform hides it.
+
+    A (0, 0) here is not cosmetic. `plan_parallel` derives its hardware ceiling
+    from this, and a zero ceiling disables the cap entirely — so a platform this
+    function does not know silently converts a mistyped budget into as many
+    concurrent 14.5 GB solves as it will divide into. That is exactly what macOS
+    did before it was taught here: `_meminfo` looked for `/proc`, found nothing,
+    and every guard downstream quietly switched off.
+    """
+    probe = {"win32": _windows_status, "darwin": _darwin_ram}.get(
+        sys.platform, _meminfo
+    )
     try:
         got = probe()
     except Exception as e:  # noqa: BLE001 — a RAM probe must never break a solve
@@ -116,6 +454,13 @@ def swap_gb() -> float:
     """
     if sys.platform == "win32":
         return 0.0  # the pagefile is dynamic; do not pretend to size it
+    if sys.platform == "darwin":
+        # macOS swap is dynamic too, but unlike the Windows pagefile it can be
+        # sized: `vm.swapusage` reports what is provisioned at this instant, and
+        # the kernel adds more files as they are needed. Reporting it therefore
+        # under-states the ceiling rather than inventing one, which is the error
+        # direction this module wants everywhere.
+        return _darwin_swap()
     try:
         text = Path("/proc/meminfo").read_text(encoding="utf-8")
     except OSError:
@@ -144,11 +489,26 @@ def reset_peak_rss() -> bool:
     in the tail-type study, and the winglet solves are the SMALLEST in the run
     (27 design variables against the champion's 32).
 
-    Linux only: `/proc/self/clear_refs` with the magic value 5 clears the peak
-    (kernel >= 4.0). Everywhere else — and if the write is refused — the caller
-    keeps the watermark behaviour and says so, because a number that silently
-    changes meaning per platform is worse than one that is always conservative.
+    Linux: `/proc/self/clear_refs` with the magic value 5 clears the peak
+    (kernel >= 4.0).
+
+    macOS has no equivalent — `ru_maxrss` and `resident_size_peak` only rise —
+    so the same quantity is obtained from the other side: start (or restart) a
+    background sampler over `phys_footprint` and let `peak_rss_gb` read its
+    running maximum. The two routes disagree about nothing that matters; both
+    answer "how big did THIS solve get", which is what the budget divides by.
+
+    Everywhere else — and if the write is refused — the caller keeps the
+    watermark behaviour and says so, because a number that silently changes
+    meaning per platform is worse than one that is always conservative.
     """
+    if sys.platform == "darwin":
+        try:
+            _SAMPLER.restart()
+        except Exception as e:  # noqa: BLE001 — never break a solve over a probe
+            log.debug("footprint sampler failed to start: %s", e)
+            return False
+        return True
     if sys.platform != "linux":
         return False
     try:
@@ -165,7 +525,18 @@ def peak_rss_gb(children: bool = False) -> float:
     the only place a genuine PER-SOLVE peak can be observed. In the sequential
     path the process high-water mark is a ceiling over the batch rather than one
     solve, which is still the right number to divide a budget by.
+
+    On macOS a sampler may be running (`reset_peak_rss`), and where it is, its
+    reading wins: it is per-solve where `ru_maxrss` is a watermark, and it
+    counts compressed pages where `ru_maxrss` does not. In a forked child the
+    sampler is deliberately unusable — the fork did not carry its thread — and
+    the child's own `ru_maxrss` is already the per-solve number, so the fallback
+    below is the right answer there rather than a degraded one.
     """
+    if sys.platform == "darwin" and not children:
+        sampled = _SAMPLER.peak_gb()
+        if sampled > 0:
+            return sampled
     if sys.platform == "win32":
         if children:
             return 0.0
@@ -203,8 +574,14 @@ def peak_rss_gb(children: bool = False) -> float:
         maxrss = resource.getrusage(who).ru_maxrss
     except Exception:  # noqa: BLE001
         return 0.0
-    # ru_maxrss is kB on Linux and bytes on macOS.
-    scale = 1024 if sys.platform == "darwin" else 1024**2
+    # ru_maxrss is kB on Linux and BYTES on macOS, so the conversion to GB is
+    # 1024**2 there and 1024**3 here. The macOS scale read 1024 until 2026-08-05
+    # — six orders of magnitude out, which turned a 14.5 GB solve into a peak of
+    # 15 million and would have been read straight into the budget arithmetic as
+    # "this aircraft needs more RAM than exists". It was invisible because the
+    # only assertion over it, `test_peak_rss_is_positive_and_in_gigabytes`, had
+    # never been run on a Mac.
+    scale = 1024**3 if sys.platform == "darwin" else 1024**2
     return maxrss / scale
 
 
@@ -292,7 +669,7 @@ def plan_parallel(
         notes.append(
             f"exceeds the {max(0.0, available_gb - RESERVE_GB):.1f} GB free right now "
             f"({available_gb:.1f} GB less {RESERVE_GB:.0f} GB reserved) — relying on swap; "
-            "back it off if the OOM killer takes a job"
+            "back it off if jobs start dying or the machine starts thrashing"
         )
     if ceiling_gb > 0 and budget_gb > ceiling_gb - RESERVE_GB:
         usable = max(0.0, ceiling_gb - RESERVE_GB)

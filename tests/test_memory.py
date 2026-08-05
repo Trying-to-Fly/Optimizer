@@ -8,6 +8,7 @@ arithmetic is pure and injected-fact based, and this is where it is pinned.
 
 import json
 import sys
+import time
 
 import pytest
 
@@ -170,6 +171,175 @@ def test_reset_reports_failure_rather_than_lying(monkeypatch):
         raise OSError("permission denied")
     monkeypatch.setattr(memory.Path, "write_text", _refuse)
     assert memory.reset_peak_rss() is False
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+def test_macos_sampler_makes_the_next_reading_per_solve():
+    """The macOS half of the test above. No `clear_refs` here, so the same
+    guarantee is reconstructed by sampling: after a reset the reading must
+    describe THIS solve and not the largest one that came before it.
+
+    Anonymous `mmap` rather than a `bytearray`, because the assertion is about
+    the sampler and not about an allocator. Freeing a large `bytearray` does not
+    reliably hand the pages back to macOS — the footprint stays up, correctly,
+    because the process is still being billed for them — and a test written that
+    way fails on a true reading. `mmap.close()` unmaps, which is the only way to
+    ask for the memory back and mean it.
+    """
+    import mmap
+
+    memory.reset_peak_rss()
+    block = mmap.mmap(-1, 400 * 1024 * 1024)
+    block.write(b"\xa5" * (400 * 1024 * 1024))  # fault the pages in; reserving is free
+    time.sleep(3 * memory._FootprintSampler.INTERVAL_S)  # let the sampler see it
+    raised = memory.peak_rss_gb()
+    assert raised > 0.35, f"the allocation should show up in the peak, got {raised}"
+
+    block.close()
+    assert memory.reset_peak_rss() is True
+    assert memory.peak_rss_gb() < raised - 0.3, "the reading still carries the old peak"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+def test_macos_sampler_is_inert_until_started():
+    """`peak_rss_gb` answers 'how big did this get', so before any reset it must
+    fall through to the watermark rather than report a spot footprint — which
+    would read a solve that has just freed its memory as tiny."""
+    sampler = memory._FootprintSampler()
+    assert sampler.peak_gb() == 0.0
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+def test_macos_forked_child_does_not_inherit_the_parents_peak():
+    """A fork carries the memory but not the sampling thread, so the child's
+    copy is a frozen parent reading attached to a dead thread — and a lock the
+    child could block on forever. It must refuse to answer and let the caller
+    fall back to its own `ru_maxrss`, which for a one-solve child is already the
+    per-solve number. This is the path `solve._solve_worker` takes."""
+    import multiprocessing as mp
+
+    memory.reset_peak_rss()
+    hog = bytearray(300 * 1024 * 1024)
+    time.sleep(3 * memory._FootprintSampler.INTERVAL_S)
+    parent_peak = memory.peak_rss_gb()
+    del hog
+    assert parent_peak > 0.25
+
+    def child(conn):
+        conn.send((memory._SAMPLER.peak_gb(), memory.peak_rss_gb()))
+        conn.close()
+
+    ctx = mp.get_context("fork")
+    rx, tx = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=child, args=(tx,))
+    proc.start()
+    tx.close()
+    sampled, reported = rx.recv()  # a deadlock here is the bug this test exists for
+    proc.join(30)
+
+    assert proc.exitcode == 0
+    assert sampled == 0.0, "the child answered with the parent's sampler"
+    assert reported > 0, "the child should still report its own watermark"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+def test_macos_readings_agree_with_the_system_tools():
+    """The Mach structures are hand-laid `ctypes`, and a layout that drifted
+    would return plausible-looking nonsense rather than an error. Pin each one
+    against the tool that prints the same number."""
+    import subprocess
+
+    total, available = memory.machine_ram()
+    hw_memsize = int(subprocess.run(
+        ["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, check=True
+    ).stdout)
+    assert total == pytest.approx(hw_memsize / memory.GB, rel=1e-9)
+    assert 0 < available <= total
+
+    swap_line = subprocess.run(
+        ["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, check=True
+    ).stdout
+    swap_mb = float(swap_line.split("total =")[1].split("M")[0])
+    assert memory.swap_gb() == pytest.approx(swap_mb / 1024, rel=1e-6)
+
+    # phys_footprint has no command-line twin, but it must sit in the same
+    # neighbourhood as RSS — the two differ by compression and by clean file
+    # pages, not by orders of magnitude. This is what catches a unit slip: the
+    # macOS ru_maxrss scale was wrong by 1024**2 until 2026-08-05.
+    import resource
+
+    rss_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / memory.GB
+    assert 0.2 * rss_gb < memory._darwin_footprint_gb() < 5 * rss_gb
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only")
+def test_macos_compressed_memory_is_reported_and_bounded():
+    """It is a headline number on a Mac — several GB of what the machine is
+    using can be sitting compressed — but it can never exceed the machine."""
+    total, _ = memory.machine_ram()
+    assert 0 <= memory.compressed_gb() <= total
+
+
+# ------------------------------------------------------------ platform parity
+# The macOS support was added to a working Windows/Linux app, so the standing
+# requirement is that none of it is reachable anywhere else. These run on every
+# platform and assert the gating itself, which is the part a Mac-only test run
+# cannot otherwise check.
+
+
+#: Whether the real machine could honour a Linux reset, so the assertion below
+#: does not demand one from a Linux path merely simulated on a Mac.
+_CAN_CLEAR_REFS = sys.platform == "linux"
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_the_macos_probes_are_unreachable_off_macos(monkeypatch, platform):
+    """Every Mach entry point must answer neutrally rather than reach for a
+    libSystem that is not there."""
+    monkeypatch.setattr(memory.sys, "platform", platform)
+    memory._libsystem._cached = None  # it is cached per process; re-decide it here
+    try:
+        assert memory._libsystem() is None
+        assert memory.compressed_gb() == 0.0
+        assert memory._darwin_ram() is None
+        assert memory._darwin_swap() == 0.0
+        assert memory._darwin_footprint_gb() == 0.0
+        assert memory.reset_peak_rss() is (platform == "linux" and _CAN_CLEAR_REFS)
+    finally:
+        memory._libsystem._cached = None
+
+
+@pytest.mark.parametrize("platform,probe", [
+    ("win32", "_windows_status"), ("linux", "_meminfo"), ("darwin", "_darwin_ram"),
+])
+def test_machine_ram_dispatches_to_the_right_probe(monkeypatch, platform, probe):
+    """A platform reading another platform's probe is how macOS silently
+    returned (0, 0) and switched off every guard in `plan_parallel`."""
+    called = []
+    for name in ("_windows_status", "_meminfo", "_darwin_ram"):
+        monkeypatch.setattr(
+            memory, name, lambda n=name: (called.append(n), (32.0, 16.0))[1]
+        )
+    monkeypatch.setattr(memory.sys, "platform", platform)
+    assert memory.machine_ram() == (32.0, 16.0)
+    assert called == [probe]
+
+
+def test_a_platform_that_hides_its_ram_still_caps_the_budget_by_cpu(monkeypatch):
+    """(0, 0) must not read as 'unlimited'. It is the one case where the
+    hardware ceiling cannot bite, so the CPU cap has to be what holds — this is
+    the regression that made a 60 GB budget mean 4 workers on a 16 GB Mac."""
+    monkeypatch.setattr(memory, "machine_ram", lambda: (0.0, 0.0))
+    monkeypatch.setattr(memory, "swap_gb", lambda: 0.0)
+    width, _ = memory.plan_parallel(60.0, per_solve_gb=14.5, fork=True, cpu_count=2)
+    assert width == 2
+
+    # ...and with the machine known, the hardware is what decides.
+    width, why = memory.plan_parallel(
+        60.0, per_solve_gb=14.5, fork=True, cpu_count=10,
+        available_gb=4.6, ceiling_gb=18.0,
+    )
+    assert width == 1 and "capped" in why
 
 
 def test_the_run_peak_survives_the_per_solve_resets():

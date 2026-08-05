@@ -1,6 +1,7 @@
 """_solve_many mechanics: fork-parallel batches must be result-identical to
 the sequential path (NLP itself is stubbed — these are plumbing tests)."""
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -88,3 +89,81 @@ def test_width_above_one_is_rejected_without_fork(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         solve.check_parallel(2)
     assert "fork" in str(e.value) and "parallel=1" in str(e.value)
+
+
+# ------------------------------------------------------- macOS fork safety
+# NumPy's macOS wheels link Apple's Accelerate, which parallelises through Grand
+# Central Dispatch, and GCD is not fork-safe. One matrix multiply in the parent
+# starts the dispatch pool; every worker forked afterwards then segfaults on its
+# first BLAS call. Measured on an M5 / macOS 26.5 / NumPy 2.4: 9 of 9 workers
+# died with the pool up, 9 of 9 survived with VECLIB_MAXIMUM_THREADS=1
+# (`planeopt._make_fork_safe_on_macos`).
+#
+# What makes it worth a guard rather than a note is how it presents. The child
+# dies before writing to its pipe, `_solve_many` reads EOF, and the result says
+# "worker died before reporting (OOM?)" — so a fork bug arrives dressed as a
+# memory problem, hours into a battery, and sends the user to lower the memory
+# budget, which cannot help.
+
+
+def test_macos_fork_guard_refuses_a_width_it_cannot_honour(monkeypatch):
+    """When the pin missed, refuse UP FRONT and say why. The message has to name
+    the cause, because the symptom points somewhere else entirely."""
+    import planeopt
+
+    monkeypatch.setattr(solve, "parallel_available", lambda: True)
+    monkeypatch.setattr(planeopt, "_FORK_SAFE_MACOS", False)
+    with pytest.raises(RuntimeError) as e:
+        solve.check_parallel(2)
+    msg = str(e.value)
+    assert "Accelerate" in msg and "segfault" in msg
+    assert "VECLIB_MAXIMUM_THREADS" in msg, "must say what to actually set"
+    assert "parallel=1" in msg, "must say what still works"
+
+    solve.check_parallel(1)  # sequential never forks, so it is never blocked
+
+
+@pytest.mark.parametrize("state", [None, True])
+def test_fork_guard_is_silent_where_it_does_not_apply(monkeypatch, state):
+    """None is every non-macOS platform and True is a macOS process that got the
+    pin in time. Neither may be affected — this guard must not become a second
+    way for Windows or Linux to refuse a width that works there."""
+    import planeopt
+
+    monkeypatch.setattr(solve, "parallel_available", lambda: True)
+    monkeypatch.setattr(planeopt, "_FORK_SAFE_MACOS", state)
+    solve.check_parallel(4)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only")
+def test_macos_pin_is_in_place_for_this_process():
+    """The pin only works if it lands before NumPy is imported, so assert the
+    real process state rather than the function in isolation — importing
+    planeopt is exactly what a run does."""
+    import os
+
+    import planeopt
+
+    assert os.environ.get("VECLIB_MAXIMUM_THREADS") == "1"
+    assert planeopt._FORK_SAFE_MACOS is True
+
+
+@needs_fork
+def test_forked_workers_survive_real_blas_in_the_parent(monkeypatch):
+    """The end-to-end version, through `_solve_many` itself: warm the parent's
+    BLAS the way a nominal solve does, then run a batch N-wide and require every
+    worker back alive. Without the pin this fails on macOS with every member
+    recorded as `worker died before reporting (OOM?)`."""
+    import numpy as np
+
+    def fake(aircraft, mission, **kw):
+        a = np.random.rand(400, 400)  # BLAS in the CHILD — where it crashed
+        return {"objective_value": float((a @ a).sum())}
+
+    np.random.rand(400, 400) @ np.random.rand(400, 400)  # ...and in the parent
+    monkeypatch.setattr(solve, "_solve_nlp", fake)
+    res = solve._solve_many(None, None, [(f"m{i}", {}) for i in range(4)], parallel=3)
+
+    died = {k: v["failed"] for k, v in res.items() if "failed" in v}
+    assert not died, f"forked workers died: {died}"
+    assert all(r["objective_value"] > 0 for r in res.values())

@@ -41,6 +41,7 @@ from ..liveframe import (
     stats_columns,
     streamline_points,
 )
+from . import fonts
 
 # --- palette ---------------------------------------------------------------
 # Matches the app stylesheet (`gui/window.py`) rather than inventing a second
@@ -526,7 +527,7 @@ def draw_model(
 
 # --- chrome ----------------------------------------------------------------
 
-MONO_FAMILIES = ["Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Menlo", "Monospace"]
+MONO_FAMILIES = fonts.families()
 
 
 def mono_font(size: int = 9) -> QFont:
