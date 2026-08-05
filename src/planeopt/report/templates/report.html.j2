@@ -19,6 +19,20 @@
   .pinned { color: #a06a00; font-weight: 600; }
   img { max-width: 100%; }
   .grid { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+  /* Wide tables (the parts list is 8 columns) scroll INSIDE their own box.
+     Without this they push the 62rem body wider than the viewport and every
+     other section on the page inherits the horizontal scroll. */
+  .scroll { overflow-x: auto; }
+  table.parts { font-size: .85rem; }
+  table.parts td { vertical-align: top; }
+  table.parts td:nth-child(7), table.parts td:nth-child(8) { min-width: 16rem; }
+  /* Numbers line up as numbers: right-aligned, tabular figures, so a column of
+     stations can be scanned rather than read. */
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* An UNCHECKED requirement is a caveat, not an error. Amber and normal
+     weight, for the same reason `.pinned` exists: twenty bold red cells would
+     read as twenty failures when they are the builder's ordinary to-do list. */
+  .caveat { color: #a06a00; }
 </style>
 </head>
 <body>
@@ -196,18 +210,98 @@ drag alone — the study's verdict above also charges its mass and profile drag.
    2026-07-29 finding that 87% of a 405-minute run went to phases that failed
    had to be reconstructed by hand from the progress log. #}
 <h2>Where the time went</h2>
+{# A 0.0-minute phase is ambiguous on its own — not run, or fully resumed from
+   an earlier run's checkpoints? The resumed column says which, because "this
+   battery re-searched the design" is a claim the artifact should be able to
+   support or withdraw. #}
+{% set resumed = r.diagnostics.get("phase_resumed") or {} %}
 <table>
-<tr><th>phase</th><th>minutes</th><th>share</th></tr>
+<tr><th>phase</th><th>minutes</th><th>share</th>{% if resumed %}<th>resumed</th>{% endif %}</tr>
 {% set total = r.diagnostics["phase_minutes"].values()|sum %}
 {% for k, v in r.diagnostics["phase_minutes"].items()|sort(attribute='1', reverse=true) %}
 <tr><td>{{ k }}</td><td>{{ "%.1f"|format(v) }}</td>
-<td>{{ "%.0f"|format(100 * v / total if total else 0) }}%</td></tr>
+<td>{{ "%.0f"|format(100 * v / total if total else 0) }}%</td>
+{% if resumed %}<td>{{ resumed.get(k, "—") }}</td>{% endif %}</tr>
 {% endfor %}
-<tr><th>total</th><th>{{ "%.1f"|format(total) }}</th><th></th></tr>
+<tr><th>total</th><th>{{ "%.1f"|format(total) }}</th><th></th>{% if resumed %}<th></th>{% endif %}</tr>
 </table>
 <p style="color:#9a9aa0;font-size:12px;">Per-solve wall-clock ceiling:
 {{ r.diagnostics.get("solve_timeout_min", "—") }} min. A member that hits it is
 recorded as <code>Maximum_WallTime_Exceeded</code> and the batch carries on.</p>
+{% endif %}
+
+{% set ab = r.diagnostics.get("afterbody") %}
+{% if ab %}
+{# The fuselage drag model could not see afterbody SHAPE until 2026-08-05: any
+   two bodies agreeing on wetted area, length, fineness and volume scored
+   identically, so a 20-degree boat-tail was free and `pod_tail` sat on the
+   geometric floor that stood in for the missing physics. This block is how a
+   run says what that term charged it. #}
+<h2>Afterbody (boat-tail separation and base pressure)</h2>
+<table>
+<tr><th>closure half-angle (max, d_eq convention)</th>
+<td>{{ "%.1f"|format(ab["theta_max_deg"]) }}°
+{% if ab["theta_max_deg"] > ab["theta_sep_deg"] %}<span class="pinned">separated</span>
+{% else %}<span class="ok">attached</span>{% endif %}
+— threshold {{ "%.0f"|format(ab["theta_sep_deg"]) }}°</td></tr>
+<tr><th>separation station / effective base</th>
+<td>u* = {{ "%.3f"|format(ab["u_star"]) }}, radius fraction {{ "%.3f"|format(ab["r_sep"]) }}
+(end cap {{ "%.3f"|format(ab["r_cap"]) }}, occluded)</td></tr>
+<tr><th>onset ramp λ</th><td>{{ "%.3f"|format(ab["lambda"]) }}</td></tr>
+<tr><th>charged base area</th>
+<td>{{ "%.4g"|format(ab["area_charged_m2"]) }} m² → drag area
+{{ "%.4g"|format(ab["base_drag_area_m2"]) }} m²
+{% if ab.get("share_of_body_drag") %}({{ "%.0f"|format(100 * ab["share_of_body_drag"]) }}% of body drag){% endif %}</td></tr>
+<tr><th>fineness (L / d_eq)</th><td>{{ "%.2f"|format(ab["fineness"]) }}</td></tr>
+</table>
+<p style="color:#9a9aa0;font-size:12px;">One mechanism, not two: the station where
+the local closure angle first crosses the threshold defines an enlarged effective
+base, and unrecovered base pressure is charged there. The coefficient
+(<code>CD_BASE</code>) is <b>declared and uncalibrated</b> — matched to AeroSandbox's
+own low-Mach base-drag value so a future numeric cross-check compares like with
+like, not fitted to anything this project has measured. Angles use the
+d_eq-equivalent axisymmetric convention, so a 68 × 88 section's vertical-plane
+closure is ~14% steeper in tangent than reported here.</p>
+{% endif %}
+
+{% set vmp = r.diagnostics.get("v_min_price") %}
+{% set dropped = r.diagnostics.get("sweep_dropped") or {} %}
+{% set slopes = r.diagnostics.get("sm_local_slopes") or [] %}
+{% set unstable = slopes|selectattr("sm_local", "lt", 0)|list %}
+{% if vmp or dropped.get("trim_not_converged") or r.constraints.get("sm_sign_consistent") is sameas false %}
+{# What the headline number is limited BY, and what the sweep did NOT establish.
+   Both were previously inferable only by reading run.json's sweep by hand. #}
+<h2>What limits this result</h2>
+{% if vmp %}
+<p><strong>The minimum-speed requirement, not the airframe.</strong> The best
+legal point is {{ "%.2f"|format(r.constraints["v_min_ms"]) }} m/s; the sweep's own
+optimum is {{ "%.2f"|format(vmp["unconstrained_best_V_ms"]) }} m/s at
+{{ "%.2f"|format(vmp["unconstrained_objective"]) }} {{ r.performance["objective_units"] }}
+{% if vmp.get("cost_of_v_min") is not none %}—
+<strong>{{ "%.2f"|format(vmp["cost_of_v_min"]) }} {{ r.performance["objective_units"] }}</strong>
+that the requirement is currently costing{% endif %}. Relax the requirement, not
+the aeroplane, to buy that back.</p>
+{% endif %}
+{% if dropped.get("trim_not_converged") %}
+<p><strong>Not proven infeasible:</strong> trim did not converge at
+V = {{ dropped["trim_not_converged"]|map("float")|map("round", 1)|join(", ") }} m/s.
+These points are absent from the sweep because there is no operating point to
+report, <em>not</em> because none exists — the 2-D root-find ran out of progress
+from every start it was given. Read them as unknown.</p>
+{% endif %}
+{% if r.constraints.get("sm_sign_consistent") is sameas false %}
+{# Why `sm_sign_consistent` reads FAIL in the table below. It is a statement
+   about the ESTIMATOR as much as the aeroplane, and a bare red FAIL invites
+   the wrong one of those two readings. #}
+<p><strong>The static margin changes sign inside its own window.</strong> The
+reported {{ "%.4f"|format(r.constraints["static_margin"]) }} is a least-squares
+slope over an alpha window about trim, not a derivative at trim — and the local
+dCm/dCL goes negative at
+{% for p in unstable %}{{ "%.2f"|format(p["alpha"]) }}°{% if not loop.last %}, {% endif %}{% endfor %},
+so on this model the aircraft is not positively stable there. Cm(alpha)
+nonlinearity is the known dominant fidelity limit of this estimator: read the
+margin as an average over the window, and do not set the CG from it alone.</p>
+{% endif %}
 {% endif %}
 
 <h2>Constraints</h2>
@@ -272,8 +366,9 @@ wing loading {{ "%.1f"|format(r.masses["wing_loading_g_dm2"]) }} g/dm²</p>
 <div class="grid">
 {% if r.masses.get("components") %}
 <table>
-<tr><th>component</th><th>g</th></tr>
-{% for k, v in r.masses["components"].items() %}<tr><td>{{ k }}</td><td>{{ "%.0f"|format(v*1000) }}</td></tr>{% endfor %}
+<tr><th>component</th><th>g</th><th>station (mm)</th></tr>
+{# artifacts written before 2026-08-05 carry a bare mass here, not a mapping #}
+{% for k, v in r.masses["components"].items() %}<tr><td>{{ k }}</td><td>{{ "%.0f"|format((v["mass_kg"] if v is mapping else v)*1000) }}</td><td>{{ "%.0f"|format(v["station_mm"]) if v is mapping and v["station_mm"] is not none else "—" }}</td></tr>{% endfor %}
 </table>
 {% endif %}
 {% for surf, bd in (r.masses.get("printed_breakdown") or {}).items() %}
@@ -294,6 +389,40 @@ wing loading {{ "%.1f"|format(r.masses["wing_loading_g_dm2"]) }} g/dm²</p>
 <tr><th>fixed equipment</th><th>kg</th></tr>
 {% for k, v in r.masses["fixed_equipment"].items() %}<tr><td>{{ k }}</td><td>{{ "%.3f"|format(v) }}</td></tr>{% endfor %}
 </table>
+{% endif %}
+
+{% set eq = r.masses.get("equipment") %}
+{% if eq and not eq.get("failed") %}
+<h2>Equipment placement</h2>
+<p>{{ eq["totals_est"]["n_items"] }} airborne parts, fit <b>{{ eq["fit"] }}</b>, solved on the
+<b>{{ eq["basis_solved"] }}</b> mass basis — {{ "%.0f"|format(eq["totals_est"]["total_kg"]*1000) }} g
+with the example parts, {{ "%.0f"|format(eq["totals_max"]["total_kg"]*1000) }} g with every part at
+its heaviest legal substitute.</p>
+{% if eq.get("closure") %}
+<p>Closure check at fixed placement: AUW
+{{ "%.0f"|format(eq["closure"]["est"]["auw_kg"]*1000) }} g → {{ "%.0f"|format(eq["closure"]["max"]["auw_kg"]*1000) }} g,
+CG {{ "%.1f"|format(eq["closure"]["est"]["x_cg_m"]*1000) }} mm → {{ "%.1f"|format(eq["closure"]["max"]["x_cg_m"]*1000) }} mm
+(Δ {{ "%+.1f"|format(eq["closure"]["delta"]["x_cg_m"]*1000) }} mm). Not a re-optimization — same aeroplane, heavier parts.</p>
+{% endif %}
+<div class="scroll">
+<table class="parts">
+<tr><th>part</th><th class="num">station (mm)</th><th class="num">g</th><th class="num">max g</th>
+<th>size (mm)</th><th>lane</th><th>requirement</th><th>not checked by this model</th></tr>
+{% for row in eq["rows"] %}<tr>
+<td>{{ row["item"] }}</td>
+<td class="num">{{ row["station_mm"] }}</td>
+<td class="num">{{ row["mass_g"] }}</td>
+<td class="num">{{ row["max_g"] }}</td>
+<td>{{ row["size_mm"] }}</td>
+<td>{{ row["lane"] or row["status"] }}</td>
+<td>{{ row["requirement"] }}</td>
+<td class="caveat">{{ row["not checked here"] }}</td>
+</tr>{% endfor %}
+</table>
+</div>
+<p class="meta">The last column is the part of each requirement this model never
+looked at — antenna geometry, cooling paths, hatch access, orientation. Those
+stay the builder's.</p>
 {% endif %}
 
 {% if r.notes %}

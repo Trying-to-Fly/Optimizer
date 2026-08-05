@@ -61,6 +61,12 @@ class Chip(QLabel):
         colors = {
             "active": ("#1f3a5f", "#8ab4f8"),
             "violated": ("#4a1f1f", "#f28b82"),
+            # Amber: something the reader should look at that is NOT a failure —
+            # a budget the model reports but does not enforce, a price the run
+            # measured but did not adopt. Same reasoning as `.pinned` in the
+            # HTML report: red chips beside real violations would read as real
+            # violations.
+            "advisory": ("#40320f", "#f0c469"),
             "neutral": ("#2a2a2e", "#c8c8cc"),
         }
         bg, fg = colors[kind]
@@ -205,6 +211,51 @@ class DetailView(QScrollArea):
         grid.add("CG", _fmt(masses.get("x_cg_m"), ".4f", " m"))
         self._layout.addWidget(grid)
 
+        # Equipment manifest (MODEL_DETAILS 10) — only for aircraft that carry
+        # one; the block is simply absent otherwise. What is worth a whole
+        # section here is the pair of numbers a lumped mass model could never
+        # show: which mass basis the run was solved on, and what the OTHER basis
+        # does to the balance. "142 minutes" means two different things
+        # depending on whether the parts were the example ones or the heaviest
+        # legal substitutes.
+        eq = masses.get("equipment") or {}
+        if eq and not eq.get("failed"):
+            self._layout.addWidget(_section("equipment"))
+            grid = MetricGrid()
+            est = (eq.get("totals_est") or {}).get("total_kg")
+            mx = (eq.get("totals_max") or {}).get("total_kg")
+            grid.add("airborne parts", str((eq.get("totals_est") or {}).get("n_items", "—")))
+            grid.add("fit / mass basis",
+                     f"{eq.get('fit', '—')} / {eq.get('basis_solved', '—')}", column=1)
+            grid.add("est / max mass",
+                     "—" if est is None or mx is None
+                     else f"{est * 1000:.0f} / {mx * 1000:.0f} g")
+            closure = eq.get("closure") or {}
+            shift = (closure.get("delta") or {}).get("x_cg_m")
+            grid.add("CG shift, est → max",
+                     "—" if shift is None else f"{shift * 1000:+.1f} mm", column=1)
+            self._layout.addWidget(grid)
+
+            tail = eq.get("tail_group") or {}
+            chips = QWidget()
+            row = QHBoxLayout(chips)
+            row.setContentsMargins(0, 6, 0, 0)
+            row.setSpacing(6)
+            if tail.get("total_kg") is not None:
+                over = (tail.get("over_by_kg") or 0) > 0
+                # ADVISORY, not violated. The budget is reported and not
+                # enforced (the printed-surface mass constants are
+                # uncalibrated), so a red chip beside genuinely violated
+                # constraints would claim the run broke a rule it never had.
+                row.addWidget(Chip(
+                    f"tail group {tail['total_kg'] * 1000:.0f} g "
+                    f"of {tail['budget_kg'] * 1000:.0f} g"
+                    + (" — over, advisory" if over else ""),
+                    "advisory" if over else "neutral",
+                ))
+            row.addStretch(1)
+            self._layout.addWidget(_fixed_height(chips))
+
         if summary.active_constraints or summary.violated_constraints:
             self._layout.addWidget(_section("constraints"))
             chips = QWidget()
@@ -229,13 +280,25 @@ class DetailView(QScrollArea):
             self._layout.addWidget(grid)
 
             studies = optimization.get("discrete_studies") or {}
-            if studies:
+            priced = optimization.get("priced_options") or {}
+            if studies or priced:
                 chips = QWidget()
                 row = QHBoxLayout(chips)
                 row.setContentsMargins(0, 6, 0, 0)
                 row.setSpacing(6)
                 for attr, study in studies.items():
                     row.addWidget(Chip(f"{attr}: {study.get('adopted')}", "neutral"))
+                # A PRICED option was measured and deliberately not adopted, so
+                # its chip carries the price rather than a winner — otherwise it
+                # would look like a study that chose the baseline.
+                for attr, study in priced.items():
+                    for cand, entry in (study.get("alternatives") or {}).items():
+                        delta = entry.get("delta_objective")
+                        row.addWidget(Chip(
+                            f"{attr}={cand} priced"
+                            + ("" if delta is None else f" {delta:+.2f}"),
+                            "advisory",
+                        ))
                 row.addStretch(1)
                 self._layout.addWidget(_fixed_height(chips))
 

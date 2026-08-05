@@ -513,14 +513,50 @@ a **streamlined family by construction** — the optimizer sizes the fuselage,
 the family guarantees it looks like one. Nose: elliptical-arc radius growth,
 tangent at the bay shoulder, section shape blending from circular at the tip
 to the bay's rounded rectangle (shape 4). Bay: constant section. Tail:
-cubic-Hermite **boat-tail** (tangent at both the shoulder and the 12 % end
-cap — no straight cone), blending back to circular. Symbolic-safe (floats or
-Opti variables; all station fractions and radius multipliers are plain
-floats), and the NLP reads the loft's **own integrals** (`area_wetted()`,
-`volume()`), so geometry and model cannot drift apart.
+cubic-Hermite **boat-tail** (tangent at both the shoulder and the end cap — no
+straight cone), blending back to circular. Symbolic-safe (floats or Opti
+variables; station fractions are plain floats, but lengths, widths, heights
+**and `r_cap`** may be symbolic), and the NLP reads the loft's **own
+integrals** (`area_wetted()`, `volume()`), so geometry and model cannot drift
+apart.
 
-Sample-aircraft variables: `pod_nose`, `pod_bay`, `pod_tail` (lengths) and
-`pod_xs` (cross-section scale on the spec's 68×88 mm). Anchor: the bay's aft
+**The end cap is the joint it actually is** (2026-08-05). It was a flat 12 % of
+d_eq, which at the 2026-08-05 champion made a 7.4 mm cap for a **12 mm boom** —
+the boom was larger than the socket it plugs into. In pod-boom topology the cap
+IS the boom socket, so `r_cap = boom_od / width`: against the *narrow* section
+dimension, because a round tube passes through the smaller of width and height
+and sizing on d_eq leaves the cap 10.5 mm wide for a 12 mm tube — self-consistent
+in the equivalent-diameter convention while leaving the physical fault in place.
+The integrated topology keeps 0.12 (a tail-block joint, not a socket). Two
+consequences, both intended: the cap is **fully occluded in both topologies by
+construction**, so base drag can only ever arrive through separation (§7.3); and
+at the champion `r_cap` moves 0.12 → 0.222, which lifts wetted area 1.2 % and
+the pod mass 1.2 g **before any drag is charged**.
+
+**The section's SHAPE is a variable, not an inheritance** (2026-08-05).
+`pod_xs` used to scale both dimensions from `POD_XS_SPEC`, so the pod could be
+made bigger but never wider or flatter — the shape came off the spec sheet and
+was never questioned. `pod_wh` is now the width:height ratio, and the two are
+**orthogonal by construction**: `w·h` is the spec product times `pod_xs²`
+whatever the ratio, so `d_eq` depends on `pod_xs` alone. That is deliberate —
+both proportion floors, the fineness ceiling and the whole afterbody term are
+written against `d_eq`, and a ratio that moved it would silently re-scale six
+constraints while claiming to change only shape. `pod_wh = 68/88` is the
+default, so every earlier number is that slice of the new family, exactly.
+
+It stayed locked until the drag model could see shape (a variable the objective
+is blind to is a flat manifold IPOPT handles badly). It no longer is: at fixed
+`d_eq` a superellipse has least perimeter when square, so the loft's own wetted
+area prices eccentricity — and the afterbody term pulls the other way, since
+squaring widens the narrow dimension, shrinks `r_cap` and closes the boat-tail
+harder. **Width is therefore no longer necessarily the narrow dimension**, so
+the boom socket, the bulkhead station and the motor row all read a SMOOTH min of
+width and height (`min` would be a branch on a design-variable value). Limits
+`POD_WH_LIMITS = (0.65, 1.55)`, a model-validity bound in the `fineness_max`
+idiom — see §7.3 for the convention error that sources it.
+
+Sample-aircraft variables: `pod_nose`, `pod_bay`, `pod_tail` (lengths),
+`pod_xs` (equivalent-diameter scale) and `pod_wh` (section ratio). Anchor: the bay's aft
 end is pinned at the wing-saddle joint station (0.410 m); the nose grows
 forward from it, the tail cone aft. Defaults reproduce the spec pod exactly
 (nose tip at station 0, length 585 mm); `dv=None` keeps returning the frozen
@@ -544,7 +580,39 @@ constraints:
 - proportion floors (nose ≥ 1.0 d_eq, pod-boom boat-tail ≥ 1.8 d_eq): the
   flat-plate + form-factor model cannot rank end-cap *shape quality*, so
   plane-like proportions are imposed as geometry, not hoped for (the spec
-  pod's 30 mm nose predates these — the `dv=None` fixture is exempt);
+  pod's 30 mm nose predates these — the `dv=None` fixture is exempt). **The
+  1.8 d_eq boat-tail floor is now a proxy for physics the model HAS** (§7.3) and
+  is kept for one battery, then deleted as a measured no-op once `active_bounds`
+  shows it inactive — or revisited, if it is still pinned;
+- **the motor has to fit inside the nose** (puller; 2026-08-05). Nothing checked
+  this until then, and the optimizer had been shrinking the pod section for
+  runs: the 2026-08-05 champion's nose offers **25.8 mm of can-width room for a
+  51 mm can**. The loft is the outer mould line — pod plus the nosecone that
+  completes it — so this asserts nothing about *how* the motor is mounted, only
+  that the cylinder fits inside that outline, ahead of the bay (whose contents
+  are packed by the rows above, so a motor borrowing bay length would be counted
+  in neither place). The nose arc inverts in closed form, so it costs one sqrt
+  and no station search: the interior first clears the can at
+  `t = 1 − √(1 − r_req²)` with `r_req = (motor_od + 2·wall)/width`, leaving
+  `pod_nose·√(1 − r_req²)` of usable nose behind it, and that must be ≥ the can
+  length. Motor size is a `COMPONENT_ENVELOPES` entry (42 × 51 mm, D3548 can)
+  like every other envelope — swap the motor and one dict entry changes.
+
+  **The nosecone is named, and its station is derived** (`nose_split`). The loft
+  runs to a 0.1 mm point because it is the outer mould line; what gets built is a
+  pod whose front is a bulkhead with a circular hole, plus a separate printed
+  fairing over the motor. The split is the motor-fit arithmetic read backwards —
+  the nose section grows aft, so there is exactly one station where the interior
+  first clears the can, and forward of it the body is too narrow to hold the
+  motor. That station is the bulkhead; everything ahead of it is nosecone. It is
+  the *forward-most* valid bulkhead, which is both what a puller is built to and
+  the position the constraint is written against. At the 2026-08-05 champion:
+  **36 mm of nosecone, a 49 × 63 mm bulkhead with a 42 mm opening, 26 mm of motor
+  bay for a 51 mm can.** No mass appears or disappears — the pod mass model
+  integrates the whole loft's wetted area, so the fairing is already paid for.
+  Reported in the CAD brief and on the manufacturing sheet, which previously
+  listed a pod, a boom and two spars and no fairing at all;
+- **fineness ceiling** `L / d_eq ≤ 8` (pod-boom only, §7.3);
 - pod-boom: an exposed boom must exist (pod tail cap + 100 mm ≤ tail block);
 - **wing-saddle carry-through (no floating wing)**: the constant-section bay
   must physically carry the wing root — bay start ≤ LE − 10 mm and bay end ≥
@@ -566,11 +634,115 @@ the spec pod reproduces its frozen 1.25 — slenderness becomes a real trade on
 a preserved baseline. The Munk destabilizing dCm/dα (§3.4) now takes the
 loft's symbolic volume inside the NLP.
 
+**The motor's station is geometry, not a literal** (2026-08-05). A puller's
+motor rides at the can's mid-length behind the bulkhead `nose_split` derives —
+the same arithmetic as the packaging row, so the mass model and the constraint
+cannot disagree about where the motor is. It was a flat `nose_tip + 0.02`,
+written when the pod was a frozen 585 mm prism and left in place when the pod
+became a loft the optimizer shrinks: by 2026-08-05 that put a 42 mm motor at a
+station where the champion's pod is **39.9 mm wide.** The correction moves the
+can's CG **41 mm aft**, worth ~4 mm of aircraft CG on a 190 g motor+prop group —
+on a design whose `x_battery` is pinned at its aft limit with SM exactly on its
+floor, i.e. in the direction it has been starved of. Mass is unchanged.
+
 Mass: pod = k_skin × S_wet + overhead (1.465 kg/m² + 50 g), calibrated to
 reproduce the frozen 250 g at the spec loft — same uncalibrated-ballpark
 caveat as the wing construction profile (§1.4). ESC/FC stations ride the loft
 as length fractions of the spec layout; ballast rides the (possibly
 stretched) nose tip.
+
+#### Afterbody separation and base drag (2026-08-05)
+
+Until this, the complete information path from fuselage geometry to the
+objective was **four numbers per body** — wetted area, length, fineness,
+volume — so any two fuselages agreeing on those four were identical to the
+optimizer, to the last digit. A well-faired body and a badly separated one of
+equal wetted area, length, equivalent diameter and volume scored the same. The
+2026-08-05 champion was exploiting exactly that: a **20.1° closure half-angle**
+through the middle of its boat-tail against a 12–15° separation onset, charged
+nothing, with `pod_tail` sitting exactly on the `1.8 d_eq` floor that stood in
+for the missing physics.
+
+**One mechanism covers both boat-tail separation and base drag** (user decision,
+2026-08-05): the station where the local closure angle first exceeds the
+threshold defines an **enlarged effective base**, and unrecovered base pressure
+is charged on that area. Closed form for this Hermite family, so it needs no
+geometry query, no quadrature and no new design variable — with
+`r(u) = 1 − (1−r_cap)(3u² − 2u³)`, `R(u) = (d_eq/2)·r(u)` and `x = tail_len·u`:
+
+    tan θ_max = 1.5 · (d_eq/2) · (1 − r_cap) / tail_len          (at u = ½)
+    4u(1−u) = ρ ≡ tan θ_sep / tan θ_max
+    u*      = (1 − √(1 − ρ)) / 2                first crossing, rising side
+    A_charged = (π/4)·d_eq²·(r(u*)² − r_cap²)   effective base, cap occluded
+    D/q       = CD_BASE · λ · A_charged
+
+The **onset ramp** `λ = h²/(h² + RAMP²)`, `h = ⌊tan θ_max − tan θ_sep⌋`, is the
+non-obvious part: at onset `u* → ½`, where the radius fraction is ~0.6 and *not*
+`r_cap`, so an unramped charge would jump from zero to most of the
+cross-section the instant the threshold was crossed. Physically, separation near
+onset is weak and intermittent; numerically, a step in a quantity the objective
+reads is what an interior-point method cannot walk across.
+
+Constants — all three **declared, uncalibrated, adjustable data** in the same
+idiom as `MOUNT_EFFECTS` and the 1.08 excrescence factor, and all in
+`fuselage.py` because they are family physics rather than aircraft choices:
+
+| | | |
+| --- | --- | --- |
+| `THETA_SEP_DEG` | 12° | conservative end of the 12–15° axisymmetric-afterbody band — conservative meaning it charges *sooner* |
+| `CD_BASE` | 0.159 | AeroSandbox 4.2.10's `fuselage_base_drag_coefficient` at M → 0 (MIL-HDBK-762 Fig 5-140), so the planned numeric cross-check compares like with like |
+| `RAMP_EXCESS_DEG` | 3° | ramp width, held in tangent so "3° of excess" survives an edit to `THETA_SEP_DEG` |
+
+Applying a **blunt**-base coefficient to a separated-boattail effective base is
+standard Hoerner-style bookkeeping, not a calibration — nothing here has been
+measured, and the label matters more than the digits.
+
+All angles use the **d_eq-equivalent axisymmetric convention**: the section is
+68 × 88, so the vertical-plane closure is ~14 % steeper in tangent than
+reported, and the correlations being borrowed are axisymmetric. The
+understatement is stated rather than corrected.
+
+The ratio **was** unlocked, the same day (`pod_wh`, §7.1), and this is what
+bounds it: the understatement is `sqrt(max(w/h, h/w))` in tangent — 14 % at the
+spec's 68 × 88 and **24 % at `POD_WH_LIMITS = (0.65, 1.55)`**, which is where
+the borrowed axisymmetric correlations, and the Munk term's
+slender-body-of-revolution assumption, stop describing the section that was
+built. A section-aware closure angle would replace the bound with physics; that
+is not this change.
+
+The term reaches the buildup as an **additive drag area** (`base_drag_area_m2`,
+D/q in m², constant with V at this Re and Mach) that `aero.body_cd0` adds
+**outside** the 1.08 excrescence factor — that factor pays for saddle steps,
+hatch lips and wires on a wetted surface and has nothing to say about a base.
+A body without the key contributes exactly zero, which is what keeps every
+frozen `dv=None` fixture bit-identical.
+
+**The fineness ceiling ships with it, and has to.** The Hoerner form factor is a
+function of fineness alone and bottoms out at f = 16.38; give the model a reason
+to lengthen the boat-tail and no fineness limit, and the exploit does not
+disappear, it moves from the tail cone to the whole pod. `fineness_max = 8.0`,
+declared on the aircraft beside `lift_to_drag_max` and in the same idiom — **a
+solve landing ON it is a defect report, not an optimum.** Sourcing: Hoerner puts
+the real minimum-drag band for a body of revolution at f ≈ 6–7; measured on the
+formula, this pod's fixed-volume stretch keeps paying until f ≈ 9. So 8 sits
+above the physical band and the champion's 6.20, and below the artefact.
+**pod-boom only**: the integrated body runs to the tail block, so its length is
+set by `tail_arm` and it sits at f = 14.7 at the declared defaults — imposing
+f ≤ 8 there would not bound that candidate, it would delete it, and a priced
+alternative in the topology study would quietly become a garbage design that
+still converged. The needle exploit therefore remains open for `integrated`; the
+champion diagnostics report fineness for both topologies so a run that finds it
+says so.
+
+At the 2026-08-05 champion the term charges **2.97e-4 m² of drag area — +34 % on
+body drag, +2.0 % on total drag at 9.5 m/s**, roughly four times the +8 % the
+scoping hinge suggested, because the effective-base form charges the area at the
+*separation station*, which at 18° is most of the cross-section. That is the
+model being honest about a separated afterbody, and it means the optimizer's
+response will be decisive rather than marginal. `run.json` records
+`diagnostics.afterbody` (θ_max, u*, λ, charged area, share of body drag,
+fineness), computed numerically at the champion point rather than read off the
+NLP graph, and the report renders it.
 
 The **boom is an outcome, not a constant**: it spans the pod's tail cap to
 the tail block (station from `tail_arm`), so its mass (linear density × that
@@ -819,7 +991,7 @@ sine-clustered toward the tip, where a superellipse does all its curving.
 
 Station count is a **fidelity knob that costs RAM**: each station becomes an
 `asb.WingXSec` that LiftingLine subdivides again, and one solve already peaks
-near 13 GB (§`memory.py`). v4 is deliberately held at four panels / five
+near 14.5 GB (§`memory.py`). v4 is deliberately held at four panels / five
 stations, so it buys a smooth planform, a free joint station and an optional
 kink **without growing the CasADi graph at all**.
 
@@ -836,3 +1008,101 @@ lateral-stability floor, which a uniform angle meets most cheaply. A mild
 two-panel polyhedral should therefore land on the same uniform answer. The
 result worth watching is the **hard-canted** one, where the mechanism is
 induced drag at the span cap rather than dihedral distribution.
+
+---
+
+## 10. Equipment manifest — the parts list as a model
+
+Added 2026-08-05. Mechanism in `planeopt.equipment`; the first aircraft to carry
+one is `aircraft/vtail_rcv2` (the RC v2 electronics BOM). Design record and the
+decisions behind it: `docs/EQUIPMENT_PLAN.md`.
+
+### 10.1 What it replaces
+
+Equipment used to be a handful of lumped point masses at literal stations
+(`esc_wiring` at 0.3932 of the pod length, `hardware_misc` at a flat 0.450 m).
+Those fractions were read off the frozen 585 mm pod and never moved again, so
+once §7 made the loft parametric they described a fuselage that no longer
+existed — and `run.json` recorded `{name: mass}` only, so **no artifact this
+project ever wrote said where anything went**, even though a `PointMass` is a
+(mass, station) pair and the CG is computed from it.
+
+Both are fixed. `masses.components` now carries mass **and station** for every
+component of every aircraft, and an aircraft may additionally declare a manifest.
+
+### 10.2 The four types
+
+- **`Item`** — one BOM line: mass on two bases (`est`, `max`), installed
+  envelope, lane, fore-to-aft `order`, an optional `rides` host, `fitted` /
+  `airborne` flags, the requirement verbatim, and `unenforced`.
+- **`Lane`** — a 1-D corridor with symbolic ends and an optional section. Items
+  pack along it in declared order with declared end and neighbour margins.
+- **`Separation`** — a required fore/aft distance in a **declared direction**.
+  Direction is declared, not derived, because the alternative is
+  `abs(x_a − x_b)`: not differentiable at zero, and a kink in the middle of the
+  feasible set. Which part is forward of which is a build fact the layout knows.
+- **`SectionStack`** — lanes that coexist at the same stations, so their widths
+  (or heights) **add** across the section. Within a lane items never share a
+  station and the section only has to admit the widest; across lanes there is no
+  such guarantee. This is the row that ties a parts list to `pod_xs`/`pod_wh`.
+
+Symbolic-safe (§4): lane bounds and stations may be design expressions; item
+sizes and masses are declared floats, so every `max()` is a plain max over data
+and never a branch on a design-variable value.
+
+### 10.3 Placement is a design variable
+
+One bounded station variable per placed item, keyed `x_<name>`, declared in the
+aircraft's `design_variables` like anything else — which is why placements reach
+`run.json`, `active_bounds` and the live viewer for free. The box is a wide
+NUMERIC backstop; the real bounds are the symbolic lane rows, exactly as
+`x_battery`'s always were. An aeroplane that already had `x_battery` keeps it and
+simply gains a battery *item* that reads it.
+
+Items with no genuine freedom do **not** get variables: a card rides its reader
+(`rides`), and a servo in a wing pocket, a motor on its mount and a cable run's
+centroid come from the aircraft's `derived_stations`. Inventing freedom an
+aeroplane does not have is not the same as giving the optimizer freedom it does.
+
+**Whether the freedom pays is a measurement, not a claim.** Station reaches the
+objective only through nose ballast (the SM floor binds, `ballast_kg` is free),
+so the gradient is small — signed and real, but small. Every placement variable
+that ends pinned at a lane end is named in `active_bounds`. If they all pin, the
+lanes collapse to derived forward-packing and the variables go, on the same
+"kept for one battery, then deleted as a measured no-op" terms as the 1.8 d_eq
+boat-tail floor (§7.2).
+
+### 10.4 Two mass bases, and which one is solved
+
+`est` is the example part; `max` is the heaviest acceptable substitute. They are
+different aircraft and the artifact says which was solved. `vtail_rcv2` solves
+`max` (user decision), so every number it reports is the worst legal build, and
+`masses.equipment.closure` recomputes AUW and CG on the other basis **at fixed
+placement** — a substitution, not a re-optimization, and labelled as such,
+because a re-solve would move the wing and the ballast to absorb it.
+
+### 10.5 What is deliberately not modelled
+
+**3-D packing.** Deciding whether two items overlap in x would be a branch on
+design-variable values. The lane/stack split is the model: within a lane, order
+is declared and overlap impossible; across lanes, coexistence is declared and
+sections add.
+
+**Everything that is not a function of a station** — antenna geometry, RF
+transparency, cooling paths, hatch access, board orientation. These are carried
+verbatim per item in `unenforced` and printed in a column headed *not checked by
+this model*, in the report and in the placement CSV. A model that silently
+dropped them would be claiming to have checked something it never looked at.
+
+### 10.6 `priced_options` — measured, never adopted
+
+`discrete_options` (§6.3) adopts whatever wins, which is right when the objective
+can see everything at stake. It is wrong when the alternative gives up something
+the model has no term for: dropping the companion computer, the airspeed sensor
+and the telemetry radio makes a strictly lighter and therefore strictly "better"
+aeroplane, and would be adopted and reported as an improvement.
+
+`priced_options` runs the same paired re-optimization and records the delta
+without ever moving the champion. Same posture `span_cap_m` takes toward the
+print bed: the model measures, the user decides. It runs after the adopting
+studies, so the price is quoted against the design actually being shipped.

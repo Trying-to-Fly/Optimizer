@@ -46,8 +46,11 @@ FILENAME = "_queue.json"
 #: job has not produced one: a job with a run directory is DONE, which is not a
 #: state this file keeps.
 _REQUIRED_PATHS = ("mission", "aircraft", "runs_dir")
-_OPTIONAL_PATHS = ("checkpoint_dir", "pause_file")
-_PLAIN = ("optimize", "multistart", "flatness", "memory_budget_gb", "solve_timeout_min")
+_OPTIONAL_PATHS = ("checkpoint_dir", "pause_file", "live_dir")
+_PLAIN = (
+    "optimize", "multistart", "flatness", "memory_budget_gb", "solve_timeout_min",
+    "timelapse_view",
+)
 
 RESTORABLE = (JobState.QUEUED, JobState.RUNNING, JobState.PAUSED)
 

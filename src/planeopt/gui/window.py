@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import __version__
+from .. import __version__, liveframe
 from . import queuestore, runindex
 from .jobs import Job, JobState
 from .newrun import NewRunDialog
@@ -56,7 +56,7 @@ PAUSE_LABEL = "Pause running job"
 PAUSE_TIP = (
     "Stop after the member solve currently in flight, keeping everything "
     "finished so far and freeing the memory. It is not instant: a solve in "
-    "progress holds ~13 GB of solver state that cannot be saved, so the wait "
+    "progress holds ~14.5 GB of solver state that cannot be saved, so the wait "
     "is up to one member."
 )
 RESUME_LABEL = "Resume paused job"
@@ -64,6 +64,18 @@ RESUME_TIP = (
     "Continue this job from its checkpoint directory. Members already solved "
     "are read from disk rather than re-solved, and the run picks up at the one "
     "it stopped before."
+)
+
+LIVE_LABEL = "Live view"
+LIVE_TIP = (
+    "Watch the aeroplane the optimizer is shaping: geometry every IPOPT "
+    "iteration, and a fully coloured, annotated frame every time a member "
+    "converges. Opens by itself when a run starts; closing it never touches "
+    "the run. For a finished run it replays what that run recorded."
+)
+LIVE_TIP_UNAVAILABLE = (
+    "Nothing to show: no run is going, and the selected run has no frames/ "
+    "directory (it was made before live frames existed, or with --live-dir off)."
 )
 
 STYLE = """
@@ -140,10 +152,16 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"planeopt {__version__}")
         self.resize(1180, 760)
 
+        #: The single live-view popup, created the first time one is wanted and
+        #: then RETARGETED at each run. Re-creating it would throw away the
+        #: camera, the zoom and the chosen scalar every time a member finished.
+        self.liveview = None
+
         self.queue = RunQueue(self)
         self.queue.queue_changed.connect(self._refresh_queue)
         self.queue.queue_changed.connect(self._save_queue)
         self.queue.job_output.connect(self._on_output)
+        self.queue.job_started.connect(self._on_job_started)
         self.queue.job_finished.connect(self._on_job_finished)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -252,9 +270,17 @@ class MainWindow(QMainWindow):
         log_layout = QVBoxLayout(log_panel)
         log_layout.setContentsMargins(12, 6, 12, 12)
         log_layout.setSpacing(6)
+        log_header = QHBoxLayout()
         self.log_label = QLabel("Progress")
         self.log_label.setStyleSheet("font-size:11px; color:#9a9aa0; font-weight:600;")
-        log_layout.addWidget(self.log_label)
+        log_header.addWidget(self.log_label)
+        log_header.addStretch(1)
+        # Beside the progress log rather than next to New run: it belongs to the
+        # run that is going, which is what this half of the window is about.
+        self.live_button = QPushButton(LIVE_LABEL)
+        self.live_button.clicked.connect(self.open_live_view)
+        log_header.addWidget(self.live_button)
+        log_layout.addLayout(log_header)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(2000)
@@ -368,7 +394,64 @@ class MainWindow(QMainWindow):
         paths = {i.data(0, Qt.UserRole) for i in self.run_tree.selectedItems()}
         return [s for s in self.summaries if str(s.path) in paths]
 
+    # --- live view ---------------------------------------------------------
+
+    def _live_source(self) -> tuple[Path, Path | None, bool] | None:
+        """Where the live view should look: (directory, run_dir, is_live).
+
+        A running job wins over the selected run — when a solve is going, that
+        is what "live view" means. Otherwise a finished run replays its own
+        `frames/`, which is where `liveframe.relocate` put them.
+        """
+        running = self.queue.running
+        if running is not None and running.live_dir:
+            return Path(running.live_dir), running.run_dir, True
+        selected = self._selected_summaries()
+        if len(selected) == 1 and (selected[0].path / "frames").is_dir():
+            return selected[0].path / "frames", selected[0].path, False
+        return None
+
+    def _update_live_button(self) -> None:
+        source = self._live_source()
+        self.live_button.setEnabled(source is not None)
+        self.live_button.setToolTip(LIVE_TIP if source else LIVE_TIP_UNAVAILABLE)
+
+    def open_live_view(self) -> None:
+        source = self._live_source()
+        if source is None:
+            return
+        self._show_live(*source)
+
+    def _show_live(self, directory: Path, run_dir: Path | None, live: bool) -> None:
+        try:
+            from .liveview import LiveViewWindow
+        except ImportError as e:  # a Qt build without QtWidgets is not a crash
+            self._log_line(f"-- live view unavailable: {e} --")
+            return
+        if self.liveview is None:
+            self.liveview = LiveViewWindow(self)
+        self.liveview.watch(directory, run_dir, live=live)
+        self.liveview.show()
+        self.liveview.raise_()
+
+    def _on_job_started(self, job: Job) -> None:
+        """Open the viewer on the run that just started.
+
+        Unasked, because the reason to watch a solve is to catch it doing
+        something wrong, and nobody opens a window for that in advance. Closing
+        it does not stop anything and the button above reopens it.
+        """
+        if job.live_dir:
+            # The chosen timelapse camera is recorded BEFORE the first frame
+            # exists, so a run whose viewer is never opened still renders in the
+            # view that was asked for. `write_view` creates the directory.
+            if job.timelapse_view:
+                liveframe.write_view(job.live_dir, {"view": job.timelapse_view})
+            self._show_live(Path(job.live_dir), job.run_dir, live=True)
+        self._update_live_button()
+
     def _on_selection(self) -> None:
+        self._update_live_button()
         selected = self._selected_summaries()
         if len(selected) == 1:
             self.detail.show_run(selected[0])
@@ -455,6 +538,7 @@ class MainWindow(QMainWindow):
         self._on_queue_selection()
 
     def _on_queue_selection(self) -> None:
+        self._update_live_button()
         job = self._selected_job()
         self.cancel_button.setEnabled(
             job is not None and job.state in (JobState.QUEUED, JobState.RUNNING)
@@ -504,6 +588,15 @@ class MainWindow(QMainWindow):
 
     def _on_job_finished(self, job: Job) -> None:
         self._log_line(f"— {job.title}: {job.state.value}")
+        if self.liveview is not None:
+            # The frames have just moved from the live directory into
+            # <run_dir>/frames/ (liveframe.relocate), so hand the window the new
+            # location instead of leaving it polling a directory that is gone.
+            # A PAUSED job's frames stay put and stay scrubbable.
+            if job.state is JobState.DONE and job.run_dir:
+                self._show_live(Path(job.run_dir) / "frames", job.run_dir, live=False)
+            else:
+                self.liveview.stop_following()
         if job.state is JobState.FAILED:
             self.statusBar().showMessage(f"{job.title} failed (exit {job.exit_code})", 10000)
         elif job.state is JobState.PAUSED:
@@ -546,6 +639,10 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.queue.shutdown()
+        if self.liveview is not None:
+            # A top-level window is not a child for closing purposes, so without
+            # this the app keeps an event loop alive on an orphaned popup.
+            self.liveview.close()
         super().closeEvent(event)
 
 

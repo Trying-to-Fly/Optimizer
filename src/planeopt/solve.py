@@ -102,6 +102,13 @@ class _SolveCache:
         self.fingerprint = fingerprint
         self.dir = self.root / fingerprint
         self.dir.mkdir(parents=True, exist_ok=True)
+        #: Members served from disk this run, per phase label. A fully resumed
+        #: phase otherwise reports 0.0 minutes and reads as a phase that was
+        #: SKIPPED — which is how the 2026-08-05 run's multistart and flatness
+        #: sweep looked in the artifact, when in fact both had been solved in
+        #: full the evening before. The distinction matters to anyone deciding
+        #: whether a "fresh" battery actually re-searched anything.
+        self.resumed: dict[str, int] = {}
         self._report_supersession()
 
     def _report_supersession(self) -> None:
@@ -138,10 +145,12 @@ class _SolveCache:
         try:
             import json
 
-            return json.loads(path.read_text(encoding="utf-8"))
+            entry = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001 — a corrupt entry just means "re-solve"
             log.warning("checkpoint %s is unreadable; re-solving that member", path.name)
             return None
+        self.resumed[label] = self.resumed.get(label, 0) + 1
+        return entry
 
     def put(self, label: str, key, result: dict) -> None:
         import json
@@ -398,6 +407,59 @@ def _failed_entry(r: dict) -> dict:
     return {k: r[k] for k in _FAILURE_FIELDS if k in r}
 
 
+def v_min_price(airworthy: list[dict], best: dict, v_min_ms: float, sign: int) -> dict | None:
+    """What the minimum-speed requirement is costing, or None if it costs nothing.
+
+    `airworthy` is every trimmed sweep point that clears stall, the advance-ratio
+    cap and the deflection limit — i.e. legal but for `v_min`. If the best of
+    those is slower than `v_min`, the requirement is what is holding the
+    objective back and the difference is its price.
+
+    Pure arithmetic over the sweep so it is testable without an aero run.
+    """
+    if not airworthy:
+        return None
+    unconstrained = max(airworthy, key=lambda s: sign * s.get("objective_value", -np.inf))
+    if unconstrained["V_ms"] >= v_min_ms - 1e-9:
+        return None
+    a, b = unconstrained.get("objective_value"), best.get("objective_value")
+    return {
+        "unconstrained_best_V_ms": unconstrained["V_ms"],
+        "unconstrained_objective": a,
+        "objective_at_v_min": b,
+        "cost_of_v_min": None if a is None or b is None else abs(a - b),
+    }
+
+
+def sm_sign_flip(sm: dict) -> dict | None:
+    """The worst locally-UNSTABLE alpha inside a positive margin's own window.
+
+    `aero.static_margin` reports a least-squares slope over `SM_ALPHA_OFFSETS`
+    and returns the per-alpha local slopes alongside it. A regression through
+    points whose slope changes sign returns a confident positive margin for an
+    aeroplane that is not positively stable at its own trim point. Returns the
+    most negative local slope when that has happened, else None.
+    """
+    if sm.get("static_margin") is None or sm["static_margin"] <= 0:
+        return None
+    negative = [
+        p for p in (sm.get("sm_local_slopes") or [])
+        if p.get("sm_local") is not None and p["sm_local"] < 0
+    ]
+    return min(negative, key=lambda p: p["sm_local"]) if negative else None
+
+
+def _is_trim_failure(e: BaseException) -> bool:
+    """Did this sweep point drop out because TRIM would not converge?
+
+    `aero.trim` is the only thing that raises with this prefix, and it does so
+    after exhausting a seeded start plus five spread starts — so the message is
+    about the root-find, not about the aeroplane. Matching on the prefix keeps
+    the classification at the one place that owns the wording.
+    """
+    return str(e).startswith("trim failed at V=")
+
+
 def run(
     aircraft: AircraftDefinition,
     mission: MissionSpec,
@@ -429,6 +491,21 @@ def run(
     auw, x_cg = mass_totals["auw_kg"], mass_totals["x_cg_m"]
     weight_n = auw * G
 
+    # Optional hook: an aircraft that carries a per-part equipment manifest
+    # (planeopt.equipment) reports it here — placements, group totals, the
+    # requirements this model does not check, and the max-weight closure check.
+    # Aircraft without the hook are unaffected; the block is simply absent.
+    equipment_block = None
+    eq_hook = getattr(aircraft, "equipment_report", None)
+    if eq_hook is not None:
+        try:
+            eq_names = {e.name for e in aircraft.fixed_equipment(dv)}
+            other = [c for c in components if c.name not in eq_names]
+            equipment_block = eq_hook(dv, other=other)
+        except Exception as e:  # noqa: BLE001 — reporting must never sink a run
+            equipment_block = {"failed": f"{type(e).__name__}: {e}"[:200]}
+            log.warning("equipment report failed: %s", equipment_block["failed"])
+
     # --- speed sweep: trim + power at each V ---
     # Continuation: each point seeds the next. Trim is a stiff root-find, and a
     # fixed starting guess only works while the sweep stays near it — marching
@@ -447,8 +524,19 @@ def run(
             guess = (t["alpha_deg"], t["deflection_deg"])
             p = propulsion.solve(float(V), t["drag_n"], pt)
         except (RuntimeError, ValueError) as e:
-            log.debug("V = %.1f m/s infeasible: %s", float(V), e)
-            sweep.append({"V_ms": float(V), "infeasible": str(e)})
+            # `infeasible` stays the key every consumer excludes on, but WHY a
+            # point dropped out is not one question. A propulsion chain that
+            # cannot close at this speed is a statement about the aeroplane; a
+            # 2-D root-find that ran out of progress from six different starts
+            # is a statement about the SOLVER, and recording the second as
+            # "infeasible" claims something the run did not establish. The
+            # 2026-08-05 artifact reported V = 8.0 m/s infeasible on the
+            # strength of "the iteration is not making good progress" — a
+            # message about IPOPT's step, at a speed only 0.28 m/s above the
+            # computed stall, where a trimmed solution may well exist.
+            cause = "trim_not_converged" if _is_trim_failure(e) else "propulsion"
+            log.debug("V = %.1f m/s dropped (%s): %s", float(V), cause, e)
+            sweep.append({"V_ms": float(V), "infeasible": str(e), "cause": cause})
             continue
         point = {**t, **p}
         if objective.evaluator is not None:
@@ -471,14 +559,15 @@ def run(
     defl_cap = getattr(aircraft, "trim_deflection_limit_deg", None)
     if callable(defl_cap):
         defl_cap = float(defl_cap(dv))
-    legal = [
-        s
-        for s in feasible
-        if s["V_ms"] >= mission.v_min_ms - 1e-9
-        and s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6
-        and s["J"] <= j_cap + 1e-6
-        and (defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3)
-    ]
+    def _legal_but_for_v_min(s: dict) -> bool:
+        return (
+            s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6
+            and s["J"] <= j_cap + 1e-6
+            and (defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3)
+        )
+
+    airworthy = [s for s in feasible if _legal_but_for_v_min(s)]
+    legal = [s for s in airworthy if s["V_ms"] >= mission.v_min_ms - 1e-9]
     candidates = legal if legal else feasible
     if not candidates:
         # Every point failed to trim or to close the propulsion chain. Report the
@@ -504,6 +593,32 @@ def run(
         airplane, best["V_ms"], x_cg, airplane.c_ref, alpha0=best["alpha_deg"], bodies=bodies
     )
 
+    # --- what the headline number is actually limited BY ---------------------
+    # A reported optimum sitting on `v_min` is not the same claim as one sitting
+    # at an interior peak, and the artifact could not tell them apart: on
+    # 2026-08-05 the champion read 142.09 min at 9.5 m/s while the sweep's own
+    # peak was 143.01 min at 9.0, excluded by the minimum-speed requirement.
+    # Nothing was wrong — but "the best this aeroplane can do" and "the best it
+    # may do at or above 9.5 m/s" are different sentences, and only the second
+    # was true. Priced here so the requirement can be argued with.
+    vmin_price = v_min_price(airworthy, best, mission.v_min_ms, sign)
+
+    # --- sweep points that dropped out, and on whose authority ---------------
+    dropped = [s for s in sweep if "infeasible" in s]
+    unproven = [s for s in dropped if s.get("cause") == "trim_not_converged"]
+
+    # --- does the static margin keep its sign across the window it is read on?
+    # The reported SM is a REGRESSION over SM_ALPHA_OFFSETS (aero.static_margin).
+    # A regression through points whose local slope changes sign returns a
+    # confident positive number for an aeroplane that is not positively stable
+    # AT ITS OWN TRIM POINT — which is the 2026-08-05 champion: SM 0.0800 on its
+    # floor, local slopes +0.187, +0.138, then -0.022 at the trim alpha. That is
+    # a known fidelity limit of this SM model (FINDINGS — the dominant one), but
+    # a known limit that nothing announces is indistinguishable from a clean
+    # result to everyone downstream of it.
+    worst_unstable = sm_sign_flip(sm)
+    sm_sign_consistent = worst_unstable is None
+
     result = RunResult(
         aircraft=aircraft.name,
         mission=mission.name,
@@ -512,7 +627,19 @@ def run(
         created=datetime.datetime.now().isoformat(timespec="seconds"),
         geometry=geometry.summarize(airplane),
         masses={
-            "components": {c.name: round(float(c.mass_kg), 4) for c in components},
+            # Mass AND station. The station was always in the model — a PointMass
+            # is a (mass, station) pair and the CG is computed from it — and until
+            # 2026-08-05 the artifact threw half of it away, so "where does the
+            # receiver go" had no answer anywhere in a run directory even though
+            # the solver had one. Millimetres because that is the unit a builder
+            # measures in and the unit the source BOMs are written in.
+            "components": {
+                c.name: {
+                    "mass_kg": round(float(c.mass_kg), 4),
+                    "station_mm": round(float(c.x_m) * 1000, 1),
+                }
+                for c in components
+            },
             "printed_breakdown": {
                 k: {kk: (round(vv, 4) if isinstance(vv, float) else vv) for kk, vv in v.items()}
                 for k, v in printed_breakdown.items()
@@ -520,6 +647,7 @@ def run(
             "auw_kg": float(auw),
             "x_cg_m": float(x_cg),
             "wing_loading_g_dm2": float(auw * 1000 / (airplane.s_ref * 100)),
+            "equipment": equipment_block,
         },
         performance={
             "objective_units": objective.units,
@@ -556,9 +684,14 @@ def run(
                 <= mission.static_margin_range[1] + SM_ACTIVE_TOL
             ),
             "trim_deflection_deg": best["deflection_deg"],
+            # Renders as pass/FAIL beside the other constraint checks: a margin
+            # that changes sign inside its own window is not a passing margin.
+            "sm_sign_consistent": sm_sign_consistent,
         },
         diagnostics={
             "wind_mode": objective.wind_mode,
+            # None when v_min is not what is holding the objective back.
+            "v_min_price": vmin_price,
             "stall_detail": stall,
             "neutral_point_m": sm["x_np_m"],
             "sm_local_slopes": sm.get("sm_local_slopes"),
@@ -566,6 +699,13 @@ def run(
             "uncalibrated_construction": [
                 k for k, v in printed_breakdown.items() if not v["calibrated"]
             ],
+            "sweep_dropped": {
+                "total": len(dropped),
+                "trim_not_converged": [s["V_ms"] for s in unproven],
+                "propulsion": [
+                    s["V_ms"] for s in dropped if s.get("cause") == "propulsion"
+                ],
+            },
         },
         notes=[
             "Stall via wing-level CLmax knockdown; critical-section method arrives at M2/M3.",
@@ -573,6 +713,43 @@ def run(
             "Propulsion chain is uncalibrated (no measurement path) — rankings over absolutes.",
         ],
     )
+
+    if vmin_price is not None:
+        cost = vmin_price["cost_of_v_min"]
+        result.notes.append(
+            f"THE OBJECTIVE IS LIMITED BY v_min, NOT BY THE AIRFRAME: the best "
+            f"legal point is {best['V_ms']:.2f} m/s, and the sweep's own optimum "
+            f"is {vmin_price['unconstrained_best_V_ms']:.2f} m/s"
+            + (f", worth {cost:.2f} {objective.units} more" if cost is not None else "")
+            + f". Relaxing the {mission.v_min_ms:.2f} m/s minimum-speed "
+            "requirement, not the aircraft, is what buys that back."
+        )
+    if unproven:
+        speeds = ", ".join(f"{s['V_ms']:.1f}" for s in unproven)
+        result.notes.append(
+            f"NOT PROVEN INFEASIBLE — trim did not converge at V = {speeds} m/s "
+            "(the 2-D root-find ran out of progress from every start it was "
+            "given). These points are excluded from the sweep because there is "
+            "no operating point to report, not because none exists; read them as "
+            "unknown rather than as a limit of the aeroplane."
+        )
+    if not sm_sign_consistent:
+        worst = worst_unstable
+        log.warning(
+            "static margin changes sign inside its own regression window: "
+            "reported %.4f, but the local slope at alpha = %.2f deg is %.4f",
+            sm["static_margin"], worst["alpha"], worst["sm_local"],
+        )
+        result.notes.append(
+            f"STATIC MARGIN CHANGES SIGN INSIDE ITS OWN WINDOW: the reported "
+            f"{sm['static_margin']:.4f} is a least-squares slope over "
+            f"{list(aero.SM_ALPHA_OFFSETS)} deg about trim, but the LOCAL "
+            f"dCm/dCL at alpha = {worst['alpha']:.2f} deg is "
+            f"{worst['sm_local']:+.4f} — the aircraft is not positively stable "
+            "there on this model. Cm(alpha) nonlinearity is the known dominant "
+            "fidelity limit of this SM estimator (FINDINGS); treat the margin as "
+            "an average, and do not fly the CG on the strength of it alone."
+        )
 
     run_dir = assemble.write_run_dir(result, runs_root, input_files or [])
     log.info("writing artifacts to %s", run_dir)
@@ -653,6 +830,88 @@ WARM_START_OPTIONS = {
 }
 
 
+#: What IPOPT's own iteration log is read for, and what those numbers are called
+#: in the frame. All of it comes from `opti.debug.stats()` INSIDE the callback,
+#: which is a dict lookup — no CasADi function is built and the ~14.5 GB graph
+#: is never touched. Measured at 0.08 ms per call on a toy problem.
+#:
+#: `obj` is renamed on the way out because it is NOT the reported objective: it
+#: is whatever `Objective.nlp_expression` handed the solver, which for endurance
+#: is a monotone surrogate rather than minutes (FINDINGS section 14.5.5). A live
+#: view that labelled it "objective" would be showing a number that does not
+#: match the one the run finally reports.
+_IPOPT_ITERATION_FIELDS = {
+    "obj": "ipopt_objective",
+    "inf_pr": "inf_pr",
+    "inf_du": "inf_du",
+    "mu": "mu",
+}
+
+
+def _live_frame_callback(opti, frames, dv: dict, state: dict):
+    """An `Opti` callback that writes one live frame per IPOPT iterate, or None.
+
+    Two measurements decided the shape of this (2026-08-05, `docs/
+    LIVE_VIEWER_PLAN.md` section 1):
+
+    - Reading the design vector back is cheap, but only if it is read as ONE
+      stacked expression. `opti.debug.value` builds a CasADi Function per call,
+      so 37 separate calls per iterate is 37 graph traversals; one `vertcat` of
+      leaf variables is 0.12 ms, against iterations that take ~1.5 s on this
+      model.
+    - Everything ELSE worth showing is free. `opti.debug.stats()` works during
+      the solve and already carries IPOPT's own objective, primal and dual
+      infeasibility and barrier parameter. Watching `inf_pr` fall is half the
+      debugging value and it costs a dict lookup, where evaluating `opti.f`
+      would mean building a function over the whole NLP graph.
+
+    **This must never raise.** It runs inside IPOPT's iteration loop, so an
+    exception here is an aborted solve rather than a missing picture. The
+    writer's own latch covers the frame-building half; this wrapper covers the
+    reading half.
+    """
+    import casadi as cas
+
+    try:
+        # Scalars only. `dv` is whatever the AIRCRAFT declared, so a vector
+        # variable is possible in principle, and splitting one back out by name
+        # is not worth doing for a picture. Building the callback is inside the
+        # guard as well: "frames can never fail a solve" has to hold before the
+        # first iterate, not only during one.
+        scalars = [(k, v) for k, v in dv.items() if getattr(v, "numel", lambda: 1)() == 1]
+        if not scalars:
+            return None
+        names = [k for k, _ in scalars] + list(state)
+        stacked = cas.vertcat(*[v for _, v in scalars], *state.values())
+    except Exception as e:  # noqa: BLE001
+        frames.writer.fail(e)
+        return None
+
+    def callback(iteration: int) -> None:
+        try:
+            values = np.asarray(opti.debug.value(stacked)).ravel()
+            read = dict(zip(names, (float(v) for v in values)))
+            try:
+                iterations = (opti.debug.stats() or {}).get("iterations") or {}
+            except Exception:  # noqa: BLE001 — stats are a bonus, not the frame
+                iterations = {}
+            measured = {
+                out: float(iterations[key][-1])
+                for key, out in _IPOPT_ITERATION_FIELDS.items()
+                if iterations.get(key)
+            }
+            frames.iterate(
+                iteration,
+                {k: read[k] for k, _ in scalars},
+                {k: read[k] for k in state},
+                measured,
+            )
+        except Exception as e:  # noqa: BLE001 — a picture must not abort a solve
+            frames.writer.fail(e)
+
+    return callback
+
+
 def _solve_nlp(
     aircraft,
     mission,
@@ -663,12 +922,17 @@ def _solve_nlp(
     eta_scale: float = 1.0,
     timeout_min: float = SOLVE_TIMEOUT_MIN,
     warm_start: bool = False,
+    frames=None,
 ) -> dict:
     """One NLP solve. Returns the champion design + state, all numeric.
 
     M2 scope note: lift=weight and thrust=drag are enforced; pitch-moment trim and
     static margin join at M3 (tail is fixed here). Objective from the mission
     registry evaluator, built symbolically.
+
+    `frames` is a `liveframe._Member`, or None. When present, every IPOPT
+    iterate writes a geometry frame for the live viewer (M5.4) — see
+    `_live_frame_callback` for what that costs and why it is safe.
     """
     import aerosandbox as asb
 
@@ -846,14 +1110,21 @@ def _solve_nlp(
     options = {"ipopt.max_wall_time": 60.0 * timeout_min}
     if warm_start:
         options |= WARM_START_OPTIONS
+    callback = None
+    if frames is not None:
+        callback = _live_frame_callback(
+            opti, frames, dv,
+            {"V_ms": V, "alpha_deg": alpha, "deflection_deg": defl, "prop_rev_s": n},
+        )
     try:
         sol = opti.solve(
             verbose=False,
             max_iter=SOLVE_MAX_ITER,
             detect_simple_bounds=True,
+            callback=callback,
             # WALL time, not CPU time. AeroSandbox's own `max_runtime` maps to
             # IPOPT's `max_cpu_time`, which is the wrong unit for this guard: a
-            # solve peaks near 13 GB on a 25 GB machine, and the case worth
+            # solve peaks near 14.5 GB on a 25 GB machine, and the case worth
             # bailing out of is exactly the one where it starts swapping and CPU
             # time falls behind the clock. What is being protected is the run's
             # wall clock, so that is what gets capped.
@@ -887,10 +1158,22 @@ def _solve_nlp(
     }
 
 
-def _solve_worker(conn, aircraft, mission, kw):  # pragma: no cover — child process
+def _solve_worker(conn, aircraft, mission, kw, live=None):  # pragma: no cover — child process
     t0 = time.monotonic()
+    # The WORKER writes its own frames, both iterate and candidate — not the
+    # parent. The parent cannot write the candidate one correctly: `prep`/
+    # `restore` bracket the launch, so by the time a child's result comes back
+    # the parent's aircraft object has been restored to the baseline and would
+    # draw a different aeroplane under this member's name. The child forked with
+    # the member's attributes already applied and keeps them for its whole life.
+    member = None
+    if live is not None:
+        from .liveframe import FrameWriter
+
+        live_dir, label, key, index, total = live
+        member = FrameWriter(live_dir, aircraft).member(label, key, index, total)
     try:
-        r = _solve_nlp(aircraft, mission, **kw)
+        r = _solve_nlp(aircraft, mission, frames=member, **kw)
     except Exception as e:
         r = _failure_record(e)
     r["solve_minutes"] = round((time.monotonic() - t0) / 60.0, 2)
@@ -898,6 +1181,8 @@ def _solve_worker(conn, aircraft, mission, kw):  # pragma: no cover — child pr
     # this process did exactly one solve, so its high-water mark IS that solve's.
     # It is what the next run's memory budget divides by (memory.py).
     r["peak_rss_gb"] = memory.peak_rss_gb()
+    if member is not None:
+        member.candidate(r)
     conn.send(r)
     conn.close()
 
@@ -1050,6 +1335,7 @@ def _solve_many(
     aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None,
     label: str = "solve", timeout_min: float = SOLVE_TIMEOUT_MIN,
     cache: "_SolveCache | None" = None, pause_file: Path | None = None,
+    live=None,
 ) -> dict:
     """Run independent _solve_nlp jobs, `parallel` at a time.
 
@@ -1058,7 +1344,7 @@ def _solve_many(
     winglet toggles) are seen by that job only — with parallel > 1 the forked
     child snapshots them at launch. parallel=1 is the historical in-process
     path and the only safe mode under a ~15 GB WSL cap (each solve peaks
-    ~13 GB — HANDOFF section 2); 2-wide needs the 26 GB .wslconfig active.
+    ~14.5 GB — measured 2026-08-05); 2-wide needs the 26 GB .wslconfig active.
     A job failure never kills the batch. `label` names the batch in the
     progress log.
 
@@ -1066,6 +1352,10 @@ def _solve_many(
     rather than restarting; `pause_file`, if it exists when a member finishes,
     stops the battery cleanly at that boundary (RunPaused). Member boundaries
     are the only place a pause can free memory — see `optimize`.
+
+    `live` is a `liveframe.FrameWriter` or None: the M5.4 viewer's data source.
+    Frames are a VIEW of the run and never a part of it — the writer disables
+    itself on its first error and the batch does not notice.
     """
     check_parallel(parallel)
     results = {}
@@ -1078,6 +1368,12 @@ def _solve_many(
             if done is not None:
                 results[key] = done
                 log.info("  %s [%d/%d] %s: from checkpoint", label, len(results), total, key)
+                # No live frame for a resumed member, deliberately. `prep` has
+                # not run, so the aircraft is not carrying this member's discrete
+                # configuration and any frame drawn now would be a picture of a
+                # different aeroplane. Nothing is lost: frames survive a pause in
+                # the live directory exactly as checkpoints do, so the run that
+                # solved this member already recorded it.
                 continue
             if prep is not None:
                 prep(key)
@@ -1089,14 +1385,27 @@ def _solve_many(
             # keeps its old watermark meaning and SAYS so.
             per_solve_peak = memory.reset_peak_rss()
             t_job = time.monotonic()
+            member = (
+                live.member(label, key, len(results) + 1, total)
+                if live is not None else None
+            )
             try:
-                results[key] = _solve_nlp(aircraft, mission, **kw)
-            except RuntimeError as e:
-                results[key] = _failure_record(e)
+                try:
+                    results[key] = _solve_nlp(aircraft, mission, frames=member, **kw)
+                except RuntimeError as e:
+                    results[key] = _failure_record(e)
+                # Timed before the candidate frame, which runs its own lifting
+                # line: a picture of the solve must not be charged to the solve.
+                results[key]["solve_minutes"] = round((time.monotonic() - t_job) / 60.0, 2)
+                # ... and written BEFORE `restore`, because a discrete study's
+                # member carries its own attribute value (a prop, a tail type)
+                # and `restore` puts the baseline back — a frame drawn afterwards
+                # would show a different aeroplane under this member's name.
+                if member is not None:
+                    member.candidate(results[key])
             finally:
                 if restore is not None:
                     restore()
-            results[key]["solve_minutes"] = round((time.monotonic() - t_job) / 60.0, 2)
             results[key]["peak_rss_gb"] = memory.peak_rss_gb()
             RUN_PEAK.observe(results[key]["peak_rss_gb"])
             if not per_solve_peak:
@@ -1128,7 +1437,20 @@ def _solve_many(
             rx, tx = ctx.Pipe(duplex=False)
             if prep is not None:
                 prep(key)
-            proc = ctx.Process(target=_solve_worker, args=(tx, aircraft, mission, kw))
+            # Members are tagged into every frame filename, so concurrent
+            # workers sharing a directory cannot overwrite each other. What they
+            # DO share is the sequence counter, which each initialises from the
+            # directory at fork time — so in forked mode the global ordering
+            # between members is coarse (frames interleave by iteration rather
+            # than by wall clock). Within a member it stays exact, which is what
+            # the timelapse needs.
+            live_spec = (
+                (live.dir, label, key, len(results) + len(running) + 1, total)
+                if live is not None else None
+            )
+            proc = ctx.Process(
+                target=_solve_worker, args=(tx, aircraft, mission, kw, live_spec)
+            )
             proc.start()
             tx.close()
             if restore is not None:
@@ -1336,6 +1658,7 @@ def optimize(
     solve_timeout_min: float = SOLVE_TIMEOUT_MIN,
     checkpoint_dir: Path | None = None,
     pause_file: Path | None = None,
+    live_dir: Path | None = None,
 ) -> tuple[RunResult, Path]:
     """M2 entry point: multi-start NLP -> champion -> shadow price -> flatness
     sweep -> numeric re-evaluation of the champion through the M1 pipeline.
@@ -1367,7 +1690,7 @@ def optimize(
 
     **The pause is at MEMBER boundaries, and that is not a shortcut — it is the
     only point where memory can actually be released.** A solve in progress is
-    ~13 GB of CasADi graph plus IPOPT's barrier state, filter and MUMPS
+    ~14.5 GB of CasADi graph plus IPOPT's barrier state, filter and MUMPS
     factorization; none of that is serialisable through CasADi, so freeing the
     memory necessarily destroys it. The most that could be salvaged mid-solve is
     the current iterate as a warm start, and this project has already measured
@@ -1375,7 +1698,14 @@ def optimize(
     active bounds, so IPOPT pushes off them at startup regardless). Waiting for
     the member boundary therefore costs at most `solve_timeout_min` and loses
     nothing, where a mid-solve pause would free the same memory and throw the
-    solve away."""
+    solve away.
+
+    live_dir: where the live viewer's frames go (M5.4, `liveframe`). It is a
+    directory under `runs/_live/` while the run is going, because the run
+    directory does not exist until the run ENDS; the frames are moved into
+    `<run_dir>/frames/` here, at the end. On a PAUSE they stay where they are so
+    a resume appends to them — the same lifecycle the checkpoint directory has.
+    """
     if memory_budget_gb is not None and parallel <= 1:
         per = memory.observed_peak_gb(runs_root)
         parallel, why = memory.plan_parallel(memory_budget_gb, per_solve_gb=per)
@@ -1412,6 +1742,9 @@ def optimize(
     # 405-minute run was spent on phases that failed or barely informed; it
     # belongs in the artifact, next to what each phase concluded.
     phase_minutes: dict[str, float] = {}
+    #: Members attempted per phase, so a resumed phase can report "6 of 6 from
+    #: checkpoint" rather than an unexplained 0.0 minutes (see _SolveCache.resumed).
+    phase_members: dict[str, int] = {}
 
     cache = None
     if checkpoint_dir is not None:
@@ -1420,13 +1753,22 @@ def optimize(
                  f"; create {pause_file} to pause at the next member boundary"
                  if pause_file is not None else "")
 
+    live = None
+    if live_dir is not None:
+        from . import liveframe
+
+        live = liveframe.FrameWriter(live_dir, aircraft)
+        log.info("live frames to %s (open the viewer from the GUI, or replay them "
+                 "later with `planeopt timelapse`)", live.dir)
+
     def batch(label, jobs, **kw):
         t_phase = time.monotonic()
+        phase_members[label] = phase_members.get(label, 0) + len(jobs)
         try:
             return _solve_many(
                 aircraft, mission, jobs, parallel, label=label,
                 timeout_min=solve_timeout_min, cache=cache, pause_file=pause_file,
-                **kw
+                live=live, **kw
             )
         finally:
             phase_minutes[label] = round(
@@ -1466,49 +1808,16 @@ def optimize(
     champion = max(ok, key=lambda r: sign * r["objective_value"])
     spread = max(abs(r["objective_value"] - champion["objective_value"]) for r in ok)
 
-    # shadow price: minutes (objective units) per gram of structure
+    # Shadow price for the SCREEN only: minutes (objective units) per gram of
+    # structure, measured against the multistart champion. `screen_discrete`
+    # needs it before the studies run, so it cannot wait for the final design;
+    # the number reported in the artifact is re-measured on that design below.
     bumped = first["mass_bump"]
-    shadow_per_g = (
+    screen_shadow_per_g = (
         (bumped["objective_value"] - champion["objective_value"]) / 20.0
         if "failed" not in bumped
         else None
     )
-
-    # flatness: re-optimize everything else at fixed spans (up to the cap)
-    flat = []
-    span_cap = getattr(aircraft, "span_cap_m", 3.0)
-    if flatness:
-        # The declared span floor is a hard limit on what the sweep may sample:
-        # a `fixed` value outside a variable's own box is not an infeasible
-        # aircraft, it is an invalid problem, and IPOPT says so
-        # (`Invalid_Problem_Definition`) rather than reporting a span.
-        span_box = (champion.get("dv_bounds") or {}).get("span") or [None, None]
-        flat = flatness_sweep(
-            batch, span_cap, run_timeout_min=solve_timeout_min,
-            incumbent_span=champion["dv"].get("span"),
-            span_floor=span_box[0],
-        )
-
-    # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization
-    battery_jobs = [
-        ("printed_mass_x1.10", {"printed_scale": 1.10}),
-        ("printed_mass_x0.90", {"printed_scale": 0.90}),
-        ("chain_eta_x0.90", {"eta_scale": 0.90}),
-        ("chain_eta_x1.10", {"eta_scale": 1.10}),
-    ]
-    battery = {}
-    battery_results = batch("re-solve battery", battery_jobs)
-    for label, r in battery_results.items():
-        if "failed" in r:
-            battery[label] = _failed_entry(r)
-        else:
-            battery[label] = {
-                "objective_value": r["objective_value"],
-                "delta": r["objective_value"] - champion["objective_value"],
-                "span": r["dv"]["span"],
-                "static_margin": r["static_margin"],
-                "ballast_kg": r["dv"]["ballast_kg"],
-            }
 
     # discrete studies (MODEL_DETAILS 6.3): the aircraft declares
     # `discrete_options = {attr: [candidate values]}` — e.g. fuselage topology
@@ -1532,7 +1841,7 @@ def optimize(
         top_n = (getattr(aircraft, "discrete_screen", None) or {}).get(attr)
         if top_n and len(cands) > top_n:
             screen = screen_discrete(
-                aircraft, mission, attr, cands, champion, top_n, shadow_per_g,
+                aircraft, mission, attr, cands, champion, top_n, screen_shadow_per_g,
             )
             study["screen"] = screen
             log.info(
@@ -1645,6 +1954,120 @@ def optimize(
                 "indicative only; the spar-fit constraint also binds high cant",
             }
 
+    # priced options (MODEL_DETAILS 6.3): candidates that are MEASURED and never
+    # adopted. `discrete_options` above adopts whatever wins, which is right when
+    # the objective can see everything at stake — a tail type, a propeller. It is
+    # wrong when the alternative gives up something the model has no term for.
+    #
+    # Dropping the companion computer, the airspeed sensor and the telemetry
+    # radio makes an aeroplane that is strictly lighter and therefore strictly
+    # better by this objective, and it is not the aeroplane the user is building.
+    # A study that adopted it would delete capability and report the deletion as
+    # an improvement. So the run prices it and stops there — the same posture
+    # `span_cap_m` takes toward the print bed: the model measures, the user
+    # decides.
+    #
+    # Runs here, after the adopting studies, so the price is quoted against the
+    # design actually being shipped rather than the multistart champion.
+    priced = {}
+    for attr, candidates in (getattr(aircraft, "priced_options", None) or {}).items():
+        baseline = getattr(aircraft, attr)
+        cands = [c for c in candidates if c != baseline]
+        if not cands:
+            continue
+        res = batch(
+            f"priced {attr}", [(c, dict(warm)) for c in cands],
+            prep=lambda c, a=attr: setattr(aircraft, a, c),
+            restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
+        )
+        entries = {}
+        for cand in cands:
+            r_c = res[cand]
+            if "failed" in r_c:
+                entries[cand] = _failed_entry(r_c)
+                continue
+            entries[cand] = {
+                **{k: r_c[k] for k in ("objective_value", "V_ms", "auw_kg")},
+                "delta_objective": r_c["objective_value"] - champion["objective_value"],
+            }
+        priced[attr] = {
+            "baseline": baseline,
+            "alternatives": entries,
+            "adopted": baseline,
+            "note": "PRICED, NOT ADOPTED — the alternative gives up something "
+                    "this model has no term for, so the number is a price and "
+                    "not a recommendation",
+        }
+
+    # --- characterization of the FINAL design ------------------------------
+    # Everything from here down describes the aeroplane this run is actually
+    # shipping, which is why it runs here and not earlier.
+    #
+    # It used to run right after the multistart, BEFORE the discrete studies and
+    # the winglet study — so on 2026-08-05 the flatness curve and the whole
+    # re-solve battery described a 119.93-minute aircraft carrying the incumbent
+    # 11x6 prop and a winglet, while the champion being reported was a
+    # 142.09-minute aircraft with a 12x10 and no winglet. Every member converged
+    # and nothing said the two were different aeroplanes. A sensitivity that is
+    # not a sensitivity OF THE DESIGN is worse than no sensitivity, because it
+    # reads exactly like one (the same failure shape as the 2026-08-01 winglet
+    # cross-check measuring its own mesh).
+    #
+    # The champion's discrete attributes are already set on `aircraft` by the
+    # studies above; the winglet is not, so it is applied here. Both are
+    # restored in the re-evaluation's `finally` below.
+    if winglet_rejected:
+        aircraft.winglet = False
+
+    # flatness: re-optimize everything else at fixed spans (up to the cap)
+    flat = []
+    span_cap = getattr(aircraft, "span_cap_m", 3.0)
+    if flatness:
+        # The declared span floor is a hard limit on what the sweep may sample:
+        # a `fixed` value outside a variable's own box is not an infeasible
+        # aircraft, it is an invalid problem, and IPOPT says so
+        # (`Invalid_Problem_Definition`) rather than reporting a span.
+        span_box = (champion.get("dv_bounds") or {}).get("span") or [None, None]
+        flat = flatness_sweep(
+            batch, span_cap, run_timeout_min=solve_timeout_min,
+            incumbent_span=champion["dv"].get("span"),
+            span_floor=span_box[0],
+        )
+
+    # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization.
+    # The +20 g bump rides along so the REPORTED shadow price is the final
+    # design's too, rather than the multistart champion's (it costs one solve,
+    # and a shadow price quoted against a superseded prop is not this design's
+    # trade rate).
+    battery_jobs = [
+        ("printed_mass_x1.10", {"printed_scale": 1.10}),
+        ("printed_mass_x0.90", {"printed_scale": 0.90}),
+        ("chain_eta_x0.90", {"eta_scale": 0.90}),
+        ("chain_eta_x1.10", {"eta_scale": 1.10}),
+        ("mass_bump", {"extra_mass_kg": 0.020}),
+    ]
+    battery = {}
+    battery_results = batch("re-solve battery", battery_jobs)
+    for label, r in battery_results.items():
+        if label == "mass_bump":
+            continue
+        if "failed" in r:
+            battery[label] = _failed_entry(r)
+        else:
+            battery[label] = {
+                "objective_value": r["objective_value"],
+                "delta": r["objective_value"] - champion["objective_value"],
+                "span": r["dv"]["span"],
+                "static_margin": r["static_margin"],
+                "ballast_kg": r["dv"]["ballast_kg"],
+            }
+    final_bump = battery_results["mass_bump"]
+    shadow_per_g = (
+        (final_bump["objective_value"] - champion["objective_value"]) / 20.0
+        if "failed" not in final_bump
+        else screen_shadow_per_g
+    )
+
     # What the champion is PINNED against, in the progress log as well as the
     # artifact: this is the "what to relax next" list, and the run it was added
     # for had eight entries where the session discussed three (issue 0b).
@@ -1657,10 +2080,10 @@ def optimize(
         )
 
     # numeric re-evaluation of the champion through the full M1 pipeline
-    # (winglet-free when the study rejected it — champion is the off-solve then)
+    # (winglet-free when the study rejected it — `aircraft.winglet` was already
+    # set to the champion's value above, so the characterization phases and this
+    # re-evaluation see the same aeroplane)
     log.info("re-evaluating the champion numerically and writing artifacts")
-    if winglet_rejected:
-        aircraft.winglet = False
     # A champion is only half described by its design vector; the studies also
     # picked tail type, topology, mount, prop and winglet, and those are plain
     # attributes. Record them, so rebuilding the champion later cannot silently
@@ -1753,6 +2176,27 @@ def optimize(
                 "this objective until it is understood (FINDINGS §18)."
             )
 
+    # What the afterbody term actually charged, at the champion point and
+    # computed NUMERICALLY rather than read off the NLP graph. Two of these
+    # numbers are the ones the next battery has to be read against: whether
+    # theta_max settled near the separation threshold, and whether the boat-tail
+    # came off its 1.8 x d_eq floor (MODEL_DETAILS 7.3, HANDOFF).
+    if best is not None:
+        try:
+            champ_bodies = aircraft.parasite_bodies(champion["dv"])
+            body = next((b for b in champ_bodies if "afterbody" in b), None)
+            if body is not None:
+                s_ref = float(champ_plane.s_ref)
+                total = aero.body_cd0(champ_bodies, best["V_ms"], s_ref) * s_ref
+                ab = {k: float(v) for k, v in body["afterbody"].items()}
+                ab["fineness"] = float(body["fineness"])
+                # of the WHOLE body drag area (skin friction + excrescence +
+                # base), so it reads as a share of what the buildup reports
+                ab["share_of_body_drag"] = ab["base_drag_area_m2"] / total if total else None
+                result.diagnostics["afterbody"] = ab
+        except Exception as e:  # noqa: BLE001 — a diagnostic must never cost the run
+            log.warning("afterbody diagnostics failed: %s: %s", type(e).__name__, e)
+
     tripped = None
     if best is not None:
         trip = aero.tripped_cd_delta(champ_plane, best["V_ms"], best["CL"])
@@ -1775,6 +2219,7 @@ def optimize(
         "champion": champion,
         "resolve_battery": battery,
         "discrete_studies": discrete_studies or None,
+        "priced_options": priced or None,
         "winglet_study": winglet_study,
         "tripped_polars": tripped,
         "multistart": [
@@ -1796,7 +2241,7 @@ def optimize(
         "stress/deflection sizing, ballast cap, battery-position balance."
     )
     # Measured per-solve peak, so the NEXT run's memory budget divides by data
-    # rather than by the folklore 13 GB. Children cover the forked (parallel)
+    # rather than by the hard-coded fallback. Children cover the forked (parallel)
     # path; RUN_PEAK covers the in-process one, where the mark is reset between
     # solves and so cannot be read off the process at the end. `peak_rss_gb()`
     # on self remains as a floor for anything that ran outside a batch.
@@ -1815,6 +2260,29 @@ def optimize(
         (time.monotonic() - t_start) / 60.0 - sum(phase_minutes.values()), 1
     )
     result.diagnostics["phase_minutes"] = phase_minutes
+    # A phase that cost 0.0 minutes was either not run or fully resumed, and the
+    # artifact could not tell those apart. Record the resumed fraction per phase,
+    # and say so plainly in a note when a whole phase came off disk — "fresh
+    # battery" and "re-ran the global search" are not the same claim.
+    if cache is not None and cache.resumed:
+        resumed = {
+            label: f"{n} of {phase_members.get(label, n)} from checkpoint"
+            for label, n in sorted(cache.resumed.items())
+        }
+        result.diagnostics["phase_resumed"] = resumed
+        whole = [
+            label for label, n in cache.resumed.items()
+            if n >= phase_members.get(label, n) > 0
+        ]
+        if whole:
+            result.notes.append(
+                "RESUMED, not re-solved: " + ", ".join(sorted(whole)) + " came "
+                "entirely from checkpoints written by an earlier run of the same "
+                f"model ({result.diagnostics['model_fingerprint']}). The physics "
+                "matches — that is what the fingerprint guarantees — but this run "
+                "did not re-search those phases, so their 0.0-minute entries above "
+                "are a resume, not a skip."
+            )
     if memory_budget_gb is not None:
         result.diagnostics["memory_budget_gb"] = memory_budget_gb
     figures.flatness_plot(flat, champion, run_dir / "figures")
@@ -1828,6 +2296,15 @@ def optimize(
         (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
     except Exception as e:  # noqa: BLE001
         log.warning("report.html could not be rendered (run.json is intact): %s", e)
+    if live is not None:
+        # The run directory exists only now, so this is the first moment the
+        # frames can live beside the artifacts they describe. A PAUSED run never
+        # reaches here (RunPaused propagates out of `batch`), which is exactly
+        # right: its frames stay in the live directory for the resume to append
+        # to. See `liveframe.relocate`.
+        from . import liveframe
+
+        liveframe.relocate(live.dir, run_dir)
     log.info(
         "done in %.1f min — champion objective %.4g, artifacts in %s",
         (time.monotonic() - t_start) / 60.0, champion["objective_value"], run_dir,

@@ -174,6 +174,28 @@ class VTailSample:
     #: ON this bound, that is the model failing, not the design succeeding** —
     #: it will show up in `active_bounds` and should be read as a defect report.
     lift_to_drag_max = 45.0
+    #: MODEL-VALIDITY ceiling on pod fineness (L / d_eq), same idiom as
+    #: `lift_to_drag_max` above and enforced in the NLP: **a solve landing ON it
+    #: is a defect report, not an optimum.**
+    #:
+    #: The form factor in use is Hoerner's `FF = 1 + 60/f^3 + f/400`, a function
+    #: of fineness ALONE, and it bottoms out at f = 16.38. That minimum is an
+    #: artefact of the fit, not a shape anyone should build toward: measured on
+    #: the formula (2026-08-05), stretching this pod at fixed volume keeps paying
+    #: until f ~ 9, where the FF's fall finally stops beating the sqrt(L) growth
+    #: in wetted area. Hoerner puts the real minimum-drag band for a body of
+    #: revolution at f ~ 6-7. So 8 sits above the physical band and above the
+    #: 2026-08-05 champion's 6.20, and below the artefact — it clips the needle
+    #: without touching the afterbody-lengthening the new base-drag term is
+    #: supposed to produce (which is expected to land near f ~ 7.2).
+    #:
+    #: Shipped WITH that term deliberately: give the model a reason to lengthen
+    #: the boat-tail and no fineness limit, and the exploit does not disappear,
+    #: it just moves from the tail cone to the whole pod.
+    #:
+    #: pod-boom only — see `geometry_constraints`, where the integrated
+    #: topology's own fineness is measured and this bound is shown not to apply.
+    fineness_max = 8.0
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
     # Outer-panel cant ceiling for the two-panel dihedral form. 60 deg is a
     # MODEL limit, not a structural one: past it a Schrenk station on a
@@ -385,13 +407,50 @@ class VTailSample:
     POD_BAY_END_X = 0.410  # default bay aft end (spec); a variable since the saddle rework
     SADDLE_CHORD_FRAC = 0.60  # bay must carry the wing root to 60% chord (no floating wing)
     SADDLE_EMBED = 0.006  # pod top embeds this far above the wing chord plane
-    POD_XS_SPEC = (0.068, 0.088)  # spec cross-section (w, h) at pod_xs = 1
+    POD_XS_SPEC = (0.068, 0.088)  # spec cross-section (w, h) at pod_xs = 1, pod_wh = 68/88
+    #: Width:height limits for the pod section (`pod_wh`), a MODEL-validity bound
+    #: rather than a style preference — the same idiom as `fineness_max`.
+    #:
+    #: Unlocked 2026-08-05. `pod_xs` used to scale BOTH dimensions from
+    #: POD_XS_SPEC, so the pod could be made bigger but never wider or flatter,
+    #: and the section shape was inherited from the spec sheet rather than
+    #: chosen. It was locked deliberately (HANDOFF: "do not widen the fuselage
+    #: parameterization until this is fixed") because the drag buildup read only
+    #: `d_eq` — a ratio the objective was blind to would have been a flat
+    #: manifold for IPOPT to wander on. That is no longer true: the loft's own
+    #: wetted-area integral prices eccentricity (a superellipse of fixed area has
+    #: least perimeter when square), and the afterbody term reads d_eq.
+    #:
+    #: The limits come from the model's own convention error. Closure angles use
+    #: the d_eq-equivalent axisymmetric convention (MODEL_DETAILS 7.3), so the
+    #: steeper principal plane is understated in tangent by sqrt(max(w/h, h/w)) —
+    #: 14% at the spec's 68x88, and **24% at these bounds**. Past them the
+    #: correlations being borrowed, and the Munk term's slender-body-of-revolution
+    #: assumption, stop describing the section that was built.
+    POD_WH_LIMITS = (0.65, 1.55)
     POD_WALL_CLEARANCE = 0.0035  # printed wall + foam liner per side
+    #: CF tail boom outside diameter. One number, because it is three facts at
+    #: once: the drawn tube, the drag body's diameter, and — since 2026-08-05 —
+    #: the pod's END-CAP DIAMETER, since in pod-boom topology the cap IS the
+    #: socket the boom plugs into. Those had drifted apart: the cap was a flat
+    #: 12% of d_eq (7.4 mm at the champion) while the boom was 12 mm, i.e. the
+    #: boom was LARGER than the hole it sockets into. `pod_dims` now derives
+    #: `r_cap` from this, which is what `aircraft/speed_sample` already did.
+    BOOM_OD_M = 0.012
     # packaging envelopes (m) — user-input data in the app (M5); spec values here
     COMPONENT_ENVELOPES = {
         "battery": {"length": 0.130, "width": 0.043, "height": 0.033},
         "esc": {"length": 0.055},
         "fc_gps": {"length": 0.060},
+        # The motor can, as a cylinder that has to fit inside the nose (D3548
+        # outrunner: the "35" is the stator, the CAN is ~42 mm). Declared,
+        # adjustable data like every other envelope here — swap the motor and
+        # this dict is the only thing that changes.
+        #
+        # It is here rather than on `MotorConfig` deliberately: the powertrain
+        # model is an equivalent circuit and does not care how big the motor
+        # is. This is a PACKAGING fact, and packaging is what this dict holds.
+        "motor": {"diameter": 0.042, "length": 0.051},
     }
 
     # Architecture v4 (user decision 2026-07-26). Two independent changes that
@@ -433,7 +492,11 @@ class VTailSample:
         "wl_len": 0.12, "wl_cant": 75.0, "wl_cr": 0.80, "wl_taper": 0.70, "wl_toe": -1.0,
         # fuselage loft (defaults reproduce the spec pod exactly — nose tip at
         # station 0, length 0.585; pod_bay_end variable since the saddle rework)
+        # pod_wh is the WIDTH:HEIGHT ratio; the spec's 68 x 88 is the default, so
+        # `pod_wh = 68/88` reproduces the frozen section exactly and every
+        # pre-2026-08-05 number is the pod_wh = 0.7727 slice of the new family
         "pod_nose": 0.030, "pod_bay": 0.380, "pod_tail": 0.175, "pod_xs": 1.0,
+        "pod_wh": 0.068 / 0.088,
         "pod_bay_end": 0.410,
         # tail (per-dimension, MODEL_DETAILS section 8; tail_scale retired).
         # Defaults reproduce the spec V-tail: 320 mm panels, chords 150 -> 110,
@@ -582,6 +645,7 @@ class VTailSample:
             "ballast_kg": (0.0, 0.200), "x_battery": (-0.10, 0.40),
             "pod_nose": (0.030, 0.25), "pod_bay": (0.20, 0.55),
             "pod_xs": (0.75, 1.30), "pod_bay_end": (0.40, 0.62),
+            "pod_wh": self.POD_WH_LIMITS,
         }
         # Dihedral form decides which angles exist at all — the same pattern as
         # tail_type below. Declaring the unused ones anyway would leave the NLP
@@ -632,20 +696,104 @@ class VTailSample:
         Anchor: the bay's aft end is fixed at POD_BAY_END_X (wing-saddle joint);
         the nose grows forward from it, the tail cone aft. Integrated topology
         runs the cone to the tail block (station from tail_arm) instead of
-        using the pod_tail variable."""
-        w = self.POD_XS_SPEC[0] * d["pod_xs"]
-        h = self.POD_XS_SPEC[1] * d["pod_xs"]
+        using the pod_tail variable.
+
+        `d_eq` and `r_cap` are derived here rather than by each caller: d_eq was
+        being recomputed in three places, and r_cap is now a design EXPRESSION
+        (the end cap is the 12 mm boom socket, so as a fraction it shrinks as
+        the pod grows) that the loft, the drag buildup and the brief must all
+        agree on."""
+        # Section: `pod_xs` sizes it, `pod_wh` shapes it, and the two are
+        # ORTHOGONAL by construction — w*h = (spec product) * pod_xs^2 whatever
+        # the ratio, so `d_eq` depends on pod_xs alone. That matters because
+        # every proportion floor, the fineness ceiling and the whole afterbody
+        # term are written against d_eq: a ratio that moved it would silently
+        # re-scale six constraints while pretending to change only shape.
+        d_eq = (self.POD_XS_SPEC[0] * self.POD_XS_SPEC[1]) ** 0.5 * d["pod_xs"]
+        ratio = d["pod_wh"] ** 0.5
+        w = d_eq * ratio
+        h = d_eq / ratio
+        # The NARROW dimension, whichever it now is. `min` would be a branch on
+        # a design-variable value (forbidden once dv is symbolic), so this is the
+        # smooth min — `-max(-w, -h)` through the same hinge every other guard
+        # here uses. tau is 0.1 mm: at w == h it under-reports by tau/2, i.e. it
+        # errs toward the stricter constraint, which is the safe direction for a
+        # dimension that has to admit a motor and a boom.
+        d_min = -geometry.smooth_floor(-w, floor=-h, tau=1e-4)
         bay_end = d["pod_bay_end"]
         bay_start = bay_end - d["pod_bay"]
         nose_tip = bay_start - d["pod_nose"]
         if self.fuselage_topology == "integrated":
             tail_len = (WING_X_LE + 0.25 * 0.201 + d["tail_arm"]) - bay_end
+            # tail-block joint, not a socket: the printed cone runs into the
+            # tail block itself, so the cap keeps the existing 12% convention
+            r_cap = 0.12
         else:
             tail_len = d["pod_tail"]
+            # Against the NARROW dimension, not d_eq. A round tube goes through
+            # the narrow one: at d_eq the cap face works out 10.5 x 13.7 mm and
+            # a 12 mm boom still does not fit through it, which is the very
+            # inconsistency this derivation exists to close.
+            r_cap = self.BOOM_OD_M / d_min
         return {
-            "w": w, "h": h, "nose_tip": nose_tip, "bay_start": bay_start,
+            "w": w, "h": h, "d_eq": d_eq, "d_min": d_min, "r_cap": r_cap,
+            "nose_tip": nose_tip, "bay_start": bay_start,
             "bay_end": bay_end, "tail_len": tail_len,
             "length": d["pod_nose"] + d["pod_bay"] + tail_len,
+        }
+
+    def nose_split(self, d: dict) -> dict:
+        """Where the printed pod ends and the NOSECONE begins. Symbolic-safe.
+
+        The loft is one continuous body running to a 0.1 mm point, because it is
+        the **outer mould line** — the shape the air sees, which is the pod and
+        the nosecone together. Nobody builds that. What gets built is a pod
+        whose front is a roughly flat bulkhead with a circular hole for the
+        motor, plus a separate nosecone that covers the motor and fairs the
+        front out to the spinner. Until this, no artifact said so: the builder
+        got a pointed body with no cut station and no opening diameter.
+
+        The split is DERIVED, not chosen, and it is the same arithmetic as the
+        motor-fit constraint read backwards. The nose section grows aft, so
+        there is exactly one station where the interior first clears the can:
+
+            t_face = 1 - sqrt(1 - r_req^2),   r_req = (motor_od + 2*wall) / width
+            x_face = nose_tip + pod_nose * t_face
+
+        Forward of it the body is too narrow to hold the motor — so that is the
+        bulkhead, everything ahead of it is nosecone, and the constraint's whole
+        job is to keep `pod_nose - x_face` at least a can long.
+
+        This is the FORWARD-most valid bulkhead. Where the constraint has slack
+        the motor could sit further aft; forward-most is reported because it is
+        what a puller is built to, and because it is the position the constraint
+        is written against — a report that picked a different one would be
+        describing an aeroplane the NLP never priced.
+
+        No mass appears or disappears here: the pod mass model integrates the
+        whole loft's wetted area, so the nosecone is already paid for as part of
+        it. What moves is the MOTOR's station — see `structure_extras`.
+        """
+        p = self.pod_dims(d)
+        motor = self.COMPONENT_ENVELOPES["motor"]
+        can_w = motor["diameter"] + 2 * self.POD_WALL_CLEARANCE
+        # against the NARROW dimension — a round can passes through the smaller
+        # of width and height, and since `pod_wh` was unlocked that is no longer
+        # always the width
+        r_req = can_w / p["d_min"]
+        # the same guard the constraint carries: an iterate whose section is
+        # narrower than the can must not produce sqrt(negative)
+        behind = np.sqrt(geometry.smooth_floor(1 - r_req**2))
+        cone_len = d["pod_nose"] * (1 - behind)
+        return {
+            "r_face": r_req,
+            "cone_len": cone_len,                        # nosecone (fairing) length
+            "x_face": p["nose_tip"] + cone_len,          # bulkhead station
+            "face_w": p["w"] * r_req,                    # bulkhead outer section
+            "face_h": p["h"] * r_req,
+            "opening": motor["diameter"],                # the hole in it
+            "usable_nose": d["pod_nose"] * behind,       # bulkhead -> bay start
+            "x_motor": p["nose_tip"] + cone_len + motor["length"] / 2,
         }
 
     def prop_assembly_mass_kg(self, diameter_in: float | None = None) -> float:
@@ -673,7 +821,7 @@ class VTailSample:
         z_c = self.SADDLE_EMBED - p["h"] / 2
         return fuselage.loft(
             d["pod_nose"], d["pod_bay"], p["tail_len"], p["w"], p["h"],
-            x_nose=p["nose_tip"], z_c=z_c,
+            x_nose=p["nose_tip"], z_c=z_c, r_cap=p["r_cap"],
         )
 
     def fuselage_lofts(self, dv: dict | None = None) -> list:
@@ -699,7 +847,7 @@ class VTailSample:
             lofts.append(
                 fuselage.boom_loft(
                     pod_end, x_tail - pod_end,
-                    od=self._BOOM_BODY.get("od_m", 0.012),
+                    od=self.BOOM_OD_M,
                     z_c=self.SADDLE_EMBED - p["h"] / 2,
                 )
             )
@@ -845,6 +993,85 @@ class VTailSample:
         # fuselage packaging (MODEL_DETAILS 7.2) — envelopes are declared data
         # (user input in the app), spec values for the sample
         p = self.pod_dims(dv)
+        self.packaging_constraints(opti, dv, p)
+        # wing saddle carry-through (MODEL_DETAILS 7.2): the constant-section
+        # bay must physically carry the wing root — start ahead of the LE and
+        # run to SADDLE_CHORD_FRAC of root chord. Without this the optimizer
+        # shrinks the pod and leaves the wing floating (unbuildable).
+        opti.subject_to(p["bay_start"] <= WING_X_LE - 0.010)
+        opti.subject_to(p["bay_end"] >= WING_X_LE + self.SADDLE_CHORD_FRAC * dv["c_root"])
+        # proportion floors (streamlined family, MODEL_DETAILS 7.2): nose >= 1.0
+        # d_eq, boat-tail >= 1.8 d_eq — every candidate stays fuselage-shaped
+        # (the spec pod's 30 mm nose predates these; dv=None fixture is exempt)
+        d_eq = p["d_eq"]
+        opti.subject_to(dv["pod_nose"] >= 1.0 * d_eq)
+        # THE MOTOR HAS TO FIT INSIDE THE NOSE. Nothing checked this until
+        # 2026-08-05, and the optimizer had been shrinking the pod section for
+        # runs: the 2026-08-05 champion's nose offers 25.8 mm of can-width room
+        # for a 51 mm can, i.e. it is short by a factor of two. A design that
+        # cannot physically hold its own motor is not a cheaper aeroplane, it is
+        # not an aeroplane.
+        #
+        # This asserts NOTHING about how the motor is mounted — no firewall
+        # station, no plate, no bolt pattern. The loft is the outer mould line
+        # (pod plus the nosecone that completes it), and the only claim made
+        # here is that a cylinder of the can's size fits inside that outline,
+        # ahead of the bay, however it is actually held.
+        #
+        # The nose arc `r(t) = sqrt(1 - (1-t)^2)` inverts in closed form, so
+        # this needs no station search. The interior first clears the can at
+        # `t = 1 - sqrt(1 - r_req^2)`, leaving `pod_nose * sqrt(1 - r_req^2)` of
+        # usable nose behind it. The binding dimension is the NARROW one
+        # (`d_min`, a smooth min since `pod_wh` was unlocked), and a superellipse
+        # of shape >= 2 inscribes a circle of its own half-breadth, so the
+        # narrow-dimension test is the circle test.
+        #
+        # Ahead of the BAY on purpose: the bay's contents are packed by the
+        # rows below (battery, ESC, FC+GPS), and a motor allowed to borrow bay
+        # length would be counted in neither place.
+        if self.motor_mount == "puller":
+            motor = self.COMPONENT_ENVELOPES["motor"]
+            can_w = motor["diameter"] + 2 * self.POD_WALL_CLEARANCE
+            # section can enclose the can at all (also what keeps r_req <= 1)
+            opti.subject_to(p["d_min"] / can_w >= 1.0)
+            # `nose_split` owns the arithmetic, so the row the solver enforces
+            # and the bulkhead station the builder is handed cannot drift apart
+            usable_nose = self.nose_split(dv)["usable_nose"]
+            opti.subject_to(usable_nose / motor["length"] >= 1.0)
+        if self.fuselage_topology == "pod_boom":
+            opti.subject_to(dv["pod_tail"] >= 1.8 * d_eq)
+            # Fineness ceiling (`fineness_max`) — a MODEL-validity bound, kept
+            # dimensionless per the standing rule. Landing on it is a defect
+            # report, not an optimum.
+            #
+            # pod-boom ONLY, and that is a measurement rather than an oversight:
+            # the integrated topology's body runs from the nose to the tail
+            # block, so its length is set by `tail_arm` and it sits at f = 14.7
+            # at the declared defaults. Imposing f <= 8 there does not BOUND
+            # that candidate, it deletes it — the only way to satisfy it is a
+            # maximally fat pod on a minimum tail arm, so a priced alternative
+            # in the topology study would quietly become a garbage design that
+            # still converged. The needle exploit therefore remains open for
+            # integrated; the champion diagnostics report fineness for both
+            # topologies so a run that finds it says so (HANDOFF).
+            opti.subject_to(p["length"] / (self.fineness_max * d_eq) <= 1.0)
+            # an exposed boom must exist: pod tail cap clears the tail block
+            x_tail = WING_X_LE + 0.25 * 0.201 + dv["tail_arm"]
+            opti.subject_to(p["bay_end"] + p["tail_len"] + 0.10 <= x_tail)
+
+    def packaging_constraints(self, opti, dv, p) -> None:
+        """What has to fit inside the bay (MODEL_DETAILS 7.2). Symbolic-safe.
+
+        Its own method so a variant can replace the equipment model without
+        re-stating the wing saddle, the proportion floors, the motor-fit row or
+        anything else `geometry_constraints` owns. `aircraft/vtail_rcv2/` does
+        exactly that: it carries a full per-part manifest and packs against it,
+        which supersedes — rather than adds to — the four lumped rows here.
+
+        The lumped form is the right fidelity for an aircraft whose equipment is
+        a declared budget rather than a chosen parts list: three envelopes and a
+        stack length, all read off the spec sheet.
+        """
         env, clr = self.COMPONENT_ENVELOPES, self.POD_WALL_CLEARANCE
         batt = env["battery"]
         w_in, h_in = p["w"] - 2 * clr, p["h"] - 2 * clr
@@ -860,22 +1087,6 @@ class VTailSample:
             dv["pod_bay"] + p["tail_len"]
             >= batt["length"] + env["esc"]["length"] + env["fc_gps"]["length"] + 0.06
         )
-        # wing saddle carry-through (MODEL_DETAILS 7.2): the constant-section
-        # bay must physically carry the wing root — start ahead of the LE and
-        # run to SADDLE_CHORD_FRAC of root chord. Without this the optimizer
-        # shrinks the pod and leaves the wing floating (unbuildable).
-        opti.subject_to(p["bay_start"] <= WING_X_LE - 0.010)
-        opti.subject_to(p["bay_end"] >= WING_X_LE + self.SADDLE_CHORD_FRAC * dv["c_root"])
-        # proportion floors (streamlined family, MODEL_DETAILS 7.2): nose >= 1.0
-        # d_eq, boat-tail >= 1.8 d_eq — every candidate stays fuselage-shaped
-        # (the spec pod's 30 mm nose predates these; dv=None fixture is exempt)
-        d_eq = (p["w"] * p["h"]) ** 0.5
-        opti.subject_to(dv["pod_nose"] >= 1.0 * d_eq)
-        if self.fuselage_topology == "pod_boom":
-            opti.subject_to(dv["pod_tail"] >= 1.8 * d_eq)
-            # an exposed boom must exist: pod tail cap clears the tail block
-            x_tail = WING_X_LE + 0.25 * 0.201 + dv["tail_arm"]
-            opti.subject_to(p["bay_end"] + p["tail_len"] + 0.10 <= x_tail)
 
     def structure_constraints(self, opti, dv, weight_n) -> None:
         """Spar sizing constraints at n = 5 g limit load (MODEL_DETAILS 1.3)."""
@@ -1110,8 +1321,19 @@ class VTailSample:
         # inside the pod nose (puller) — the biggest CG lever the study moves.
         # The dv=None fixture stays the frozen spec pusher regardless of the
         # parametric default (M1 validation continuity).
+        # PULLER: the can's mid-length, aft of the bulkhead the nose can
+        # actually hold it behind (`nose_split`). This was a flat
+        # `nose_tip + 0.02` — a station where the champion's pod is 39.9 mm
+        # wide, i.e. a place a 42 mm motor cannot be. The literal predates any
+        # check that the motor fits at all, and once the pod stopped being a
+        # frozen 585 mm prism it stopped being even approximately right: at the
+        # 2026-08-05 champion the can's real CG is **41 mm further aft**, which
+        # on a 190 g motor+prop group is ~4 mm of aircraft CG on a design whose
+        # `x_battery` is pinned at its aft limit with SM exactly on its floor.
+        # It moves CG AFT, i.e. in the direction this design has been starved
+        # of. Two stations for one motor is the defect; there is now one.
         mount = self.motor_mount if dv is not None else "pusher"
-        x_motor = x_tail + 0.08 if mount == "pusher" else p["nose_tip"] + 0.02
+        x_motor = x_tail + 0.08 if mount == "pusher" else self.nose_split(d)["x_motor"]
         # The dv=None fixture is the frozen v1.2 spec design, which carries an
         # 11 in prop: it keeps the literal 190 g so M1 validation continuity
         # survives whatever the prop study is currently pointed at. Parametric
@@ -1218,10 +1440,21 @@ class VTailSample:
         pod = fuselage.body_dict(self._pod_loft(d), p["length"], p["w"], p["h"])
         # puller slipstream scrubs the pod: declared drag factor (MODEL_DETAILS 2.4)
         pod["form_factor"] = pod["form_factor"] * self.MOUNT_EFFECTS[self.motor_mount]["pod_drag_factor"]
+        # afterbody separation + base pressure (MODEL_DETAILS 7.3). An ADDITIVE
+        # drag area rather than a factor on the form factor: it is not a
+        # skin-friction effect and must not be scaled by the slipstream scrub
+        # above or by the excrescence factor in `aero.body_cd0`. Until this
+        # existed the buildup could not see the boat-tail at all, and the
+        # optimizer shortened it until a geometric floor stopped it.
+        pod |= fuselage.afterbody_terms(p["d_eq"], p["tail_len"], p["r_cap"])
         bodies = [pod]
         if self.fuselage_topology == "pod_boom":
             x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
-            bodies.append(fuselage.boom_body(x_tail - (p["bay_end"] + p["tail_len"])))
+            bodies.append(
+                fuselage.boom_body(
+                    x_tail - (p["bay_end"] + p["tail_len"]), od=self.BOOM_OD_M
+                )
+            )
         return bodies
 
     def design_brief(self, dv: dict | None = None, shadow_per_g=None) -> dict:
@@ -1231,10 +1464,11 @@ class VTailSample:
         p = self.pod_dims(d)
         env, clr = self.COMPONENT_ENVELOPES, self.POD_WALL_CLEARANCE
         batt = env["battery"]
-        d_eq = (p["w"] * p["h"]) ** 0.5
+        d_eq = p["d_eq"]
         half = batt["length"] / 2
         x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
         pod_end = p["bay_end"] + p["tail_len"]
+        split = self.nose_split(d)
         mm = lambda v: f"{v * 1000:.0f} mm"
 
         brief = {
@@ -1248,8 +1482,51 @@ class VTailSample:
                 "equipment bay (constant section)": mm(d["pod_bay"]),
                 "boat-tail (floor 1.8 x d_eq)": f"{mm(p['tail_len'])} (floor {mm(1.8 * d_eq)})",
                 "overall pod": mm(p["length"]),
-                "fineness (L / d_eq)": f"{p['length'] / d_eq:.2f}",
+                "fineness (L / d_eq)": (
+                    f"{p['length'] / d_eq:.2f}"
+                    + (f" (model-validity ceiling {self.fineness_max:.0f})"
+                       if self.fuselage_topology == "pod_boom" else "")
+                ),
             },
+            "Nose — what is printed pod and what is NOSECONE": (
+                {
+                    "note": (
+                        "The loft above is the OUTER MOULD LINE — the shape the air "
+                        "sees, which is the pod and the nosecone together. It runs to "
+                        "a point and nothing builds that. The pod's front is a "
+                        "bulkhead with a hole for the motor; the nosecone is a "
+                        "separate printed part that covers the motor and fairs out to "
+                        "the spinner. The split is derived, not chosen: it is the one "
+                        "station where the interior first clears the can."
+                    ),
+                    "motor (declared envelope)": (
+                        f"{mm(self.COMPONENT_ENVELOPES['motor']['diameter'])} dia x "
+                        f"{mm(self.COMPONENT_ENVELOPES['motor']['length'])} long"
+                    ),
+                    "NOSECONE — fairing, nose tip to bulkhead": (
+                        f"{mm(split['cone_len'])} long, station "
+                        f"{mm(p['nose_tip'])} to {mm(split['x_face'])}"
+                    ),
+                    "BULKHEAD — pod front face": (
+                        f"{mm(split['face_w'])} W x {mm(split['face_h'])} H outer "
+                        f"(wall {self.POD_WALL_CLEARANCE * 1000:.1f} mm per side), with a "
+                        f"{mm(split['opening'])} circular opening — the can's own diameter"
+                    ),
+                    "POD — bulkhead aft": f"station {mm(split['x_face'])} onward",
+                    "motor bay (bulkhead to bay start)": (
+                        f"{mm(split['usable_nose'])} available for a "
+                        f"{mm(self.COMPONENT_ENVELOPES['motor']['length'])} can"
+                    ),
+                    "motor CG rides at": mm(split["x_motor"]),
+                    "nosecone mass": (
+                        "already inside the pod mass — the mass model integrates the "
+                        "whole loft's wetted area, so nothing is added or lost by "
+                        "printing it as two parts"
+                    ),
+                }
+                if self.motor_mount == "puller"
+                else {"note": "pusher mount — the motor is at the boom tip, not the nose"}
+            ),
             "Balance — battery must reach these stations": {
                 "bay interior spans": f"{mm(p['bay_start'])} to {mm(p['bay_end'])} aft of nose datum",
                 "battery CG window (3 mm end margins)": f"{mm(p['bay_start'] + 0.003 + half)} to {mm(p['bay_end'] - 0.003 - half)}",
@@ -1262,7 +1539,10 @@ class VTailSample:
                     f" {mm(p['bay_start'])} to {mm(p['bay_end'])}"
                 ),
                 "pod top embeds into wing root plane": mm(self.SADDLE_EMBED),
-                "boom socket at tail cap (pod-boom topology)": f"12 mm OD at station {mm(pod_end)}",
+                "boom socket at tail cap (pod-boom topology)": (
+                    f"{mm(self.BOOM_OD_M)} OD at station {mm(pod_end)}"
+                    f" — the cap IS this socket ({self.BOOM_OD_M / d_eq:.3f} x d_eq)"
+                ),
                 "tail block station (champion tail arm)": mm(x_tail),
                 "ESC / FC+GPS stack lengths": f"{mm(env['esc']['length'])} / {mm(env['fc_gps']['length'])}",
             },
@@ -1384,9 +1664,41 @@ class VTailSample:
         mm = lambda v: f"{v * 1000:.0f} mm"
         throw_deg = float(self.trim_deflection_limit_deg(dv))
         c_cs = d["cs_frac"] * d["t_c_root"] * (1 + d["t_taper"]) / 2
+        # The nosecone is a SEPARATE PRINTED PART and was on no parts list: the
+        # loft is the outer mould line, so a builder reading these artifacts saw
+        # one pointed body and no cut station (`nose_split`).
+        nose = {}
+        if self.motor_mount == "puller":
+            split = self.nose_split(d)
+            motor = self.COMPONENT_ENVELOPES["motor"]
+            nose = {
+                "Nose parts (the loft is the outer mould line, not one part)": {
+                    "nosecone — removable fairing over the motor": (
+                        f"{mm(split['cone_len'])} long, nose tip to bulkhead "
+                        f"(station {mm(p['nose_tip'])} to {mm(split['x_face'])}); "
+                        f"mates to a {mm(split['face_w'])} x {mm(split['face_h'])} face"
+                    ),
+                    "pod front bulkhead": (
+                        f"{mm(split['face_w'])} x {mm(split['face_h'])} section, "
+                        f"circular opening {mm(split['opening'])} = the can's own "
+                        f"diameter (add print clearance to taste — the model sizes "
+                        f"the structure, not the fit), wall "
+                        f"{self.POD_WALL_CLEARANCE * 1000:.1f} mm per side"
+                    ),
+                    "motor bay depth, bulkhead to bay start": (
+                        f"{mm(split['usable_nose'])} for a {mm(motor['length'])} can"
+                    ),
+                    "print note": (
+                        "the cone is a fairing, not structure — the motor mount takes "
+                        "its load into the bulkhead, and the model charges the cone's "
+                        "skin through the pod's own wetted-area mass term"
+                    ),
+                }
+            }
         return {
             "Spars (sized at 5 g limit load)": spars,
             "Stock list": stock,
+            **nose,
             "Spar and joint stations": {
                 "reading the spar margins": (
                     f"0% means the constraint is ACTIVE — the optimizer sized the tube "

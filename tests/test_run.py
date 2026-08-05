@@ -40,8 +40,17 @@ def test_run_writes_artifacts(sample_aircraft, sample_mission, tmp_path):
 
     # printed structure fraction of AUW (anchors: 43-52% for full-PLA builds;
     # here pod+wing+tail printed mass over AUW, wide band)
-    printed = sum(v for k, v in m["components"].items() if k.startswith("printed_")) + m["components"]["pod"]
+    printed = (
+        sum(v["mass_kg"] for k, v in m["components"].items() if k.startswith("printed_"))
+        + m["components"]["pod"]["mass_kg"]
+    )
     assert 0.30 < printed / m["auw_kg"] < 0.60
+    # every component carries its STATION as well as its mass — the run artifact
+    # is where "what goes where" is answered, and it used to record only mass
+    assert all(
+        isinstance(v["station_mm"], float) and -200 < v["station_mm"] < 2000
+        for v in m["components"].values()
+    )
 
     # constraint plumbing
     c = data["constraints"]

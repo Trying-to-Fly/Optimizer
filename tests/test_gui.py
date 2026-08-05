@@ -8,6 +8,7 @@ running the app, not by asserting on pixels.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -193,6 +194,20 @@ def test_checkpoint_and_pause_reach_the_child(tmp_path):
 
     plain = jobs.program_and_args(_job(tmp_path))[1]
     assert "--checkpoint" not in plain and "--pause-file" not in plain
+
+
+def test_the_live_frame_directory_reaches_the_child(tmp_path):
+    """The live viewer watches a directory the CHILD writes, so the flag has to
+    survive the queue -> subprocess hop or the popup opens onto nothing."""
+    job = _job(tmp_path, optimize=True, live_dir=tmp_path / "_live" / "m")
+    _, args = jobs.program_and_args(job)
+    assert args[args.index("--live-dir") + 1] == str(tmp_path / "_live" / "m")
+
+    # An evaluation has nothing to watch — no iteration — and must not be given
+    # a flag the `run` subcommand does not have.
+    evaluation = _job(tmp_path, optimize=False, live_dir=tmp_path / "_live" / "m")
+    assert "--live-dir" not in jobs.program_and_args(evaluation)[1]
+    assert "--live-dir" not in jobs.program_and_args(_job(tmp_path))[1]
 
 
 def test_pause_writes_the_sentinel_only_for_the_running_job(tmp_path):
@@ -450,6 +465,7 @@ def test_a_paused_job_survives_closing_the_app(tmp_path):
 
     job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt",
                pause_file=tmp_path / "ckpt" / "m.PAUSE",
+               live_dir=tmp_path / "_live" / "m",
                multistart=5, flatness=False, solve_timeout_min=45.0,
                memory_budget_gb=20.0)
     job.state = jobs.JobState.PAUSED
@@ -459,6 +475,9 @@ def test_a_paused_job_survives_closing_the_app(tmp_path):
     assert restored.mission == job.mission and restored.aircraft == job.aircraft
     assert restored.checkpoint_dir == job.checkpoint_dir
     assert restored.pause_file == job.pause_file
+    # A resumed run appends to the frames the first half wrote, so the resumed
+    # job has to point at the same directory (liveframe._next_seq).
+    assert restored.live_dir == job.live_dir
     # the settings have to come back too — a resumed job that quietly dropped
     # --multistart would produce one artifact from two configurations
     assert (restored.multistart, restored.flatness) == (5, False)
@@ -530,3 +549,41 @@ def test_restore_does_not_start_anything(tmp_path, monkeypatch):
     job.state = jobs.JobState.PAUSED
     queue.restore([job])
     assert queue.jobs == [job] and started == []
+
+
+def test_the_gui_never_imports_the_solver():
+    """EXECUTION_PLAN section 3 rule 1: the GUI owns no solver path.
+
+    It reads artifacts and launches subprocesses, and that separation is what
+    keeps a ~14.5 GB solve — which the OOM killer can and does take — from being
+    able to take the window and the queue down with it. The live viewer (M5.4)
+    is the closest thing to a breach: it renders aircraft geometry, so the
+    temptation is to build that geometry here. It does not; the SOLVER writes
+    the mesh into each frame and `planeopt.liveframe` keeps every aerosandbox
+    import function-local so that reading a frame stays pure stdlib.
+
+    A subprocess, because this test session has already imported the solver
+    through the aircraft fixtures — asking `sys.modules` in-process proves
+    nothing.
+    """
+    import subprocess
+
+    probe = (
+        "import sys;"
+        "from planeopt.gui import render3d, liveview, timelapse, jobs, runindex,"
+        " queuestore, missionfile, workspace, newrun, window;"
+        "from planeopt import liveframe;"
+        "print(','.join(m for m in ('aerosandbox', 'casadi', 'matplotlib')"
+        " if m in sys.modules))"
+    )
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, env=env,
+    )
+    if "No module named" in result.stderr:
+        pytest.skip("the GUI extra is not installed")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "", (
+        f"the GUI pulled in {result.stdout.strip()} — a solver import in the GUI "
+        "process is exactly what the subprocess architecture exists to prevent"
+    )

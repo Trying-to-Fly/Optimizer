@@ -18,6 +18,7 @@ uv run planeopt info           # install report: version, packaged data, capabil
 uv run planeopt objectives     # list the objective library
 uv run planeopt run missions/endurance_sample.py -a aircraft/vtail_sample
 uv run planeopt gui            # desktop app (needs: uv sync --extra gui)
+uv run planeopt timelapse <run-dir>   # replay a run's live frames to PNGs/MP4
 ```
 
 The GUI (M5) browses and compares past runs, edits the mission as a form, and
@@ -29,7 +30,7 @@ report.html + an interactive 3D model (`interactive_3d.html`, rotatable in any
 browser) + inputs snapshot).
 
 Long commands print progress to stderr as each solve lands; `--quiet` silences
-it. A single NLP solve takes minutes and peaks near 13 GB of RAM, and a full
+it. A single NLP solve takes minutes and peaks near 14.5 GB of RAM, and a full
 `optimize` battery runs for hours.
 
 RAM is what limits this app, not CPU — a solve uses one core and a lot of
@@ -90,7 +91,7 @@ motor mount; see `docs/FINDINGS.md` §10 for the current champion and
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
 ```
 
-A battery runs for hours and holds ~13 GB, so it can be stopped and continued:
+A battery runs for hours and holds ~14.5 GB, so it can be stopped and continued:
 
 ```sh
 uv run planeopt optimize ... --checkpoint runs/_ckpt --pause-file runs/_ckpt/PAUSE
@@ -102,9 +103,64 @@ The pause waits for the solve in flight (bounded by `--solve-timeout-min`)
 because IPOPT's internal state cannot be checkpointed — that wait is what makes
 it lossless. The GUI exposes the same thing as a Pause button.
 
+### Watching a solve
+
+`--live-dir` makes the run record what it is shaping — the lifting line's own
+panel mesh, one small gzip'd JSON per IPOPT iterate and a coloured, fully
+annotated one per finished member. The desktop app opens a viewer on it
+automatically; a finished run keeps its frames in `<run_dir>/frames/`, so it can
+be replayed or re-rendered later.
+
+```sh
+uv run planeopt optimize ... --live-dir runs/_live/endurance
+uv run planeopt timelapse runs/20260805T120000-endurance_sample-vtail_sample
+```
+
+Colours are local section **cl**, **stall margin** (`cl/cl_max` at the local
+Reynolds number, on a fixed scale where 1.0 is the section limit — the
+constraint the optimizer is actually fighting), circulation **Γ**, or **lift per
+span**. There is no Cp and none is faked: the in-loop model is a lifting line
+with one chordwise panel, so no chordwise pressure distribution exists. A
+chordwise ΔCp from the out-of-loop VLM is possible and designed but not built —
+`docs/LIVE_VIEWER_PLAN.md` §11.
+
+Finished members also carry two overlays: **wake streamlines** traced through the
+lifting line's own induced-velocity field, which is what makes the tip rollup
+visible, and the **spanwise lift distribution** against an elliptical reference
+of the same total lift and span.
+
+The camera is chosen in the **New Run dialog before the run starts**, since the
+point of a timelapse of a four-hour battery is not having to be there when it
+ends. Seven presets — four three-quarter corners and the three elevations — and
+the choice travels with the frames into the finished run. The live window can
+override it, and so can the command line:
+
+```sh
+uv run planeopt timelapse <run-dir> --view plan --lift-dist --scalar stall_margin
+uv run planeopt timelapse <run-dir> --yaw -120 --pitch 15 --no-streamlines
+```
+
+Iterate frames are geometry-only, because computing circulation *during* a solve
+means evaluating it inside the Opti graph — the thing that peaks near 14.5 GB.
+Doing it **afterwards** costs a plain numeric lifting line, about 0.2 s a frame,
+so a whole run's iterates can be coloured for a couple of minutes of an idle
+machine and nothing at all from the solve:
+
+```sh
+uv run planeopt recolour <run-dir>                      # pay once, keep the result
+uv run planeopt timelapse <run-dir> --colour-iterates   # or just for this render
+```
+
+Those numbers are real but **untrimmed** — lift does not equal weight until the
+solve says so — and every recoloured frame says so under its stats block.
+Recolouring is refused outright if the aircraft's design vector does not match
+the frames', so it cannot quietly draw a different aeroplane; a finished run
+defaults to its own `inputs/` snapshot.
+
 **M5.1 (desktop GUI)** is in: run browser, detail and compare views, mission
-form, and a sequential run queue. Aircraft definitions remain Python modules —
-a form over them is M5.2 and is the real gate on non-programmer use.
+form, a sequential run queue, and the live solve viewer. Aircraft definitions
+remain Python modules — a form over them is M5.2 and is the real gate on
+non-programmer use.
 
 Next: the imported-fuselage NLP mode for a user-supplied .STEP — see
 `docs/HANDOFF.md` section 5. Construction-profile and propulsion

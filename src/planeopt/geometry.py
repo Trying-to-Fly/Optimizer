@@ -82,7 +82,7 @@ def station_grid(eta_break, n_inner: int = 2, n_outer: int = 2) -> list:
     The count is a fidelity knob, not a design choice, and it is deliberately
     left at the panel count the four-panel wing used: these stations become
     asb.WingXSec sections, each of which LiftingLine subdivides further, so
-    adding stations grows the CasADi graph and the ~13 GB solve peak with it
+    adding stations grows the CasADi graph and the ~14.5 GB solve peak with it
     (memory.py). Chord resolution therefore costs RAM and buys nothing once the
     curve is resolved.
 

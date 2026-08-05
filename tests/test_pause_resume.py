@@ -1,7 +1,7 @@
 """Stopping a multi-hour battery and getting the machine back.
 
 The pause is at MEMBER boundaries, and that is a physical limit rather than a
-shortcut: a solve in progress is ~13 GB of CasADi graph plus IPOPT barrier,
+shortcut: a solve in progress is ~14.5 GB of CasADi graph plus IPOPT barrier,
 filter and factorization state, none of it serialisable through CasADi. Freeing
 that memory necessarily destroys the solve, so the only pause that both releases
 memory AND loses nothing is one that waits for the member to finish.

@@ -37,13 +37,28 @@ def body_cd0(bodies: list[dict], V: float, s_ref: float, rho=1.225, mu=1.81e-5) 
     reaching a constraint row fails the SOLVE rather than the point — so the
     length is floored (geometry.smooth_floor) before it becomes a Reynolds
     number. Feasible designs are unaffected to within a micrometre; the
-    constraint that owns the dimension still does the rejecting."""
+    constraint that owns the dimension still does the rejecting.
+
+    A body may also declare `base_drag_area_m2` — a drag AREA (D/q, m^2) that is
+    not a skin-friction term at all: afterbody separation and the base pressure
+    behind it (`fuselage.afterbody_terms`, MODEL_DETAILS 7.3). It is added
+    OUTSIDE the excrescence factor, which pays for saddle steps, hatch lips and
+    wires on a wetted surface and has nothing to say about a base. Bodies
+    without the key — every frozen dv=None fixture — contribute exactly zero, so
+    the M1 validation baseline is bit-identical.
+
+    This function is the one seam where the buildup meets the design variables,
+    and `aero.py` imports PLAIN numpy: `.get` and addition are symbolic
+    transparent, anything else here would not be. New afterbody arithmetic
+    belongs in `fuselage.py`, which imports `aerosandbox.numpy`."""
     d = 0.0
+    d_base = 0.0
     for b in bodies:
         re_l = rho * V * geometry.smooth_floor(b["length_m"]) / mu
         cf = 0.074 / re_l**0.2
         d += cf * b["form_factor"] * b["wetted_area_m2"]
-    return EXCRESCENCE * d / s_ref
+        d_base += b.get("base_drag_area_m2", 0.0)
+    return (EXCRESCENCE * d + d_base) / s_ref
 
 
 #: Vortex core radius for EVERY lifting-line call, in metres. AeroSandbox

@@ -35,6 +35,7 @@ from ..types import MissionSpec
 from . import missionfile
 from planeopt import memory
 
+from . import render3d
 from .jobs import Job
 from .workspace import Workspace
 
@@ -174,8 +175,19 @@ class NewRunDialog(QDialog):
         options.addWidget(self.multistart)
         self.flatness = QCheckBox("span flatness sweep")
         self.flatness.setChecked(True)
+        # A QHBoxLayout shrinks whichever item has the most slack when the row is
+        # over budget, and a checkbox's slack is its label — which is how this
+        # one came to read "span flatness swe". A label that has been cut off is
+        # not a shorter label, it is a wrong one.
+        self.flatness.setMinimumWidth(self.flatness.sizeHint().width())
         options.addWidget(self.flatness)
-        options.addSpacing(16)
+        options.addStretch(1)
+        mode_layout.addLayout(options)
+
+        # Second row, because the first one no longer fits: four controls on one
+        # line left "span flatness sweep" reading "span flatness swe", and a
+        # label that has been cut off is not a shorter label, it is a wrong one.
+        options = QHBoxLayout()
         # Per-solve wall-clock ceiling. A battery is a fixed set of independent
         # solves, so one that diverges has no natural end and can quietly own the
         # whole run — a single flatness member once took 172 minutes and failed
@@ -195,12 +207,34 @@ class NewRunDialog(QDialog):
             "Maximum_WallTime_Exceeded and the batch carries on."
         )
         options.addWidget(self.solve_timeout)
+
+        # --- timelapse view ---
+        # Asked here rather than at render time because the whole point of a
+        # timelapse of a four-hour battery is not having to be at the machine
+        # when it finishes. The choice is recorded beside the frames and travels
+        # into the finished run, so it still holds whenever it is rendered; the
+        # live window can override it, and `planeopt timelapse --view` beats both.
+        options.addSpacing(20)
+        options.addWidget(QLabel("Timelapse view"))
+        self.timelapse_view = QComboBox()
+        for name, (label, _) in render3d.VIEW_PRESETS.items():
+            self.timelapse_view.addItem(label, name)
+        self.timelapse_view.setCurrentIndex(
+            list(render3d.VIEW_PRESETS).index(render3d.DEFAULT_VIEW)
+        )
+        self.timelapse_view.setFixedWidth(FIELD_WIDTH)
+        self.timelapse_view.setToolTip(
+            "The camera the live viewer opens at and this run's timelapse is "
+            "rendered from. Orbiting the live window does not change it — use "
+            "its “Use for timelapse” button for that."
+        )
+        options.addWidget(self.timelapse_view)
         options.addStretch(1)
         mode_layout.addLayout(options)
 
         # --- memory budget ---
         # RAM, not CPU, is what limits this app: a solve is single-core and peaks
-        # near 13 GB, so the budget does not make one solve faster — it decides
+        # near 14.5 GB, so the budget does not make one solve faster — it decides
         # how many independent solves in a batch run side by side. The dial is
         # therefore phrased as memory (what the user actually owns) rather than
         # as a worker count (an implementation detail they would have to convert).
@@ -255,7 +289,11 @@ class NewRunDialog(QDialog):
 
     def _update_mode(self) -> None:
         optimizing = self.mode_optimize.isChecked()
-        for widget in (self.multistart, self.flatness, self.solve_timeout):
+        # The timelapse view goes with them: an evaluation writes no frames, so
+        # offering to choose the camera for a video of them would be a lie.
+        for widget in (
+            self.multistart, self.flatness, self.solve_timeout, self.timelapse_view,
+        ):
             widget.setEnabled(optimizing)
         # Concurrency only exists inside an optimize battery — an evaluation is
         # a single pass, so offering to spread it over memory would be a lie.
@@ -377,6 +415,17 @@ class NewRunDialog(QDialog):
                 self._runs_dir / "_checkpoints" / f"{mission.name}.PAUSE"
                 if self.mode_optimize.isChecked() else None
             ),
+            # Same reasoning as the checkpoint block above: unasked, because it
+            # costs about 1% of solver time and a few tens of MB, and the
+            # alternative is discovering four hours in that the one run you
+            # wanted to watch is the one that has nothing to watch. An
+            # EVALUATION gets none — nothing iterates, and the existing
+            # interactive_3d.html already shows that design.
+            live_dir=(
+                self._runs_dir / "_live" / mission.name
+                if self.mode_optimize.isChecked() else None
+            ),
+            timelapse_view=self.timelapse_view.currentData(),
             memory_budget_gb=(
                 self.memory_budget.value()
                 if self.mode_optimize.isChecked() and self.memory_enabled.isChecked()

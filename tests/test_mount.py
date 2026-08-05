@@ -28,12 +28,31 @@ def test_the_pusher_can_still_be_priced(sample_aircraft):
 
 
 def test_motor_mass_rides_the_mount(sample_aircraft):
+    """The mount decides which END of the aeroplane the motor is on; the
+    GEOMETRY decides where on that end it can actually sit.
+
+    This used to pin `nose_tip + 0.02`. That literal was written when the pod
+    was a frozen 585 mm prism, and it survived the pod becoming a loft the
+    optimizer shrinks — by 2026-08-05 it placed a 42 mm motor at a station where
+    the champion's pod is 39.9 mm wide. The station now comes from
+    `nose_split`, the same arithmetic as the motor-fit constraint, so the mass
+    model and the packaging rows cannot disagree about where the motor is
+    (tests/test_afterbody.py has the CG consequence).
+    """
     d = dict(sample_aircraft.DV_DEFAULTS)
     p = sample_aircraft.pod_dims(d)
     x_tail = 0.390 + 0.25 * 0.201 + d["tail_arm"]
-    # parametric default = puller: motor in the nose
+    # parametric default = puller: motor in the nose, behind the bulkhead
     motor = next(e for e in sample_aircraft.fixed_equipment(d) if e.name == "motor_prop")
-    assert abs(motor.x_m - (p["nose_tip"] + 0.02)) < 1e-12
+    split = sample_aircraft.nose_split(d)
+    assert abs(motor.x_m - split["x_motor"]) < 1e-12
+    # aft of the bulkhead by construction. NOT also "ahead of the bay": these
+    # are the DECLARED DEFAULTS, whose 30 mm nose predates the `1.0 x d_eq`
+    # floor and is deliberately infeasible against it, so at this vector the can
+    # does overhang into the bay — which is exactly what the constraint exists
+    # to drive out, and asserting otherwise here would be asserting that an
+    # infeasible start is feasible.
+    assert motor.x_m > split["x_face"]
     sample_aircraft.motor_mount = "pusher"
     try:
         motor = next(e for e in sample_aircraft.fixed_equipment(d) if e.name == "motor_prop")

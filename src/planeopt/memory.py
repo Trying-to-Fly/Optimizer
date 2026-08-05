@@ -2,11 +2,11 @@
 and how many solves may therefore run at once.
 
 Why this module exists. RAM is the binding resource for this app and nothing
-else is: one NLP solve peaks near 13 GB while using a single core of the
+else is: one NLP solve peaks near 14.5 GB while using a single core of the
 sixteen available (HANDOFF section 2). So a memory budget does NOT make a solve
 faster — a solve is what it is. What it buys is CONCURRENCY: independent solves
 within a batch (multistart, flatness, the re-solve battery, discrete studies)
-run N-wide, and N is set by how many 13 GB peaks fit in the RAM the user is
+run N-wide, and N is set by how many 14.5 GB peaks fit in the RAM the user is
 willing to hand over. Getting that number wrong in the optimistic direction
 costs a whole battery, because the OOM killer takes the process rather than the
 job.
@@ -29,9 +29,16 @@ log = logging.getLogger("planeopt")
 
 GB = 1024**3
 
-#: Fallback per-solve peak, used only until a run has measured one. The figure
-#: is the observed champion-battery peak from HANDOFF section 2.
-DEFAULT_PER_SOLVE_GB = 13.0
+#: Fallback per-solve peak, used only until a run has measured one.
+#:
+#: **14.5, not 13.0 (2026-08-05).** 13 was the HANDOFF section 2 figure and it
+#: has been overtaken by measurement: the 2026-08-05 battery peaked at 14.48 GB.
+#: The error direction is not symmetric — `budget_to_parallel` DIVIDES by this,
+#: so an optimistic figure hands out a concurrency the machine cannot honour and
+#: the OOM killer takes the process, losing a battery measured in hours, while a
+#: pessimistic one costs at most one fewer concurrent solve on a machine that is
+#: single-core-bound anyway. Round up to the measurement, not down to the memory.
+DEFAULT_PER_SOLVE_GB = 14.5
 
 #: Never handed out, whatever the user asks for: the OS, the GUI, the desktop
 #: and the page cache all need room, and a machine that swaps while IPOPT
@@ -102,7 +109,7 @@ def swap_gb() -> float:
     """Configured swap, which is why a budget may exceed physical RAM.
 
     Peak RSS is transient — two solves seldom peak in the same instant — so
-    running 2-wide on a 25 GB box at a 13 GB peak works in practice with swap
+    running 2-wide on a 25 GB box at a 14.5 GB peak works in practice with swap
     behind it (HANDOFF section 2 records exactly that, verified). Swap is the
     slack that makes the budget dial reach 2 on this hardware instead of being
     permanently pinned at 1.
@@ -205,7 +212,7 @@ def observed_peak_gb(runs_root: Path, limit: int = 25) -> float | None:
     """Largest per-solve peak recorded by recent runs, or None if never measured.
 
     This is what makes the budget arithmetic honest: dividing by a hard-coded
-    13 GB is folklore, dividing by what this aircraft measured last week is data.
+    a hard-coded figure is folklore, dividing by what this aircraft measured last week is data.
     """
     try:
         dirs = sorted((p for p in Path(runs_root).iterdir() if p.is_dir()), reverse=True)
@@ -249,7 +256,7 @@ def plan_parallel(
 ) -> tuple[int, str]:
     """(width, human-readable reason) for a memory budget.
 
-    Pure arithmetic over injected facts so it is testable without a 13 GB solve.
+    Pure arithmetic over injected facts so it is testable without a 14.5 GB solve.
     The width is deliberately conservative: it floors rather than rounds, holds
     RESERVE_GB back for the OS, and never exceeds what is actually free even if
     the user asks for more.

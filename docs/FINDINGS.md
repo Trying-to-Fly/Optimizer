@@ -1841,3 +1841,98 @@ Three consequences that outlive the decision:
 its package would have been a duplicate of the sample). Its `name` now derives
 from `VTailSample.name` instead of restating it, so a retired package cannot
 drift into claiming a version whose feasible set it no longer shares.
+
+## 20. The battery converged and described a different aeroplane (2026-08-05)
+
+The 2.0 m battery owed by §19 ran overnight and produced a clean champion:
+**142.087 min**, mesh check converged at -0.46%, NLP-vs-re-eval gap 2.2e-5,
+multistart spread 1.6e-7, stall clear, SM in range, winglet rejected again and
+the 12x10 prop picked again — both of the things HANDOFF said to watch, resolved
+as predicted. Nothing failed. The audit of the artifact nonetheless found
+**seven claims the run was not entitled to make**, and the shape of them is the
+finding: *every guard green* is not the same as *the artifact describes the
+aircraft*.
+
+### 20.1 The sensitivity phases belonged to a superseded design
+
+The flatness sweep and the re-solve battery ran immediately after the
+multistart. The discrete studies and the winglet study run AFTER them, and they
+change the design — the prop study adopted the 12x10 (+22 min) and the winglet
+study rejected the winglet. So the artifact shipped:
+
+| in the artifact | the aeroplane it describes |
+| --- | --- |
+| champion, 142.087 min | 12x10 prop, no winglet |
+| flatness curve, 119.93 min at 2.0 m | incumbent 11x6, winglet on |
+| all four ±10% sensitivities | incumbent 11x6, winglet on |
+| shadow price, -0.0663 min/g | incumbent 11x6, winglet on |
+
+Nothing in the run said these were different aircraft. The deltas even *look*
+right — the battery's four entries are internally consistent, each computed
+against the multistart champion — which is precisely what makes it dangerous: a
+sensitivity that is not a sensitivity of the shipped design reads exactly like
+one. This is the same failure as §16 (the winglet cross-check measuring its own
+mesh) and §18 (the in-loop model making thrust): **the number was never wrong,
+the thing it was a number ABOUT was.**
+
+Fixed by ordering: characterization now runs after the winglet study, with the
+champion's discrete attributes and winglet state applied to the aircraft first.
+The +20 g shadow-price bump moved into the battery so the reported trade rate is
+also the final design's; the multistart bump stays, unreported, because
+`screen_discrete` needs a shadow price before the studies can run. The property
+is an ordering one, so `tests/test_phase_order.py` pins the order with a fake
+NLP rather than re-deriving it from aerodynamics.
+
+### 20.2 Four things the run knew and did not say
+
+Smaller, same family — the run had the information and the artifact did not
+carry the claim:
+
+1. **The objective was limited by `v_min`, not by the airframe.** 142.09 min at
+   9.5 m/s, while the sweep's own peak is 143.01 min at 9.0. Correct behaviour,
+   undisclosed conclusion: the number answers "best at or above 9.5 m/s", and
+   was read as "best". Now `diagnostics.v_min_price`, priced and noted.
+2. **Non-convergence was recorded as infeasibility.** V = 8.0 m/s carried
+   `infeasible: "the iteration is not making good progress"` — a statement about
+   the root-find's step size, 0.28 m/s above computed stall. Sweep points now
+   carry a `cause`; `trim_not_converged` reports as UNKNOWN.
+3. **The static margin changes sign inside its own regression window.** 0.0800
+   reported, local dCm/dCL of +0.187, +0.138, **-0.022 at the trim alpha**. Known
+   (HANDOFF issue 2, and it cannot be closed in this app) — but a known limit
+   that nothing announces is indistinguishable from a clean result downstream.
+   Now `sm_sign_consistent`, warned and explained beside the margin.
+4. **A fully resumed phase looked like a skipped one.** Multistart and flatness
+   reported 0.0 minutes; both were solved in full the previous evening and came
+   off disk under the same fingerprint. The resume was legitimate — that is what
+   §18.7's fingerprint guard is for — but "this battery re-searched the design"
+   was not a claim the artifact could support or withdraw. Now
+   `diagnostics.phase_resumed`.
+
+### 20.3 A prediction that did not come true, and why that was not a bug
+
+HANDOFF predicted the regularized vortex core (§18) would move the 2.0 m
+champion by ~-0.16%, to ~141.9. The measured champion is **142.087 against the
+pre-fix 142.086 — no movement at all**, which reads immediately as the fix not
+having been applied. It was applied: all four `asb.LiftingLine` call sites pass
+`LL_VORTEX_CORE_RADIUS`, and the same run shows the shift plainly in the
+flatness sweep, **120.1217 -> 119.9342, exactly -0.156%**.
+
+The difference is the winglet. The core artefact is a near-coincident-filament
+effect concentrated on high-cant winglet panels; the flatness and multistart
+solves carry live winglet design variables and the champion does not, because
+the winglet study rejects it. The prediction was extrapolated from a nominal
+configuration that keeps its winglet and never applied to this champion.
+
+Worth recording for the same reason §19.1 records the span extrapolation: **a
+model-change delta measured on one configuration does not transfer to another
+whose active features differ.** The cost of not writing it down is an afternoon
+spent ruling out a fix that was never broken.
+
+### 20.4 The per-solve RAM figure was folklore
+
+`DEFAULT_PER_SOLVE_GB = 13.0` against a measured 14.48 GB peak. The error is not
+symmetric — `budget_to_parallel` divides by it, so optimism hands out a
+concurrency the machine cannot honour and the OOM killer takes a battery
+measured in hours, while pessimism costs one concurrent solve on a machine that
+is single-core-bound anyway. Now 14.5, with the prose in `memory.py`, `cli.py`,
+`geometry.py` and `solve.py` agreeing.

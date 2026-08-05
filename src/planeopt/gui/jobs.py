@@ -1,7 +1,7 @@
 """What the queue executes — Qt-free so the command building is testable.
 
 Every job is a subprocess of this same program, not an in-process call. A solve
-peaks near 13 GB and can be killed by the OOM killer; as a child that takes down
+peaks near 14.5 GB and can be killed by the OOM killer; as a child that takes down
 one job, while in-process it would take down the GUI with the queue in it. It
 also makes cancellation a kill rather than a cooperative-interrupt problem, and
 means the GUI drives exactly the code path the CLI does.
@@ -46,6 +46,18 @@ class Job:
     #: Both derive from the run directory so a user never has to invent a path.
     checkpoint_dir: Path | None = None
     pause_file: Path | None = None
+    #: Where the live viewer's frames go while this run is going (M5.4). Under
+    #: `runs/_live/` rather than in the run directory, because the run directory
+    #: does not exist until the run ENDS; `liveframe.relocate` moves them into
+    #: `<run_dir>/frames/` at that point.
+    live_dir: Path | None = None
+    #: Which camera preset a timelapse of this run should be rendered from
+    #: (`render3d.VIEW_PRESETS`). Chosen before the run starts, because the point
+    #: of picking it then is not having to be at the machine afterwards. Not a
+    #: CLI argument: the solver has no camera. The GUI records it as a sidecar in
+    #: `live_dir`, which travels with the frames into the finished run — so it
+    #: still applies to a timelapse rendered months later, from anywhere.
+    timelapse_view: str | None = None
     state: JobState = JobState.QUEUED
     log: list[str] = field(default_factory=list)
     run_dir: Path | None = None  # parsed out of the child's final stdout line
@@ -57,13 +69,23 @@ class Job:
         return f"{verb} {self.aircraft.name} / {self.mission.stem}"
 
 
-def program_and_args(job: Job) -> tuple[str, list[str]]:
-    """The child process to launch, as (program, args).
+def planeopt_command(args: list[str]) -> tuple[str, list[str]]:
+    """How to invoke this same program as a child, as (program, args).
 
     Frozen: this executable *is* the CLI, so it takes the subcommand directly.
     Source: go through `python -m planeopt` rather than a `planeopt` console
     script, which may not be on PATH in a venv-less invocation.
+
+    Shared by the run queue and by the live viewer's timelapse button, so a
+    packaged build cannot end up able to launch one and not the other.
     """
+    if getattr(sys, "frozen", False):
+        return sys.executable, list(args)
+    return sys.executable, ["-m", "planeopt", *args]
+
+
+def program_and_args(job: Job) -> tuple[str, list[str]]:
+    """The child process that runs `job`, as (program, args)."""
     args = [
         "optimize" if job.optimize else "run",
         str(job.mission),
@@ -87,10 +109,10 @@ def program_and_args(job: Job) -> tuple[str, list[str]]:
             args += ["--checkpoint", str(job.checkpoint_dir)]
         if job.pause_file:
             args += ["--pause-file", str(job.pause_file)]
+        if job.live_dir:
+            args += ["--live-dir", str(job.live_dir)]
 
-    if getattr(sys, "frozen", False):
-        return sys.executable, args
-    return sys.executable, ["-m", "planeopt", *args]
+    return planeopt_command(args)
 
 
 def parse_run_dir(stdout: str, runs_dir: Path) -> Path | None:

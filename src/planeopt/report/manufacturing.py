@@ -33,6 +33,22 @@ import numpy as np
 from .. import types
 
 
+def _components(result) -> dict[str, dict]:
+    """`{name: {mass_kg, station_mm}}` from a run artifact, old shape or new.
+
+    Runs written before 2026-08-05 recorded a bare mass per component and threw
+    the station away, so a build document regenerated from one of those has no
+    station to print. It gets `None` and a dash, rather than an exception —
+    every artifact this project has ever written must stay readable, or the
+    "regenerate the build doc from any run" promise is only true going forward.
+    """
+    raw = (result.masses or {}).get("components") or {}
+    return {
+        name: (v if isinstance(v, dict) else {"mass_kg": float(v), "station_mm": None})
+        for name, v in raw.items()
+    }
+
+
 def _airfoil_name(xsec) -> str:
     return getattr(getattr(xsec, "airfoil", None), "name", None) or "unknown"
 
@@ -258,9 +274,9 @@ def _build(result: types.RunResult, airplane, aircraft=None) -> tuple[str, dict]
                     "stability window it was optimized against; treat the margin as "
                     "unverified until an external check (flow5 or equivalent) settles it."
                 ]
-        ballast = ((result.masses or {}).get("components") or {}).get("nose_ballast")
+        ballast = _components(result).get("nose_ballast")
         if ballast is not None:
-            L += [f"- **Nose ballast in this design:** {abs(ballast) * 1000:.0f} g"]
+            L += [f"- **Nose ballast in this design:** {abs(ballast['mass_kg']) * 1000:.0f} g"]
         if "cg_fwd_limit_m" not in bal:
             L += ["- **CG limits: not available.** This run predates the static-margin",
                   "  range being recorded in `run.json`. Re-solve to get the window."]
@@ -295,14 +311,25 @@ def _build(result: types.RunResult, airplane, aircraft=None) -> tuple[str, dict]
         L += ["", "The hinge is a constant CHORD FRACTION, so on a tapered panel the",
               "hinge line is not square to the root. Endpoints are in `hinges.csv`.", ""]
 
-    comps = (result.masses or {}).get("components") or {}
+    comps = _components(result)
     if comps:
-        auw = (result.masses or {}).get("auw_kg") or sum(comps.values())
+        auw = (result.masses or {}).get("auw_kg") or sum(
+            c["mass_kg"] for c in comps.values()
+        )
         L += ["## 4. Mass budget", "", f"Target all-up weight **{auw * 1000:.0f} g**.",
-              "", "| component | mass (g) | share |", "| --- | --- | --- |"]
-        for name, kg in sorted(comps.items(), key=lambda kv: -abs(kv[1])):
-            L.append(f"| {name} | {_nz(kg * 1000):.1f} | {_nz(kg / auw * 100):.1f}% |")
-        L += ["", f"| **total** | **{auw * 1000:.0f}** | |", ""]
+              "", "| component | mass (g) | station (mm) | share |",
+              "| --- | --- | --- | --- |"]
+        for name, c in sorted(comps.items(), key=lambda kv: -abs(kv[1]["mass_kg"])):
+            kg, sta = c["mass_kg"], c["station_mm"]
+            L.append(
+                f"| {name} | {_nz(kg * 1000):.1f} | "
+                f"{'—' if sta is None else f'{sta:.0f}'} | "
+                f"{_nz(kg / auw * 100):.1f}% |"
+            )
+        L += ["", f"| **total** | **{auw * 1000:.0f}** | | |", ""]
+        L += ["Stations are millimetres aft of the nose datum — the same datum the",
+              "CG above is quoted against, so this table is a weigh-and-balance",
+              "sheet as well as a shopping list.", ""]
         shadow = ((perf.get("optimization") or {}).get("shadow_price_obj_per_gram"))
         if shadow:
             L += [f"Every 100 g over target costs about **{abs(shadow) * 100:.1f} {units}**.", ""]

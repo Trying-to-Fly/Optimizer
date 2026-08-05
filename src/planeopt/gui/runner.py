@@ -1,6 +1,6 @@
 """Sequential run queue over QProcess.
 
-One job at a time by design: a single NLP solve peaks near 13 GB, so a second
+One job at a time by design: a single NLP solve peaks near 14.5 GB, so a second
 concurrent solve is how you meet the OOM killer rather than how you go faster
 (and on Windows there is no fork-based concurrency at all).
 
@@ -41,6 +41,10 @@ class RunQueue(QObject):
 
     queue_changed = Signal()  # any job's state changed, or the queue's contents
     job_output = Signal(object, str)  # (Job, one line of output)
+    #: (Job) — a child process was just launched. Distinct from `queue_changed`,
+    #: which fires for every state transition: the live viewer must open exactly
+    #: once per start, not on every refresh of the queue list.
+    job_started = Signal(object)
     job_finished = Signal(object)  # (Job) — terminal state reached
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -74,7 +78,7 @@ class RunQueue(QObject):
         Unlike cancel, this keeps the work: the child writes each finished
         member to its checkpoint directory and exits cleanly, so re-queuing the
         same job continues instead of restarting. It cannot be instant — a solve
-        in progress holds ~13 GB of solver state that cannot be saved, so the
+        in progress holds ~14.5 GB of solver state that cannot be saved, so the
         only stop that frees memory without discarding work is one that waits
         for the member to finish (up to the solve timeout).
         """
@@ -146,6 +150,7 @@ class RunQueue(QObject):
         self._append(job, f"$ {program} {' '.join(args)}")
         self.queue_changed.emit()
         process.start()
+        self.job_started.emit(job)
 
     def _append(self, job: Job, text: str) -> None:
         for line in text.splitlines():

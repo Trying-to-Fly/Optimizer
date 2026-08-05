@@ -1,4 +1,4 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-04, fourteenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-05, sixteenth session)
 
 > ## THE SPAN CAP IS BACK AT 2.0 m (user decision, 2026-08-04)
 >
@@ -14,18 +14,39 @@
 > (its name now derives from the base so it cannot drift into claiming a version
 > it does not share); re-opening the question is one command.
 >
-> **There is currently no guard-checked champion at 2.0 m.** The best 2.0 m
-> number on record is **142.09 min**
-> (`runs/20260731T152208-…-vtail_sample_v1-6_chord275`, same 12x10 prop) and it
-> predates BOTH the vortex-core fix (expect ~-0.16%, so ~141.9) and the mesh /
-> VLM ensemble guards. **A fresh 2.0 m battery is the next action** — user
-> approved 2026-08-04. Watch: whether the winglet is rejected again (it was at
-> 2.0 m, retained at 2.5 m), and whether the prop screen still picks the 12x10
-> at the 2.0 m operating point.
+> **That battery has now run.** The guard-checked 2.0 m champion is
+> **142.087 min** (`runs/20260805T000721-endurance_sample-vtail_sample_v1-7`),
+> 12x10 prop, winglet rejected, mesh check converged at -0.46%, NLP-vs-re-eval
+> gap 2.2e-5. Both things this section said to watch came out as predicted: the
+> winglet was rejected again at 2.0 m (it costs 0.917 min), and the prop screen
+> still picks the 12x10.
+>
+> **The -0.16% this section predicted did NOT appear, and that is not a bug.**
+> The prediction was that the vortex-core fix would drag 142.09 down to ~141.9.
+> The measured champion is 142.087 against the pre-fix 142.086 — no movement at
+> all. The fix *is* applied (all four `asb.LiftingLine` call sites pass
+> `LL_VORTEX_CORE_RADIUS`) and its effect is plainly visible elsewhere in the
+> same run: the flatness sweep at 2.0 m moved **120.1217 -> 119.9342, exactly
+> -0.156%**. The difference is the winglet. The core artefact was a
+> near-coincident-filament effect concentrated on high-cant winglet panels; the
+> flatness and multistart solves carry live winglet design variables, and the
+> CHAMPION does not, because the winglet study rejects it. The -0.16% was
+> extrapolated from a nominal configuration that keeps its winglet, so it never
+> applied to this champion. Do not read the unchanged number as the fix having
+> silently failed to apply — that was this session's first hypothesis and it was
+> wrong.
 
-**Champion of record: 142.09 min at the 2.0 m cap**, pending that re-run —
-`runs/20260731T152208-endurance_sample-vtail_sample_v1-6_chord275`. The 150.53
-figure below is retained as the answer to the span question, not as a design.
+**Champion of record: 142.087 min at the 2.0 m cap** —
+`runs/20260805T000721-endurance_sample-vtail_sample_v1-7`, guard-checked. The
+150.53 figure below is retained as the answer to the span question, not as a
+design.
+
+> **Read that run's sensitivities from a re-run, not from its own artifact.**
+> The flatness curve and the whole re-solve battery in that run describe the
+> INCUMBENT-prop, winglet-carrying aircraft at ~119.9 min, not the 142.09 min
+> design being reported, because those phases ran before the studies had
+> finished choosing the design. Fixed in this session (see below), so the next
+> battery's numbers are the champion's — but that run's are not.
 
 The thirteenth session closed every open issue the twelfth session left, and **five of them
 turned out to be measurement defects rather than physics** — three found by
@@ -44,7 +65,151 @@ not comparable at all — the sweep now samples a different set of spans.
 > packages (`aircraft/vtail_chord275/`, `aircraft/vtail_span180/`) are deleted;
 > their reasoning lives in `VTailSample.c_root_max_m`'s comment and FINDINGS §15.
 
-## FIXED this session (fourteenth, 2026-08-04)
+## NEW this session (sixteenth, 2026-08-05): equipment is a MANIFEST now
+
+The user supplied `Planes/RC/RC v2/ELECTRONICS_SPEC.xlsx` and asked for every
+part in it to be placed by the optimizer. That turned out to be less a feature
+request than a hole report.
+
+**Equipment was seven lumped point masses at literal stations, and no run this
+project has ever written said where any of them went.** `esc_wiring` sat at
+0.3932 of the pod length and `fc_gps_rx` at 0.5128 — fractions read off the
+frozen 585 mm pod, which stopped meaning anything the moment section 7 made the
+loft parametric. And `run.json` recorded `{name: mass}`, throwing away the half
+of each `PointMass` that says where it is, even though the CG is computed from
+exactly that number. **Both are fixed for every aircraft**: `masses.components`
+now carries mass AND station, and so do `report.html` and the build document's
+mass budget (which is therefore a weigh-and-balance sheet now).
+
+**`planeopt.equipment` is the mechanism; `aircraft/vtail_rcv2/` is the first
+aircraft to use it.** 19 airborne parts and 4 ground items, each with its own
+mass on two bases, installed envelope, packing lane, fore/aft order and the
+requirement verbatim. MODEL_DETAILS section 10 and `docs/EQUIPMENT_PLAN.md`
+carry the design; the four decisions were the user's (2026-08-05): a free
+station per item, the optional kit fitted and priced by a study, the **max**
+mass basis, and a new package rather than a change to `vtail_sample`.
+
+**`vtail_sample` and its 142.087 min champion are untouched.** The only edit to
+it is a pure refactor — the four lumped packaging rows moved into an overridable
+`packaging_constraints`, pinned by `tests/test_equipment.py` as still being six
+rows. The fingerprint moves (any source change does), so the next sample battery
+starts a fresh checkpoint subdirectory; the numbers do not.
+
+### Three findings from transcribing the sheet
+
+- **Its stated max-weight cap is 55 g light.** The totals row says "≈ 895 cap";
+  its own Max-wt column sums to **950 g**. `vtail_rcv2` solves on the max basis,
+  so that 55 g is the gap between the aeroplane the sheet claims and the one it
+  specifies. Both numbers are pinned in tests — correct the spreadsheet and the
+  test is what says the model must move with it.
+- **The BOM was written for a PUSHER and this aeroplane is a PULLER.** Every
+  placement note assumes the DESIGN_SPEC tail-pusher layout: nose bay free for
+  the companion computer, "pusher prop = everything forward is clean" for the
+  pitot. The pusher was priced twice and lost by 9.5-10.7 min, so the nose is
+  full of motor. Handled without assuming anything away — the nose bay is
+  modelled and used under a pusher, and under a puller the Pi and its BEC take
+  the fallback **the BOM itself names** ("beside FC tray") while the pitot takes
+  the outer wing LE, which the BOM lists first anyway.
+- **The 68 mm pod section is within a millimetre of not holding its own
+  electronics.** ESC (8 mm, left wall) + FC (36 mm, shelf) + SiK air unit
+  (10.7 mm, right wall) + 6 mm of build play = 60.7 mm against 61.0 mm of
+  interior width. That is now a constraint row, and it is the first thing in
+  this project that ties a parts list to `pod_wh`.
+
+### Two things reported rather than enforced, on purpose
+
+- **The tail group is over its 120 g budget** — 154.5 g at the fixed design,
+  126.5 g of which is the printed V-tail. Writing that as a constraint would not
+  discipline the design, it would delete the aeroplane, and what it would really
+  be constraining is the printed-surface mass model, whose constants are
+  UNCALIBRATED until `tools/fit_profile.py` runs on slicer data. So
+  `masses.equipment.tail_group` states it with its own verdict.
+- **`priced_options`, a new framework hook**: candidates measured by a full
+  paired re-optimization and NEVER adopted. `discrete_options` adopts whatever
+  wins, which is wrong when the alternative gives up something the model has no
+  term for — dropping the companion computer is strictly lighter and would be
+  adopted and reported as an improvement. Same posture `span_cap_m` takes toward
+  the print bed.
+
+### What to watch on the first `vtail_rcv2` battery
+
+- **`active_bounds` on the ten placement variables.** They were the user's call
+  against a flat-manifold recommendation; station reaches the objective only
+  through nose ballast, so the gradient is real but small. **If they all pin at
+  their lane ends, the freedom bought nothing** and the lanes should collapse to
+  derived forward-packing — measured, then deleted, exactly as the 1.8 d_eq
+  boat-tail floor is being handled.
+- **The objective will be well below 142.087 min and that is not a regression.**
+  Equipment goes from a lumped 858 g to 995 g (max basis, prop included). It is
+  a heavier aeroplane on purpose, and `masses.equipment.closure` reports what
+  the example-part build would weigh and balance at instead.
+- **Whether the aft-bay width row binds.** If `pod_wh` runs to a bound to make
+  room for the electronics, the parts list is now driving the fuselage section,
+  which is new and worth knowing.
+
+## FIXED in the fifteenth session (2026-08-05)
+
+The 2.0 m battery ran and converged cleanly, and auditing its artifact turned up
+**seven things the run was wrong about — none of them in its numbers, all of them
+in its claims.** That is the same shape as the thirteenth session's findings and
+worth stating plainly: a converged battery with every guard green can still
+describe an aeroplane other than the one it built.
+
+- **The sensitivity phases described a superseded design.** The flatness sweep
+  and the re-solve battery ran immediately after the multistart, BEFORE the
+  discrete studies and the winglet study had finished choosing the design. So
+  the artifact's span-flatness curve and all four ±10% sensitivities belong to a
+  119.93 min aircraft on the incumbent 11x6 prop carrying a winglet, while the
+  champion reported alongside them is a 142.09 min aircraft on a 12x10 with no
+  winglet. Every member converged and nothing said the two were different
+  aeroplanes. **Both phases now run after the winglet study**, and the +20 g
+  shadow-price bump rides the battery so the REPORTED trade rate is the final
+  design's too (the multistart bump survives, unreported, because
+  `screen_discrete` needs a shadow price before the studies run). Pinned by
+  `tests/test_phase_order.py`.
+- **The headline number was limited by `v_min`, and said so nowhere.** The
+  champion is 142.09 min at 9.5 m/s; the sweep's own optimum is 143.01 min at
+  9.0, excluded by the minimum-speed requirement. `diagnostics.v_min_price` now
+  names the excluded peak and prices the requirement, with a note and a report
+  section — "the best this aeroplane can do" and "the best it may do at or above
+  9.5 m/s" are different sentences and only the second was ever true.
+- **A solver giving up was recorded as proven infeasibility.** V = 8.0 m/s was
+  reported `infeasible` on the strength of *"the iteration is not making good
+  progress"* — a message about the root-find's step, at a speed 0.28 m/s above
+  computed stall where a trimmed solution may well exist. Sweep points now carry
+  a `cause`, and `trim_not_converged` is reported as UNKNOWN rather than as a
+  limit of the aeroplane.
+- **The static margin changes sign inside its own regression window.** Reported
+  SM 0.0800 sitting on its floor, with local dCm/dCL of +0.187, +0.138, then
+  **-0.022 at the trim alpha itself**. This is the known dominant fidelity limit
+  of the SM estimator — and a known limit that nothing announces is
+  indistinguishable from a clean result to everyone downstream. Now a
+  `sm_sign_consistent` constraint check, a log warning, a note, and a report
+  paragraph that explains the FAIL rather than leaving it bare.
+- **A fully resumed phase was indistinguishable from a skipped one.** Multistart
+  and the flatness sweep both reported 0.0 minutes; both had in fact been solved
+  in full the evening before and came off disk. The fingerprint guard means the
+  physics matches, so the resume was legitimate — but "fresh battery" and
+  "re-ran the global search" are different claims and the artifact could not
+  tell them apart. `diagnostics.phase_resumed` now reports "N of M from
+  checkpoint" per phase, with a note when a whole phase came off disk.
+- **The per-solve RAM figure was folklore and was optimistic.** `13.0` GB
+  against a measured 14.48 GB peak. `budget_to_parallel` DIVIDES by this, so the
+  error direction costs a battery to the OOM killer; now 14.5, and the prose in
+  `memory.py`, `cli.py`, `geometry.py` and `solve.py` agrees with it.
+- **The vortex-core prediction in this file was wrong** — see the correction at
+  the top. Recorded because the wrong inference it invites (that the fix silently
+  failed to apply) costs an afternoon to rule out.
+- **The fuselage drag model could not see afterbody SHAPE, and two things it
+  could not see were load-bearing.** Tier 1 of the fuselage-drag plan is built:
+  boat-tail separation charged as an effective base, a fineness ceiling shipped
+  with it, and the end cap derived from the boom socket it actually is. Plus, at
+  the user's request, the rows that stop the optimizer shrinking the pod below
+  its own motor — **the champion's nose has half the length it needs for the
+  can.** Both move every objective; the FUSELAGE DRAG FIDELITY section below is
+  the full account, including where the build departed from the plan.
+
+## FIXED in the fourteenth session (2026-08-04)
 
 Nothing in the model moved; this was a decision-and-hygiene session. The audit of
 everything committed since the last run found the code and the run artifacts
@@ -163,12 +328,369 @@ is a defensible summary of that and still a summary. **flow5 (or equivalent)
 should own the stability verdict before anything is built** — an external tool,
 not a code change, and it gates BUILDING rather than running.
 
+> Since 2026-08-05 the RUN says this about itself: `sm_sign_consistent` fails,
+> the log warns, and the report explains it beside the margin. That does not
+> close the issue — it stops it being something a reader has to already know.
+
 **Issue 0b's second half** — which of the seven active bounds is worth relaxing —
 is now a question with a printed work list rather than a hidden one, and it needs
 solves rather than edits. Start with `x_battery`: it, `ballast_kg = 0` and SM
 exactly on its floor together say the design is CG-limited, which the whole
 span-vs-chord discussion missed. `le_shear = 1.0` and `washout_tip = 0.0` are
 departures from DESIGN_SPEC that have never been questioned.
+
+> The 2026-08-05 champion sharpens this: **`c_root` is no longer on its cap**
+> (0.251 m against the 0.275 m limit), so the chord starvation that FINDINGS §15
+> diagnosed is genuinely relieved — while `x_battery` IS pinned at its aft limit
+> with SM exactly on 0.0800. The binding pair is now battery travel and the SM
+> floor, and nothing else. That is the next bound worth relaxing, and unlike the
+> chord cap it is a mounting question rather than a print-bed one.
+
+**Issue 3 (2026-08-05) — the fuselage drag model could not see shape, and the
+champion was exploiting that. TIER 1 IS NOW BUILT** — see the next section for
+what shipped and what it changed. What remains open is the *measurement*: the
+`pod_tail ≥ 1.8·d_eq` floor is deliberately kept for one battery, and the next
+run is what decides whether it is deleted as a no-op or whether the constants
+need revisiting.
+
+## FUSELAGE DRAG FIDELITY — Tier 1 BUILT 2026-08-05
+
+> **Status: IMPLEMENTED** against `docs/FUSELAGE_DRAG_PLAN.md` (2026-08-05).
+> The four judgement calls were decided by the user that day (effective-base
+> model, θ_sep = 12°, fineness cap f ≤ 8, floor kept one battery then deleted as
+> a measured no-op); the plan states the full math, the seams, expected
+> magnitudes and the rollout, and the implementation notes below record where
+> the build **departed from the plan and why**. The physics lives in
+> `fuselage.afterbody_terms` and is documented in MODEL_DETAILS §7.3.
+> Everything after "### 1. Why it matters more than it looks" remains as the
+> original investigation record.
+>
+> ### > THIS MOVES EVERY OBJECTIVE. COMPARISONS CARRY IT. <
+>
+> Exactly like the vortex-core fix: the `r_cap` geometry change plus the new
+> term shift every objective, and **flatness figures are not comparable across
+> it at all.** The first run that carries this change must be flagged the same
+> way, and FINDINGS gets its entry AFTER that battery, not before. **Do not
+> compare the next champion's minutes against 142.087 without naming this
+> change as a cause.** At the current champion's design vector the term charges
+> +34 % on body drag and +2.0 % on total drag; the geometry fix alone adds 1.2 %
+> wetted area and 1.2 g before any drag is charged.
+>
+> ### What to read the next battery for
+>
+> The rollout is deliberately measure-then-move (plan §7): with an uncalibrated
+> constant and no floor, the first battery's boat-tail would be set entirely by
+> a number nobody has validated. So `pod_tail ≥ 1.8·d_eq` ships **untouched**,
+> and the next battery answers three questions with machinery that already
+> exists:
+>
+> - `active_bounds` / the constraint's slack — **is the floor inactive now?**
+>   If yes, delete it in the following change as a measured no-op and state the
+>   slack in the commit. If it is still pinned, the correlation is too weak:
+>   revisit the constants, do **not** delete the floor.
+> - `diagnostics.afterbody` — did θ_max settle near the 12° threshold? The
+>   predicted response is a longer boat-tail, θ_max → 12–14°, landing near
+>   f ≈ 7.2 — inside the f ≤ 8 ceiling and off the floor.
+> - the champion delta — within shouting distance of the −2 to −3 min the plan
+>   estimated?
+>
+> ### Where the build departed from the plan
+>
+> Three places, all recorded because each one is a decision a reader would
+> otherwise have to re-derive from the diff:
+>
+> 1. **`r_cap = boom_od / WIDTH`, not `/ d_eq`.** The plan's formula makes the
+>    cap's *equivalent* diameter equal the boom OD — but the cap face then works
+>    out **10.5 × 13.7 mm at the champion, and a round 12 mm tube does not pass
+>    through a 10.5 mm hole.** It would have made the fraction self-consistent
+>    in the d_eq convention while leaving in place the exact physical fault §3
+>    exists to close. Sized on the narrow dimension the cap is 12.0 × 15.5 mm.
+>    Costs ~6 % of the charge (θ_max 18.5° → 18.0°, base area 3.15e-4 →
+>    2.97e-4 m²), so the plan's §6 estimates still hold to within that.
+> 2. **The fineness ceiling is pod-boom ONLY.** Applied to `integrated` it would
+>    not bound that candidate, it would delete it — that body runs to the tail
+>    block, so its length is set by `tail_arm` and it sits at **f = 14.7** at the
+>    declared defaults (18.1 at the champion's vector). The only way to satisfy
+>    f ≤ 8 there is a maximally fat pod on a minimum tail arm, so the topology
+>    study's priced alternative would quietly become a garbage design that still
+>    converged. **The needle exploit is therefore still open for `integrated`** —
+>    the champion diagnostics report fineness for both topologies so a run that
+>    finds it says so, but nothing stops it.
+> 3. **A NaN pole was found and closed that the plan did not anticipate.** At
+>    `r_cap = 1` the closure `1 − r_cap` is exactly zero, ρ is infinite, and
+>    `smooth_floor(1 − ∞)` is `0.5·(−∞ + ∞)` = NaN; separately, flooring the
+>    discriminant to exactly zero gives the sqrt above it an infinite slope, so
+>    the *guard against NaN values* was itself a source of NaN **gradients**.
+>    Both are unreachable through today's bounds and one edit away from
+>    reachable — freeing `r_cap` is on this file's own list of cheap widenings.
+>    Found by the symbolic-safety test, not by review.
+>
+> ### Shipped alongside, at the user's request (2026-08-05)
+>
+> **The motor has to fit inside the nose.** Not part of the drag plan; raised
+> while reviewing it, and a live defect of the same kind — the optimizer had been
+> shrinking the pod section for runs and **the champion's nose offers 25.8 mm of
+> can-width room for a 51 mm can.** MODEL_DETAILS §7.2 has the formulation. Two
+> rows, puller only, no geometry change: the loft stays the outer mould line
+> (pod plus the nosecone that completes it) and the rows only claim that the
+> cylinder fits inside it, ahead of the bay. Expect the next champion's `pod_xs`
+> to come back up from 0.794 toward ~1.0, where the existing `pod_nose ≥ 1.0·d_eq`
+> floor nearly satisfies it on its own.
+>
+> **This one is not comparable-across either, and it binds harder than the drag
+> term does.** A pod that cannot hold its own motor was never a cheaper
+> aeroplane, so the minutes it was buying were not real.
+>
+> **And it dragged out a second defect, in the MASS model.** Asking where the
+> bulkhead is means asking where the motor is, and the answer was a literal:
+> `nose_tip + 0.02`, written when the pod was a frozen 585 mm prism and left
+> alone when the pod became a loft the optimizer shrinks. At the 2026-08-05
+> champion it places a 42 mm motor **20 mm behind a tip where the pod is 39.9 mm
+> wide** — a station the motor cannot occupy. The can's CG is really **41 mm
+> further aft**, which on a 190 g motor+prop group is **+4.3 mm of aircraft CG**,
+> measured. That matters more than its size suggests: this design is CG-limited,
+> with `x_battery` pinned at its aft limit and SM sitting exactly on its floor,
+> and the correction moves CG in the direction it has been starved of. Mass does
+> not move; only the station. Both the mass model and the packaging row now read
+> `nose_split`, so there is one motor station instead of two.
+>
+> **The nosecone is now a named part.** The loft is the outer mould line — pod
+> plus the fairing that completes it — and no artifact said which was which, so
+> the builder got a pointed body with no cut station and no opening diameter.
+> The split is derived rather than chosen (the one station where the interior
+> first clears the can, i.e. the motor-fit constraint read backwards), and it
+> appears in the CAD brief and on the manufacturing sheet. At the champion:
+> **36 mm of nosecone, a 49 × 63 mm bulkhead with a 42 mm opening, 26 mm of motor
+> bay for a 51 mm can.** No mass moves — the pod mass model integrates the whole
+> loft's wetted area, so the fairing was always paid for.
+>
+> Still one continuous body in the 3D model and the STEP/CSV export. Splitting it
+> there would mean `fuselage_lofts()[0]` no longer being the whole pod, which the
+> mass model indexes — so it is a deliberate next step, not a silent one.
+
+### 1. Why it matters more than it looks
+
+Body drag as a share of total, measured on the 2026-08-05 champion's own speed
+sweep — same airframe, current model, nothing re-solved:
+
+| V (m/s) | CL | CD_bodies | CD_total | body share |
+| --- | --- | --- | --- | --- |
+| 8.5 | 0.98 | 0.00219 | 0.05446 | **4.0%** |
+| 9.5 *(champion)* | 0.78 | 0.00214 | 0.03712 | **5.8%** |
+| 12.0 | 0.49 | 0.00204 | 0.02179 | **9.4%** |
+| 16.5 | 0.26 | 0.00192 | 0.01452 | **13.2%** |
+
+`CD_bodies` barely moves — **-12% across a 2x speed range, all of it the
+`Re^-0.2` on skin friction**. The entire effect is induced drag collapsing out
+from under it. So the endurance intuition ("mass decides, fuselage shape is
+noise") is a statement about the OPERATING POINT, not about the model: at a
+top-speed design point the ranking inverts, weight nearly stops mattering, and
+what is left is wetted area and form.
+
+Do NOT cite the 2026-07-26 `speed_sample` run for this — it predates the
+vortex-core fix, the prop model and the mesh guards. The table above is current.
+
+### 2. The actual limitation: a four-number channel
+
+The complete information path from fuselage geometry to the objective is
+`aero.body_cd0` plus the Munk term, and between them they consume exactly four
+quantities per body:
+
+- `wetted_area_m2`
+- `length_m` (only as `Re` -> `Cf = 0.074/Re^0.2`)
+- `form_factor` (a function of `L/d_eq` ALONE — `fuselage.body_dict`)
+- `volume_m3` (Munk pitching moment only, not drag)
+
+**Any two fuselages agreeing on those four are identical to the optimizer, to
+the last digit.** A well-faired body and a badly separated one of equal wetted
+area, length, equivalent diameter and volume score the same.
+
+The direct consequence, and the reason this section exists before any geometry
+work: **do not widen the fuselage parameterization until this is fixed.** Adding
+spline control points or free cross-sections today would add design variables
+the objective is provably blind to — a degenerate optimum on a flat manifold,
+which IPOPT handles badly, plus more CasADi graph on a solve already peaking
+near 14.5 GB, and no better aeroplane. The parameterization is not the binding
+constraint. The drag model is.
+
+### 3. What the parameterization currently is (inventory, so nobody re-derives it)
+
+It is a REAL loft, not a drag table: `fuselage.loft()` builds an `asb.Fuselage`
+from 16 superellipse stations and the NLP reads that loft's own
+`area_wetted()` / `volume()` integrals symbolically. The optimizer SIZES the
+family; it does not RESHAPE it.
+
+Free (4 shape DOF + 1 placement): `pod_nose`, `pod_bay`, `pod_tail` (pod_boom
+only — integrated derives the cone from `tail_arm`), `pod_xs`, and
+`pod_bay_end` (axial placement).
+
+Fixed: superellipse exponent (4.0), end-cap fraction `r_cap` (0.12), station
+counts (7/7), the nose elliptical arc, the boat-tail cubic Hermite, and — note —
+**the width:height ratio, locked**: `pod_xs` scales BOTH from
+`POD_XS_SPEC = (0.068, 0.088)`, so the pod cannot be made wider and flatter.
+
+Also note `fuselage_topology: ["pod_boom", "integrated"]` is already a discrete
+study priced every run, so the aircraft is *not* stuck on pod-and-boom — but
+both topologies use the same 5-parameter family.
+
+Once the physics can see shape, the cheap widenings are three scalars: unlock
+the w:h ratio, free the superellipse exponent, free `r_cap`. Splines come much
+later, if ever.
+
+> **THE FIRST OF THOSE THREE IS DONE (2026-08-05, user decision).** `pod_wh` is a
+> design variable — the width:height ratio — with `r_cap` already symbolic.
+> Only the superellipse exponent is still fixed.
+>
+> **`pod_xs` and `pod_wh` are orthogonal by construction:** `w·h` is the spec
+> product times `pod_xs²` whatever the ratio, so **`d_eq` depends on `pod_xs`
+> alone.** That is deliberate rather than tidy — the two proportion floors, the
+> fineness ceiling and the entire afterbody term are written against `d_eq`, and
+> a ratio that moved it would silently re-scale six constraints while claiming to
+> change only shape. `pod_wh = 68/88` is the default, so **every number this
+> project has recorded is the `pod_wh = 0.7727` slice of the new family**, exactly.
+>
+> **The objective can see it, which is the whole precondition.** At fixed `d_eq`
+> a superellipse has least perimeter when square, so the loft's own wetted-area
+> integral prices eccentricity: measured at the champion, **Swet 0.0688 m² square
+> against 0.0712 at the 1.55 bound, +3.5%.** And it pulls the OTHER way through
+> the afterbody term — squaring widens the narrow dimension, so `r_cap` shrinks,
+> the boat-tail closes harder and the base charge rises (2.97e-4 → 3.15e-4).
+> A real trade, not a slide to a bound.
+>
+> **What it buys immediately** is the cheap currency for the motor-fit row. That
+> row was going to be paid for with `pod_xs` — growing the whole pod and its
+> wetted area with it — and squaring the section instead takes the motor bay
+> from **25.8 mm to 37.0 mm without touching `d_eq` at all.**
+>
+> **Width is no longer the narrow dimension.** Three places quietly relied on it
+> — the boom socket, the bulkhead station and the motor row — and all three now
+> take a SMOOTH min of width and height (`p["d_min"]`), because `min` is a branch
+> on a design-variable value. It under-reports by tau/2 = 50 µm, i.e. toward the
+> stricter constraint and the slightly larger socket, which is the safe direction
+> for a hole that has to admit a tube. Pinned by a mirror test: a 68×88 pod and
+> an 88×68 pod must agree on every derived quantity.
+>
+> Bounds `POD_WH_LIMITS = (0.65, 1.55)`, a model-validity bound in the
+> `fineness_max` idiom, sourced from the model's own convention error — closure
+> angles use the d_eq-equivalent convention, which understates the steeper
+> principal plane by `sqrt(max(w/h, h/w))`: 14% at the spec section and **24% at
+> these limits**.
+
+### 4. The live defect
+
+Computed from the champion's own Hermite boat-tail
+(`r(u) = 1 - (1-r_cap)(3u^2 - 2u^3)`, max slope at `u = 0.5`):
+
+| station | local closure half-angle |
+| --- | --- |
+| u = 0.25 | 15.4° |
+| u = 0.50 | **20.1°** |
+| u = 0.75 | 15.4° |
+
+Separation onset for an axisymmetric afterbody is around **12-15°** half-angle.
+The champion runs ~20° (≈40° included) through the middle of its boat-tail and
+`body_cd0` charges **nothing** for it. *(Charged since 2026-08-05; the angle
+reads 18.0° once the end cap is the boom socket it should always have been.)*
+
+And the reason is visible in the design vector: **`pod_tail` = 110.6 mm sits
+EXACTLY on its floor of `1.8 x d_eq` = 110.6 mm.** The optimizer shortens the
+boat-tail until a hard-coded geometric floor stops it, and that floor is a
+*proxy for the physics that is missing*. Give the model a real afterbody term
+and the floor should become removable — which is the satisfying version of this
+work, not a bolted-on penalty.
+
+Two more gaps found while scoping — **both closed 2026-08-05, see the status
+block at the top of this section**:
+
+- **There is no base-drag term anywhere in the buildup.** Not small-and-ignored;
+  absent.
+- **There is no fineness cap anywhere.** The Hoerner form factor in use,
+  `FF = 1 + 60/f^3 + f/400`, bottoms out at **f = 16.38**; the champion sits at
+  f = 6.20. Real minimum-drag fineness for a body of revolution is ~6-7. Point a
+  top-speed objective at this and the model will pay to stretch the pod toward a
+  needle — the same failure shape as FINDINGS §18, where the optimizer found a
+  corner in which the MODEL rather than the aeroplane produced the win.
+
+### 5. Tier 1 — the work item
+
+In-loop algebraic afterbody terms plus a fineness cap. Rough estimate one day of
+code; the correlation decision is the long pole, not the implementation.
+
+**Seams (both already exist).** `fuselage.body_dict()` computes the terms — it
+already owns the fineness -> FF derivation, so afterbody physics belongs beside
+it — and `aero.body_cd0()` consumes them by reading new dict keys.
+
+**The closure angle is closed-form for this family**, so no geometry query and
+no new design variables are needed:
+
+```
+theta_max = atan[ (d_eq/2) * 1.5 * (1 - r_cap) / tail_len ]
+```
+
+`body_dict` does not currently receive `tail_len` or `r_cap` (they are
+`loft()` arguments) — they will have to be passed or the afterbody helper
+called alongside.
+
+**Constraints the implementer must respect:**
+
+- **Symbolic safety.** `fuselage.py` imports `aerosandbox.numpy` and is safe.
+  **`aero.py` imports PLAIN `numpy`** — putting new symbolic arithmetic there is
+  a trap; check before writing. Use `geometry.smooth_floor` for the
+  `max(0, theta - theta_sep)` hinge, never a bare `max`.
+- **The `dv=None` frozen baseline must not move** (validation continuity). It
+  returns hard-coded dicts; additive keys with safe defaults leave it still.
+  `tests/test_fuselage.py:13` pins `wetted_area_m2 == 0.183` and will catch a
+  regression.
+- **Base area needs occlusion handling** — in pod_boom the boom emerges from the
+  cap. While checking this a **geometric inconsistency surfaced: the boom is
+  12 mm OD and the base is `r_cap * d_eq` = 7.4 mm, so the boom is LARGER than
+  the cap it sockets into.** Resolve that before charging base drag against
+  either number.
+- **Ship the fineness cap in the same change**, or the exploit merely moves from
+  the boat-tail to the needle.
+- **It will move every objective**, exactly like the vortex-core fix — flatness
+  figures will not be comparable across it, and HANDOFF/FINDINGS need the same
+  "comparisons carry this" note.
+
+**Unresolved judgement calls — decide these, do not assume them:**
+
+1. **The boat-tail correlation and its constants** (separation threshold, growth
+   law). The defensible posture is the one already used for `MOUNT_EFFECTS` and
+   the 1.08 interference factor: *declared data, labelled uncalibrated,
+   adjustable data not code*. A scoping sanity-check using a
+   `(theta - 12°)^2` form suggested roughly +8% on body drag at the champion —
+   real but not dominant, and enough to create the gradient that lifts
+   `pod_tail` off its floor. **That was an order-of-magnitude check, not a
+   recommendation.**
+2. **Whether max local angle is the right separation criterion**, or whether the
+   drag should be integrated over the afterbody. Max-angle is analytic and
+   cheap; an integral is more honest.
+3. **The base drag coefficient.** Suggest matching AeroSandbox's own
+   `fuselage_base_drag_coefficient(mach)` at low Mach, so that Tier 2's
+   cross-check is comparing like with like.
+4. **The fineness cap value** — must come from a source, NOT from the FF curve's
+   own minimum, which is the artefact being guarded against.
+
+### 6. Tiers 2 and 3, for context
+
+**Tier 2 — numeric cross-check guard (a day or two).** Follows the architecture
+already in place: `aero.mesh_convergence_check` and `aero.vlm_induced_check` are
+both "cheap in-loop model, expensive numeric second opinion at the champion
+point, flagged in the artifact". Run `asb.AeroBuildup` on a fuselage-only
+airplane and compare. Numeric-only, so no symbolic constraints.
+
+Be honest about what it buys: **asb 4.2.10's fuselage model HAS a base-drag term
+(`Cd_base(M) * area_base * q`) the current buildup lacks entirely, and has NO
+boat-tail or separation model at all** (zero source hits for `boattail` /
+`separation`). It cross-checks wetted-area and base bookkeeping. It says nothing
+about closure angle. Easy to oversell.
+
+**Tier 3 — a real pressure solution (weeks, and not in-loop).** A source-panel
+method gives a pressure distribution but is inviscid: it shows the adverse
+gradient, not the separation, without boundary-layer coupling. The better
+version is external and gates BUILDING rather than running — the same posture
+this project already took for stability, where flow5 owns the verdict (issue 2
+above).
 
 ## THE 3 m RUN — DONE, and the span curve finally turns over
 
@@ -347,7 +869,7 @@ that were tested and refuted — read those before re-deriving them.
   below could be reclassified at all.
 - **Per-solve wall-clock cap** — `SOLVE_TIMEOUT_MIN = 30`, `--solve-timeout-min`,
   and a field in the GUI's New Run dialog. IPOPT's `max_wall_time`, not
-  `max_cpu_time`: a 13 GB solve on a 25 GB machine can swap, and it is the
+  `max_cpu_time`: a 14.5 GB solve on a 25 GB machine can swap, and it is the
   clock we are protecting.
 - **One static-margin estimator.** The NLP used 3 alphas and the re-evaluation 5;
   those are different quantities on a nonlinear Cm(CL) and differed by ~0.002.
@@ -369,7 +891,7 @@ that were tested and refuted — read those before re-deriving them.
 - **Pause and resume a battery** — `--checkpoint DIR` and `--pause-file FILE`,
   plus a Pause button in the GUI. Creating the pause file stops the run at the
   next member boundary; every finished member is on disk, so re-running the same
-  command continues instead of restarting, and the process exits so all ~13 GB
+  command continues instead of restarting, and the process exits so all ~14.5 GB
   is released.
 
   **Member boundaries are a physical limit, not a shortcut.** A solve in flight
@@ -980,7 +1502,7 @@ below is still the M4.8 champion's.
   how many independent solves in a batch run side by side, i.e. it is a
   friendlier `--parallel`. Width = budget / measured per-solve peak. Runs now
   RECORD `diagnostics.peak_rss_gb`, and later budgets divide by that measurement
-  instead of the folklore 13 GB. Overshooting free RAM warns rather than clamps
+  instead of a hard-coded figure. Overshooting free RAM warns rather than clamps
   (swap is real, peaks are transient, and a dial that silently refuses to move
   is worse than no dial); the hard ceiling is physical + swap. On this box
   (25 GB + 10 GB swap) the dial is effectively a 1-vs-2 switch — `planeopt
@@ -1004,7 +1526,7 @@ below is still the M4.8 champion's.
   design brief, read off the built airplane rather than the declared attribute
   (it is a discrete outer-loop candidate, so it can differ per run).
 - Costs held flat on purpose: still 4 panels / 5 xsecs, so the CasADi graph,
-  solve time and 13 GB peak are unchanged from v3.
+  solve time and RAM peak are unchanged from v3.
 - Tests: `tests/test_memory.py` (16) new, `tests/test_wingcurve.py` rewritten
   (24). Full fast suite 113 passing. A 384-corner sweep of the wing variable
   bounds confirms a NaN/Inf-free Jacobian in both dihedral forms.
@@ -1026,7 +1548,7 @@ first slice = run browser + mission form, sequential queue.
   (`tests/test_gui.py`, 16 tests) — widget layout is verified by running the
   app, not by asserting on pixels.
 - Browsing reads run.json only. Runs execute as **subprocesses of the same
-  CLI** (`python -m planeopt ...`, or the exe itself when frozen): a 13 GB
+  CLI** (`python -m planeopt ...`, or the exe itself when frozen): a 14.5 GB
   solve that the OOM killer takes kills one job, not the GUI, and cancel is a
   kill rather than a cooperative interrupt.
 - The mission is a real form because MissionSpec is pure data; it round-trips
@@ -1077,7 +1599,7 @@ mission. New features enter as framework hooks + aircraft-declared data.
 
 ## 2. Environment hazards (each one has already burned a session)
 
-- **RAM:** one NLP solve peaks ~13 GB. Under the default 15 GB WSL
+- **RAM:** one NLP solve peaks ~14.5 GB (measured 14.48, 2026-08-05). Under the default 15 GB WSL
   allotment, NEVER run two heavy jobs (NLP solve, pytest suite)
   concurrently — the WSL OOM killer takes the whole session down.
   **2026-07-24:** `C:\Users\M0obo\.wslconfig` now grants WSL 26 GB +

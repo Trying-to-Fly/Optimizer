@@ -34,6 +34,7 @@ from __future__ import annotations
 import aerosandbox as asb
 import aerosandbox.numpy as np
 
+from planeopt import geometry
 from planeopt.types import (
     BatteryConfig,
     ConstructionProfile,
@@ -55,7 +56,7 @@ from lwpla_a1 import (
 # by the optimiser around them, so nothing about its shape is asserted here.
 BATT_L, BATT_W, BATT_H = 0.145, 0.045, 0.030  # the 4S 4Ah pack
 STACK_LEN = 0.070  # ESC + FC + RX + wiring, packed behind the battery
-MOTOR_LEN = 0.055  # motor can + spinner ahead of the firewall
+MOTOR_LEN, MOTOR_OD = 0.055, 0.042  # the motor can, as a cylinder that must fit in the nose
 WALL = 0.006  # printed shell + clearance, per side
 SHELL_KG_M2 = 0.60  # printed fuselage shell + formers, per m2 of wetted area
 BOOM_OD, BOOM_WALL = 0.012, 0.0008  # CF tube, only used by the pod_boom topology
@@ -109,6 +110,16 @@ class SpeedSample:
     # drag is cheap at low CL and a short spar is light. The optimiser is then
     # exploiting a region where the aerodynamics being reported is not valid.
     aspect_ratio_min = 4.5
+
+    # Fineness ceiling (L / d_eq) — the same kind of bound as the floor above,
+    # and it belongs on THIS aircraft more than on the loiter one. The Hoerner
+    # form factor is a function of fineness alone and bottoms out at f = 16.38,
+    # so a speed objective, which is the one that actually cares about body
+    # drag, will happily stretch the fuselage toward a needle to chase a fit
+    # artefact. 8 is above the ~6-7 physical minimum-drag band for a body of
+    # revolution and above this airframe's 6.6 at defaults. Landing on it is a
+    # defect report, not an optimum. pod_boom only — see geometry_constraints.
+    fineness_max = 8.0
 
     # Tail arm as a multiple of the wing's mean chord. Tail *volume* alone can be
     # bought with arm instead of area, which satisfies the floor with a long boom
@@ -431,12 +442,30 @@ class SpeedSample:
             boat = self._tail_station(d) - bay_end
         else:
             boat = d["boat_len"]
+        d_eq = (d["fus_w"] * d["fus_h"]) ** 0.5
         return {
             "nose": d["nose_len"], "bay": d["bay_len"], "boat": boat,
             "bay_start": d["nose_len"], "bay_end": bay_end,
             "length": bay_end + boat,
             "w": d["fus_w"], "h": d["fus_h"],
-            "d_eq": (d["fus_w"] * d["fus_h"]) ** 0.5,
+            "d_eq": d_eq,
+            # End cap: the boom SOCKET when there is a boom (so the fraction
+            # moves with the body — a 12 mm tube is 12 mm whatever the body
+            # does), a small tail cap when the body carries the tail itself.
+            # Derived here rather than in the loft, because the afterbody drag
+            # term needs the same number the loft is built from.
+            #
+            # Sized against the NARROW dimension: a round tube passes through
+            # the smaller of width and height, and against d_eq the cap face
+            # comes out narrower than the boom it sockets. Both are free
+            # variables here, so `min` would be a branch on a design-variable
+            # value — hence the smooth min, which is `-max(-w, -h)` through the
+            # same hinge every other guard in this project uses.
+            "r_cap": (
+                BOOM_OD / -geometry.smooth_floor(-d["fus_w"], floor=-d["fus_h"])
+                if self.fuselage_topology == "pod_boom"
+                else 0.10
+            ),
         }
 
     def fuselage_lofts(self, dv: dict | None = None) -> list:
@@ -446,16 +475,13 @@ class SpeedSample:
 
         d = self.DV_DEFAULTS | (dv or {})
         f = self.fus_dims(d)
-        # End cap: a boom socket when there is a boom, a small tail cap when the
-        # body carries the tail itself.
-        r_cap = BOOM_OD / f["d_eq"] if self.fuselage_topology == "pod_boom" else 0.10
         return [
             fuselage.loft(
                 nose_len=f["nose"], bay_len=f["bay"], tail_len=f["boat"],
                 width=f["w"], height=f["h"],
                 x_nose=0.0,
                 z_c=-f["h"] / 2 + 0.006,  # wing root plane embeds 6 mm into the body
-                r_cap=r_cap,
+                r_cap=f["r_cap"],
                 name="fuselage",
             )
         ]
@@ -524,12 +550,36 @@ class SpeedSample:
         opti.subject_to(f["h"] >= BATT_H + 2 * WALL)
         # bay must hold the pack plus the electronics stack behind it
         opti.subject_to(f["bay"] >= BATT_L + STACK_LEN)
-        # nose must clear the motor, and stay long enough to fair into the bay
-        opti.subject_to(f["nose"] >= MOTOR_LEN)
+        # nose must stay long enough to fair into the bay
         opti.subject_to(f["nose"] >= 1.0 * f["d_eq"])
-        # boat-tail proportion floor: shorter than this and the flow separates,
-        # which the flat-plate buildup would not notice but the airplane would
+        # ...and must actually HOLD the motor. `nose >= MOTOR_LEN` used to stand
+        # for this and did not: the nose is a pointed elliptical arc, so its
+        # front is narrower than the can and only the aft part of it is usable.
+        # The arc inverts in closed form — the interior first clears the can at
+        # t = 1 - sqrt(1 - r_req^2), leaving `nose * sqrt(1 - r_req^2)` behind
+        # it — so the honest test costs one sqrt and no station search.
+        #
+        # Both cross-section dimensions are free variables here, so BOTH rows
+        # are emitted rather than the smaller one selected: `min(w, h)` would be
+        # a branch on a design-variable value, which the symbolic-safety rule
+        # forbids, and requiring both is the same feasible set.
+        for dim in (f["w"], f["h"]):
+            can = MOTOR_OD + 2 * WALL
+            opti.subject_to(dim / can >= 1.0)
+            r_req = can / dim
+            usable = f["nose"] * np.sqrt(geometry.smooth_floor(1 - r_req**2))
+            opti.subject_to(usable / MOTOR_LEN >= 1.0)
+        # boat-tail proportion floor. It used to be the ONLY thing standing
+        # between this model and a separated afterbody; since 2026-08-05 the
+        # buildup charges separation directly (fuselage.afterbody_terms), and
+        # the floor stays until a run measures it inactive.
         opti.subject_to(f["boat"] >= 1.8 * f["d_eq"])
+        # Fineness ceiling (see `fineness_max`), dimensionless per the standing
+        # rule. pod_boom only: in the integrated topology the body runs to the
+        # tail group, so its length is set by `tail_arm` and this bound would
+        # delete the candidate from the topology study rather than bound it.
+        if self.fuselage_topology == "pod_boom":
+            opti.subject_to(f["length"] / (self.fineness_max * f["d_eq"]) <= 1.0)
         # the battery lives inside the bay
         opti.subject_to(d["x_battery"] >= f["bay_start"] + BATT_L / 2)
         opti.subject_to(d["x_battery"] <= f["bay_end"] - BATT_L / 2)
@@ -669,6 +719,13 @@ class SpeedSample:
         body = fuselage.body_dict(self.fuselage_lofts(dv)[0], f["length"], f["w"], f["h"])
         # Puller: the slipstream scrubs the whole body (MODEL_DETAILS section 2.4).
         body["form_factor"] = body["form_factor"] * 1.10
+        # Afterbody separation + base pressure (MODEL_DETAILS 7.3), additive
+        # rather than a factor — not a skin-friction term, so neither the scrub
+        # above nor the excrescence factor may scale it. It matters MORE here
+        # than on the loiter aircraft: body drag is 4% of the total at 8.5 m/s
+        # and 13% at 16.5, and a top-speed objective is judged where induced
+        # drag has collapsed out from under it.
+        body |= fuselage.afterbody_terms(f["d_eq"], f["boat"], f["r_cap"])
         bodies = [body]
         if self.fuselage_topology == "pod_boom":
             bodies.append(fuselage.boom_body(self._boom_length(d), od=BOOM_OD))

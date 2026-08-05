@@ -273,7 +273,7 @@ def test_geometry_matches_the_shared_panel_list(sample_aircraft, form, dv):
 
 def test_station_count_is_unchanged_from_v3(sample_aircraft):
     """Stations are a fidelity knob that costs RAM: each becomes an asb section
-    that LiftingLine subdivides again, and a solve already peaks near 13 GB.
+    that LiftingLine subdivides again, and a solve already peaks near 14.5 GB.
     v4 buys its smooth planform without growing the graph."""
     for form in ("curve", "polyhedral2"):
         sample_aircraft.wing_dihedral_form = form
