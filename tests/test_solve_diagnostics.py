@@ -326,3 +326,54 @@ def test_a_real_failure_carries_its_convergence_trace():
     assert rec["convergence"]["iterations_recorded"] > 0
     assert "reading" in rec["convergence"]
     assert "convergence" in solve._failed_entry(rec)
+
+
+# --------------------------------------------------------------------------
+# which operating point each static margin was read at
+# --------------------------------------------------------------------------
+
+SM_RANGE = (0.08, 0.15)
+
+
+def test_sm_read_at_is_silent_when_both_read_the_same_speed():
+    """Eleven runs' worth of normal: the NLP optimum sits on v_min and so does
+    the sweep's peak, so there is nothing to disclose."""
+    champ = {"V_ms": 9.5, "static_margin": 0.08}
+    best = {"V_ms": 9.5}
+    assert solve.sm_read_at(champ, best, {"sm_in_range": True}, SM_RANGE) == (None, None)
+
+
+def test_sm_read_at_names_both_speeds_when_they_differ():
+    champ = {"V_ms": 9.709, "static_margin": 0.08}
+    read_at, _ = solve.sm_read_at(champ, {"V_ms": 9.5}, {"sm_in_range": True}, SM_RANGE)
+    assert read_at["nlp_V_ms"] == 9.709
+    assert read_at["reeval_V_ms"] == 9.5
+    assert "static-margin window" in read_at["why"]
+
+
+def test_sm_read_at_explains_an_out_of_range_headline_the_design_actually_meets():
+    """The 2026-08-06 vtail_rcv2 case: SM 0.0629 reported out of range at the
+    sweep's 9.5 m/s, while the design meets 0.08 at the 9.709 m/s it was solved
+    for. Without the note a reader cannot tell that from an unstable aeroplane.
+    """
+    champ = {"V_ms": 9.709, "static_margin": 0.07999999}
+    _, note = solve.sm_read_at(champ, {"V_ms": 9.5}, {"sm_in_range": False}, SM_RANGE)
+    assert note is not None
+    assert "9.500 m/s" in note and "9.709 m/s" in note
+    assert "sm_read_at" in note
+
+
+def test_sm_read_at_treats_a_bound_hit_to_solver_tolerance_as_in_range():
+    """The champion lands ON the floor, a hair under it: SM 0.07999999 against
+    0.08. That is a converged bound, not a design that misses its window."""
+    champ = {"V_ms": 9.709, "static_margin": 0.07999999000380999}
+    _, note = solve.sm_read_at(champ, {"V_ms": 9.5}, {"sm_in_range": False}, SM_RANGE)
+    assert note is not None
+
+
+def test_sm_read_at_stays_quiet_when_the_design_itself_misses_the_window():
+    """If the NLP's own static margin is out of range too, the aeroplane really
+    does miss its window and there is nothing to explain away."""
+    champ = {"V_ms": 9.709, "static_margin": 0.061}
+    _, note = solve.sm_read_at(champ, {"V_ms": 9.5}, {"sm_in_range": False}, SM_RANGE)
+    assert note is None
