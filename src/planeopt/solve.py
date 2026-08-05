@@ -189,9 +189,82 @@ class SolveFailure(RuntimeError):
         self.iter_count = stats.get("iter_count")
         self.detail = str(exc)
         self.violations = _worst_violations(opti, labels or {})
+        self.convergence = _convergence_trace(stats)
         iters = "" if self.iter_count is None else f" after {self.iter_count} iterations"
         worst = f"; closest miss {self.violations[0]['what']}" if self.violations else ""
         super().__init__(f"{self.return_status}{iters}{worst}")
+
+
+def _convergence_trace(stats: dict, tail: int = 25) -> dict:
+    """The DUAL side of a failure, which the primal violations cannot show.
+
+    `_worst_violations` says which rows the last iterate missed. This says what
+    KIND of failure it was, and the two call for opposite fixes. The
+    discriminator is the one `tools/degeneracy.py` is built on: `inf_du`
+    diverging while `inf_pr` is driven small means the active constraint
+    gradients have gone linearly dependent, so no Lagrange multipliers exist and
+    there is nothing for the solver to converge to — no amount of extra clock
+    helps. Both sides staying large is the opposite reading: a solve that is
+    simply far from feasible and was cut off.
+
+    Recorded because the 2026-08-06 battery lost six members to
+    `Maximum_WallTime_Exceeded` and the artifact could not tell those two cases
+    apart — the primal violations were all it kept, and answering the question
+    afterwards would have cost a bespoke ~13 GB re-solve per member.
+
+    Best-effort throughout: a diagnostic must never turn a failed solve into a
+    crashed one.
+    """
+    try:
+        it = stats.get("iterations") or {}
+        pr = [float(v) for v in (it.get("inf_pr") or [])]
+        du = [float(v) for v in (it.get("inf_du") or [])]
+        mu = [float(v) for v in (it.get("mu") or [])]
+        if not pr:
+            return {}
+        out = {
+            "iterations_recorded": len(pr),
+            "inf_pr_final": pr[-1],
+            "inf_pr_min": min(pr),
+            "inf_du_final": du[-1] if du else None,
+            "inf_du_max": max(du) if du else None,
+            "mu_final": mu[-1] if mu else None,
+        }
+        progress = None
+        if len(pr) > tail:
+            # how much primal progress the last `tail` iterations actually
+            # bought: ~0 is a plateau, and a plateau is why more clock is not
+            # the fix (FINDINGS 14.5.7 — pusher at 25 vs 60 min, same plateau)
+            progress = pr[-tail] - pr[-1]
+            out[f"inf_pr_progress_last_{tail}"] = progress
+        if du:
+            # Three readings, because they want three different responses and
+            # the artifact should not make a reader re-derive which one it is.
+            # Thresholds are far from anything a converged member produces: on
+            # the 2026-08-06 battery the 14 converged members peaked at
+            # inf_du 5.8e+02 and finished at 1e-9 or below, so a FINAL 1e+03
+            # cannot be one of them.
+            stalled = progress is not None and abs(progress) < 0.05 * pr[-1]
+            if du[-1] > 1e3 * max(pr[-1], 1e-12):
+                out["reading"] = (
+                    "dual blow-up: the multipliers diverged while the primal "
+                    "side sat still. Stuck, not slow — more clock buys nothing "
+                    "(FINDINGS 14.5.7). Run tools/degeneracy.py"
+                )
+            elif stalled:
+                out["reading"] = (
+                    "no dual blow-up, but the primal side stopped moving — a "
+                    "plateau short of feasible, which is what a starved corner "
+                    "looks like (FINDINGS 14.5.8)"
+                )
+            else:
+                out["reading"] = (
+                    "still converging when the clock stopped — the one case "
+                    "where a larger --solve-timeout-min may actually pay"
+                )
+        return out
+    except Exception:  # pragma: no cover — stats shape is CasADi's, not ours
+        return {}
 
 
 def _worst_violations(opti, labels: dict[int, str], top: int = 5) -> list[dict]:
@@ -388,6 +461,8 @@ def _failure_record(exc: BaseException) -> dict:
         rec["iter_count"] = exc.iter_count
         if exc.violations:
             rec["violations"] = exc.violations
+        if exc.convergence:
+            rec["convergence"] = exc.convergence
         if exc.return_status == "unknown":
             # no stats to read — the solver did not get far enough to have a
             # verdict, so the raw exception text is all there is. Keep it.
@@ -399,7 +474,8 @@ def _failure_record(exc: BaseException) -> dict:
 #: Every summariser projects a solve result down to a few fields, and each one
 #: used to drop everything but the message.
 _FAILURE_FIELDS = (
-    "failed", "return_status", "iter_count", "violations", "detail", "solve_minutes",
+    "failed", "return_status", "iter_count", "violations", "convergence", "detail",
+    "solve_minutes",
 )
 
 

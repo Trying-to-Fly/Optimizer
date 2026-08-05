@@ -257,3 +257,72 @@ def test_the_declared_box_is_recorded_next_to_the_values():
     assert boxes == {"x": [0.0, 2.0], "y": [0.5, 4.0], "z": [-5.0, 5.0]}
     # every declared variable appears, whether or not its bound is active
     assert set(boxes) == set(dv)
+
+
+# --------------------------------------------------------------------------
+# the dual side of a failure — which KIND of failure it was
+# --------------------------------------------------------------------------
+
+
+def _stats(pr, du, mu=None):
+    return {"iterations": {"inf_pr": pr, "inf_du": du, "mu": mu or [0.1] * len(pr)}}
+
+
+def test_convergence_trace_reads_a_dual_blow_up_as_degeneracy():
+    """`inf_du` diverging while the primal side is driven small is the
+    signature `tools/degeneracy.py` exists for — no multipliers to converge to,
+    so more clock cannot help."""
+    tr = solve._convergence_trace(_stats([5.0] + [1e-9] * 40, [1.0] + [1e6] * 40))
+    assert tr["inf_pr_final"] == pytest.approx(1e-9)
+    assert tr["inf_du_final"] == pytest.approx(1e6)
+    assert "Stuck, not slow" in tr["reading"]
+
+
+def test_convergence_trace_reads_a_flat_primal_side_as_a_starved_corner():
+    """No dual blow-up, but no progress either: the shape of an infeasible
+    corner rather than a solver defect."""
+    tr = solve._convergence_trace(_stats([5.0] * 40, [3.0] * 40))
+    assert "starved corner" in tr["reading"]
+    assert tr["inf_pr_min"] == pytest.approx(5.0)
+
+
+def test_convergence_trace_says_when_more_clock_would_actually_pay():
+    """Still descending when the clock stopped — the only case where raising
+    the timeout is the right response."""
+    tr = solve._convergence_trace(
+        _stats([5.0 - 0.1 * i for i in range(40)], [3.0] * 40)
+    )
+    assert "may actually pay" in tr["reading"]
+
+
+def test_convergence_trace_measures_the_plateau():
+    """How much the last 25 iterations actually bought. ~0 is why more clock is
+    not the fix (FINDINGS 14.5.7)."""
+    flat = solve._convergence_trace(_stats([0.3] * 40, [0.3] * 40))
+    assert flat["inf_pr_progress_last_25"] == pytest.approx(0.0)
+    moving = solve._convergence_trace(
+        _stats([1.0] * 15 + [1.0 - 0.02 * i for i in range(26)], [1.0] * 41)
+    )
+    assert moving["inf_pr_progress_last_25"] > 0.4
+
+
+def test_convergence_trace_is_best_effort():
+    """A diagnostic must never turn a failed solve into a crashed one."""
+    assert solve._convergence_trace({}) == {}
+    assert solve._convergence_trace({"iterations": {}}) == {}
+    assert solve._convergence_trace({"iterations": {"inf_pr": ["not a number"]}}) == {}
+
+
+def test_a_real_failure_carries_its_convergence_trace():
+    """End to end: the trace reaches the record and survives the summarisers."""
+    opti, labels = _infeasible()
+    try:
+        opti.solve(verbose=False, max_iter=12)
+        pytest.fail("expected the solve to fail")
+    except RuntimeError as e:
+        exc = solve.SolveFailure(opti, e, labels.as_dict())
+    rec = solve._failure_record(exc)
+    assert "convergence" in rec, rec
+    assert rec["convergence"]["iterations_recorded"] > 0
+    assert "reading" in rec["convergence"]
+    assert "convergence" in solve._failed_entry(rec)

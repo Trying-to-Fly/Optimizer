@@ -274,3 +274,113 @@ def test_sample_packaging_rows_are_unchanged_by_the_refactor(sample_aircraft):
     d = dict(sample_aircraft.DV_DEFAULTS)
     sample_aircraft.packaging_constraints(stub, d, sample_aircraft.pod_dims(d))
     assert stub.rows == 6
+
+
+# --------------------------------------------------------------------------
+# did the freedom buy anything — the measurement EQUIPMENT_PLAN.md pre-registered
+# --------------------------------------------------------------------------
+
+
+def _lane(**kw):
+    base = dict(name="l", x_lo=0.0, x_hi=1.0, end_margin_m=0.003, gap_m=0.003)
+    return equipment.Lane(**(base | kw))
+
+
+def _pair():
+    return [
+        equipment.Item("a", "g", 0.010, size_m=(0.040, 0.01, 0.01), lane="l", order=10),
+        equipment.Item("b", "g", 0.010, size_m=(0.020, 0.01, 0.01), lane="l", order=20),
+    ]
+
+
+def test_an_item_touching_one_neighbour_is_still_a_live_variable():
+    """Hard against the item in front, but a whole lane of room behind it.
+
+    This is the distinction the measurement exists to make: `b` is AT a row, so
+    a naive "is any row tight" test would call it pinned, but its station is not
+    determined — the optimizer put it forward and could have put it anywhere in
+    the next 900 mm. Calling that "the freedom bought nothing" would be wrong.
+    """
+    items = _pair()
+    where = {"a": 0.003 + 0.020, "b": 0.003 + 0.020 + 0.030 + 0.003}
+    act = equipment.placement_activity(items, {"l": _lane(x_hi=1.0)}, where)
+    assert act["n_placed"] == 2
+    # `a` is boxed in (lane front ahead, `b` behind); `b` is not
+    assert act["n_determined"] == 1
+    b = next(r for r in act["items"] if r["item"] == "b")
+    assert b["pinned_by"] == ["gap behind a"]  # touching, but only on one side
+    assert abs(b["room_fwd_mm"]) < 1e-3
+    assert b["room_aft_mm"] > 900
+    assert b["determined"] is False
+    assert "still have room aft" in act["verdict"]
+
+
+def test_placement_activity_reports_every_item_determined_when_the_lane_is_full():
+    """A lane exactly long enough to hold its contents fixes both of them.
+
+    This is the case the plan said to watch for: if every placed item is boxed
+    in on both sides then the station variables were never free, and the lanes
+    could collapse to derived packing without changing the design.
+    """
+    items = _pair()
+    # front margin + a + gap + b + aft margin, to the millimetre
+    lane = _lane(x_hi=0.003 + 0.040 + 0.003 + 0.020 + 0.003)
+    where = {"a": 0.003 + 0.020, "b": 0.003 + 0.040 + 0.003 + 0.010}
+    act = equipment.placement_activity(items, {"l": lane}, where)
+    assert act["n_determined"] == act["n_placed"] == 2
+    assert act["n_at_forward_stop"] == 2
+    for r in act["items"]:
+        # never negative zero: the artifact must not read as slightly violated
+        assert r["room_fwd_mm"] == 0.0 and r["room_aft_mm"] == 0.0
+    assert "boxed in on both sides" in act["verdict"]
+
+
+def test_placement_activity_names_a_separation_as_the_thing_holding_an_item():
+    """An item held off the lane front by an RF separation is reported as held
+    BY THAT SEPARATION — a lane-end check alone would call it free."""
+    items = _pair()
+    seps = (equipment.Separation(a="a", b="b", min_m=0.200),)
+    where = {"a": 0.023, "b": 0.223}  # b pushed aft to clear the 200 mm rule
+    act = equipment.placement_activity(items, {"l": _lane(x_hi=2.0)}, where, seps)
+    b = next(r for r in act["items"] if r["item"] == "b")
+    assert b["pinned_by"] == ["separation from a"]
+    assert abs(b["room_fwd_mm"]) < 1e-3   # the separation stops it moving forward
+    assert b["room_aft_mm"] > 1000        # nothing stops it moving aft
+    # and the partner is held the other way: `a` cannot move AFT without
+    # closing the same gap
+    a = next(r for r in act["items"] if r["item"] == "a")
+    assert "separation to b" in a["pinned_by"]
+    assert abs(a["room_aft_mm"]) < 1e-3
+
+
+def test_placement_activity_covers_the_real_manifest(rcv2):
+    """Every placed item on the real aircraft appears, by name."""
+    act = rcv2.equipment_report()["placement_activity"]
+    named = {r["item"] for r in act["items"]}
+    assert named == {i.name for i in equipment.placed(rcv2.manifest())}
+    assert act["n_placed"] == len(named) == 10
+    assert all(r["room_fwd_mm"] >= 0.0 for r in act["items"])
+
+
+def test_packing_rows_stay_exact_after_being_made_dimensionless(rcv2):
+    """Dividing a row by a positive constant must not move the feasible set.
+
+    One micrometre either side of the ordering row's limit, which is the
+    tightest thing the rescale could plausibly have broken.
+    """
+    items = rcv2.manifest()
+    d = dict(rcv2.DV_DEFAULTS)
+    contents = equipment.by_lane(items, "bay_shelf")
+    prev, item = contents[0], contents[1]
+    gap = (prev.length + item.length) / 2 + rcv2.lanes(d, items)["bay_shelf"].gap_m
+    for delta, expect_ok in ((+1e-6, True), (-1e-6, False)):
+        probe = dict(d)
+        probe[f"x_{item.name}"] = probe[f"x_{prev.name}"] + gap + delta
+        stub = _Stub()
+        equipment.constraints(
+            stub, items, rcv2.lanes(probe, items), probe,
+            separations=(), stacks=(),
+        )
+        hit = any("prev" in ctx and ctx.get("item") == item.name
+                  for _, ctx in stub.violated)
+        assert hit is not expect_ok, f"delta={delta}"

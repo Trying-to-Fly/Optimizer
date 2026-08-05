@@ -313,14 +313,35 @@ def constraints(
         for item in contents:
             xi = x[f"x_{item.name}"]
             half = item.length / 2
-            # nose end / tail end of the corridor, with the declared margin
+            # Nose end / tail end of the corridor, with the declared margin.
+            #
+            # RAW METRES, and the only rows in this module that are — the
+            # module rule is "dimensionless WHEREVER A NATURAL SCALE EXISTS"
+            # and for these two it does not. What they measure is how far an
+            # item sits from a lane end, which ranges from 0 to the length of
+            # the lane (200 mm here); the only constants available to divide by
+            # are the 3 mm end margin and the item's own length, and the lane
+            # length itself is a design expression, so dividing by it would
+            # trade a scaling problem for a nonlinearity. Dividing by the margin
+            # was tried on 2026-08-06 and measured WORSE: these rows went from
+            # 0.18 to 60-75 at the initial point, because a 200 mm clearance
+            # over a 3 mm margin is 67 and not 1. At raw metres they sit at
+            # 0.18-0.22, inside a decade of 1, which is what the rule is
+            # protecting. Left alone deliberately.
             opti.subject_to(xi - half >= lane.x_lo + lane.end_margin_m)
             opti.subject_to(xi + half <= lane.x_hi - lane.end_margin_m)
             if prev is not None:
                 gap = (prev.length + item.length) / 2 + lane.gap_m
                 # `item` is declared AFT of `prev`, so this is one-sided and
-                # smooth — no absolute value anywhere in the packing
-                opti.subject_to(xi - x[f"x_{prev.name}"] >= gap)
+                # smooth — no absolute value anywhere in the packing.
+                #
+                # This one DOES have a natural scale and was raw metres until
+                # 2026-08-06: the required gap is the distance the row is about,
+                # items pack at it, and dividing by it moves this row from 0.047
+                # to 1.05 at the initial point. Dividing by a positive constant
+                # cannot move the feasible set (FINDINGS 14.5.1, verified on
+                # this model to five significant figures).
+                opti.subject_to((xi - x[f"x_{prev.name}"]) / (gap or 1.0) >= 1.0)
             prev = item
         # --- across the section: the lane must admit its widest occupant ---
         if lane.width_m is not None:
@@ -350,6 +371,144 @@ def constraints(
             opti.subject_to((xb - xa) / sep.min_m >= 1.0)
         if sep.max_m is not None:
             opti.subject_to((xb - xa) / sep.max_m <= 1.0)
+
+
+#: Slack under which a placement row counts as PINNED. 50 um is below any
+#: tolerance a builder can hold, and nearly three orders below the smallest real
+#: free play this manifest has ever produced (39.5 mm, the GPS held off the lane
+#: front by its RF separation), so nothing here is sensitive to the exact value.
+PINNED_TOL_M = 50e-6
+
+
+def placement_activity(
+    items: list[Item],
+    lanes: dict[str, Lane],
+    where: dict,
+    separations: tuple[Separation, ...] = (),
+) -> dict:
+    """Which placed items are HELD by a row, and which have room to move.
+
+    **The measurement `EQUIPMENT_PLAN.md` pre-registered**, and it has to live
+    here rather than come out of `active_bounds` — which is what that plan said
+    would answer it. A placement variable's declared box is a wide numeric
+    backstop (`PLACEMENT_BOX`); its real bounds are the symbolic lane rows in
+    `g`. Bound-activity reporting only ever inspects declared boxes, so it was
+    silent about every placement variable in the 2026-08-05 battery and would
+    have stayed silent in every battery after it. The promise — "every placement
+    variable that ends pinned at a lane end is reported by name, and if they all
+    pin the freedom bought nothing" — was unkeepable as written, which is worse
+    than a wrong answer: the decision it was attached to had no way to come due.
+
+    Slack is measured PER DIRECTION, because the two readings the plan needs are
+    different questions and a single "nearest row" number conflates them:
+
+    - `room_fwd_mm` / `room_aft_mm` — how far the item could actually move each
+      way before a row stops it. An item with zero of both is DETERMINED: its
+      variable holds a number the rows already fix, and solving for it is
+      solving for nothing.
+    - `pinned_by` — the rows with no slack, named. An item hard against one side
+      only is still a live variable; it is telling you the objective pushed it
+      that way and something stopped it, which is the ordinary meaning of an
+      active bound and NOT evidence that the freedom was wasted.
+
+    Rows are sorted into the direction they block. A lane front, the neighbour
+    ahead, and a `min` separation measured from an item in front all stop the
+    item moving FORWARD; the lane aft end, the neighbour behind, and a `max`
+    separation to an item behind stop it moving AFT.
+
+    **Room is measured with every OTHER item held fixed**, which is what makes
+    it a per-item number instead of a rank computation. Read it that way: a
+    hard-packed train reports every member determined, and that is true of each
+    member individually even though the train can still slide as a body. The
+    collective freedom that remains is the lane's own position, which for this
+    manifest is `x_battery` — a variable the aircraft declared for balance long
+    before there was a manifest, and the one placement knob that was never in
+    question.
+
+    Reported, never enforced. This says what the solve DID, so the choice
+    between a station variable and derived packing is settled against a run
+    rather than against an argument.
+    """
+    tol = PINNED_TOL_M
+    x = {k: float(v) for k, v in where.items()}
+    rows_out, determined = [], 0
+    for lane_name, lane in lanes.items():
+        contents = by_lane(items, lane_name)
+        x_lo, x_hi = float(lane.x_lo), float(lane.x_hi)
+        for k, item in enumerate(contents):
+            xi, half = x[item.name], item.length / 2
+            fwd = {f"lane {lane_name} front": (xi - half) - (x_lo + lane.end_margin_m)}
+            aft = {f"lane {lane_name} aft": (x_hi - lane.end_margin_m) - (xi + half)}
+            if k:
+                prev = contents[k - 1]
+                fwd[f"gap behind {prev.name}"] = (xi - x[prev.name]) - (
+                    (prev.length + item.length) / 2 + lane.gap_m
+                )
+            if k + 1 < len(contents):
+                nxt = contents[k + 1]
+                aft[f"gap ahead of {nxt.name}"] = (x[nxt.name] - xi) - (
+                    (item.length + nxt.length) / 2 + lane.gap_m
+                )
+            for sep in separations:
+                if sep.min_m is not None:
+                    d = x[sep.b] - x[sep.a] - sep.min_m
+                    if item.name == sep.b:
+                        fwd[f"separation from {sep.a}"] = d
+                    elif item.name == sep.a:
+                        aft[f"separation to {sep.b}"] = d
+                if sep.max_m is not None:
+                    d = sep.max_m - (x[sep.b] - x[sep.a])
+                    if item.name == sep.b:
+                        aft[f"separation to {sep.a}"] = d
+                    elif item.name == sep.a:
+                        fwd[f"separation from {sep.b}"] = d
+            r_fwd, r_aft = min(fwd.values()), min(aft.values())
+            determined += r_fwd <= tol and r_aft <= tol
+            rows_out.append({
+                "item": item.name,
+                "lane": lane_name,
+                # `or 0.0` so a residual that rounds to negative zero prints as
+                # 0.0 — "-0.00 mm of room" is not a thing, and a reader who sees
+                # it starts wondering which rows are slightly violated
+                "station_mm": round(xi * 1000, 2) or 0.0,
+                "room_fwd_mm": round(r_fwd * 1000, 3) or 0.0,
+                "room_aft_mm": round(r_aft * 1000, 3) or 0.0,
+                "determined": bool(r_fwd <= tol and r_aft <= tol),
+                "pinned_by": sorted(
+                    k2 for k2, v in (fwd | aft).items() if v <= tol
+                ),
+            })
+    n = len(rows_out)
+    fwd_stop = sum(r["room_fwd_mm"] <= tol * 1000 for r in rows_out)
+    return {
+        "tolerance_mm": tol * 1000,
+        "n_placed": n,
+        "n_determined": determined,
+        #: Items sitting on their forward stop. On an aeroplane whose static
+        #: margin wants mass forward this is the number that carries the
+        #: finding: if it equals `n_placed`, forward-most derived packing would
+        #: reproduce the solved layout exactly, which is the same convention
+        #: `nose_split` already uses for the bulkhead.
+        "n_at_forward_stop": fwd_stop,
+        "items": sorted(rows_out, key=lambda r: r["station_mm"]),
+        "verdict": (
+            "nothing is placed by a station variable" if not n else
+            f"all {n} placed items sit on their FORWARD stop"
+            + (
+                " and are boxed in on both sides — the station variables hold "
+                "numbers the packing rows already fix, so forward-most derived "
+                "packing would reproduce this layout exactly "
+                "(EQUIPMENT_PLAN.md, 'measured, then deleted')"
+                if determined == n else
+                f"; {n - determined} of them still have room aft, held forward "
+                "by the objective rather than by a row, so derived packing "
+                "would reproduce the layout but would stop pricing that choice"
+            )
+            if fwd_stop == n else
+            f"{n - fwd_stop} of {n} placed items are off their forward stop — "
+            "the placement freedom is doing something derived packing would not"
+        ),
+    }
 
 
 # --------------------------------------------------------------------------
