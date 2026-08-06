@@ -443,6 +443,58 @@ departures from DESIGN_SPEC that have never been questioned.
 > > battery are over-constrained corners with lift equilibrium and the SM floor
 > > as their two dominant misses. See the seventeenth-session section.
 
+**Issue 4 (2026-08-06) — the V-tail is sized by a declared number, and the yaw
+axis is available to replace it. SCOPED, NOT BUILT.** The user asked why the
+V-tail is so large. It is not aerodynamics: **`Vv` lands on 0.03000 — the
+declared `v_tail_volume_min` — to five decimals in both the 2026-08-05 and
+2026-08-06 champions.** Lifting line has no yaw axis, so nothing pushes back on
+tail size except that constant, and the optimizer parks exactly on it. The tail
+grew this run (span 0.422 -> 0.475 m, arm 0.942 -> 1.081 m) only because the
+floor is normalised by wing size and the wing grew 17.9% to carry the manifest;
+as a FRACTION of the wing the tail actually got leaner, 9.7% -> 9.1%.
+
+**`asb.VortexLatticeMethod` can replace it and is fully differentiable.**
+Measured 2026-08-06 with plain `cas.MX.sym` inputs:
+
+    VLM  d(Cn)/d(t_span)     = +0.028797     live
+    VLM  d(Cn)/d(t_dihedral) = +0.000501     live
+    VLM  d(CL)/d(span)       = +0.035371  vs  LiftingLine +0.035867  (1.4%)
+
+`OperatingPoint` already takes `beta` (and p/q/r), `Cn`/`CY` come back as MX,
+and VLM builds ~8x FASTER than the LiftingLine already in the loop (0.3 s
+against 4.5 s). The mechanism is small: run VLM at beta = +-eps, form
+`Cnbeta = dCn/dbeta`, and constrain that instead of `vv`.
+
+> **A methodology warning, because it cost an hour here.**
+> `cas.jacobian(expr, opti.x)` returns nnz = 0 for AeroSandbox `Opti`
+> expressions — `opti.x` is not purely symbolic — and it does so for a trivial
+> `3*v**2` as readily as for a VLM. It reads exactly like "this model is not
+> differentiable" and it is an artefact of the test. Probe with `cas.MX.sym`
+> inputs, and sanity-check the probe on a trivial expression first.
+
+Four things make this a fidelity upgrade rather than a quick win, in rough order
+of how much they should worry you:
+
+1. **VLM is lifting surfaces only, so a VLM-only `Cnbeta` is OPTIMISTIC** — it
+   omits the pod's destabilising yaw contribution, which on this fat-nosed pod
+   is not small. That fails in the UNSAFE direction (tail too small), so the
+   slender-body fuselage term belongs in the same change, not a follow-up.
+2. **It adds a second aero model to the NLP**, probably two runs (+-beta), to a
+   loop where **10 of 22 members already die on the 30-minute cap**. This
+   session showed how sensitive that is: a one-line constraint rescale cost a
+   member outright. **Fix the over-constrained corners first.**
+3. **The floor stays a declared number** — `Cnbeta_min ~ 0.04-0.10 /rad` is
+   class practice just as 0.030 is. What is gained is that it acts on real
+   computed geometry (dihedral, arm, area, sweep and their interaction) rather
+   than the closed-form `S*sin^2(dihedral)` proxy. Do not sell it as the model
+   learning what stability it needs.
+4. **Static stability only.** Dutch roll and spiral want `Clbeta`, `Clp`, `Cnr`
+   and inertias. This narrows the section 3.4 gap; it does not close it, and
+   "flow5 and flight test own the rest" still holds.
+
+Expect tail size to move 10-20% in EITHER direction. The user's Cnbeta floor is
+wanted before the constraint is written.
+
 **Issue 3 (2026-08-05) — the fuselage drag model could not see shape, and the
 champion was exploiting that. TIER 1 IS NOW BUILT** — see the next section for
 what shipped and what it changed. What remains open is the *measurement*: the
