@@ -43,6 +43,21 @@ M1_STATUS = "M1: fixed-design evaluation (Phase 1 gate pipeline) — no optimize
 SOLVE_TIMEOUT_MIN = 30.0
 #: Iteration ceiling for one member solve (IPOPT's own `max_iter`).
 SOLVE_MAX_ITER = 1000
+
+#: How far the NLP's objective and the numeric re-evaluation of the SAME design
+#: vector may sit apart before the run says so, as a fraction of the objective.
+#:
+#: Not a new judgement — this is the number `test_m3_optimize_smoke` has asserted
+#: since M3 (`abs(nlp_vs_reeval_gap) < 0.1 * objective`). It lived only in the
+#: test, so the property was ENFORCED on the sample aircraft and UNREPORTED on
+#: every other run: the 2026-08-06 smoke battery recorded a 64.16 min gap on a
+#: 120 min champion — 53%, two models describing different aeroplanes — in an
+#: artifact that mentioned it nowhere. Declared here so the test and the run
+#: cannot drift apart, which is the same discipline `airworthiness_rules` gets.
+#:
+#: A healthy converged run sits nowhere near this: the 2026-08-05 champion
+#: recorded -1.5e-5 min, and FINDINGS calls even a ~4% residual worth explaining.
+NLP_REEVAL_GAP_FRAC = 0.10
 #: How far outside the mission's static-margin window a reported SM may land and
 #: still count as satisfying it. An optimizer holds this constraint ACTIVE, so
 #: the comparison has to admit the solver's own convergence tolerance or it
@@ -2722,6 +2737,43 @@ def optimize(
         "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar "
         "stress/deflection sizing, ballast cap, battery-position balance."
     )
+    # Do the two models agree about the aeroplane the run is shipping? The NLP
+    # objective and the numeric re-evaluation of the SAME design vector are
+    # independent arithmetic over the same physics, so a large disagreement
+    # means at least one of them is describing something else.
+    #
+    # The number has been recorded since M2 and adjudicated by NOTHING. Worse,
+    # the project already has a declared tolerance for it — `test_m3_optimize_smoke`
+    # asserts `abs(gap) < 0.1 * objective` — so the property was enforced in the
+    # test suite and unreported in the artifact, which is the exact split this
+    # session keeps finding (FINDINGS §20). The 2026-08-06 smoke run recorded a
+    # 64.16 min gap on a 120 min champion, 53%, in an artifact that said nothing.
+    gap = result.performance["optimization"]["nlp_vs_reeval_gap"]
+    if gap is not None and np.isfinite(gap):
+        champ_obj = champion["objective_value"]
+        if abs(gap) > NLP_REEVAL_GAP_FRAC * abs(champ_obj):
+            units = OBJECTIVES[mission.objective].units
+            result.diagnostics["nlp_reeval_disagreement"] = {
+                "nlp_objective": champ_obj,
+                "reeval_objective": result.performance["best"].get("objective_value"),
+                "gap": gap,
+                "gap_frac": abs(gap) / abs(champ_obj) if champ_obj else None,
+                "tolerance_frac": NLP_REEVAL_GAP_FRAC,
+            }
+            result.notes.append(
+                f"THE NLP AND THE RE-EVALUATION DISAGREE ABOUT THIS AEROPLANE BY "
+                f"{abs(gap):.2f} {units} "
+                f"({100 * abs(gap) / abs(champ_obj):.0f}% of the champion's "
+                f"{champ_obj:.2f} {units}, against a {100 * NLP_REEVAL_GAP_FRAC:.0f}% "
+                "tolerance). Both numbers describe the SAME design vector, so one "
+                "of them is not describing this aeroplane. Usual causes, in the "
+                "order worth checking: the NLP stopped short of a solution (see "
+                "`iteration_truncated`); the re-evaluation's speed sweep is "
+                "filter-limited (see `airworthiness_price`), in which case the two "
+                "are answering different questions rather than disagreeing; or the "
+                "in-loop and numeric models have genuinely diverged, which is the "
+                "one that matters and the one to rule out last."
+            )
     # Measured per-solve peak, so the NEXT run's memory budget divides by data
     # rather than by the hard-coded fallback. Children cover the forked (parallel)
     # path; RUN_PEAK covers the in-process one, where the mark is reset between

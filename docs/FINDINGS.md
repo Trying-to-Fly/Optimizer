@@ -2502,3 +2502,104 @@ so the branch that reports on the filter had never been asked for. The general
 form is worth keeping: **a guard that has only ever been evaluated on designs
 that pass it has not been tested**, and the cheapest way to test one is a
 differently-shaped aeroplane rather than a longer solve.
+
+## 27. Running the new code, and the three things that only running it found (2026-08-06)
+
+§26 came from the cheapest stage of a bug hunt — an M1 evaluation, no optimizer.
+These came from the next two, and they share a shape worth naming: **each is a
+number the code already computed and no one had made it answerable for.**
+
+### 27.1 `--max-iter` crashed the pipeline it was added to exercise
+
+§24.2 added the flag so the whole pipeline could run "in seconds instead of
+hours". The first run that used it died in 2.5 minutes with:
+
+    ValueError: max() iterable argument is empty     (solve.py:1999)
+
+no artifact, no diagnosis, every solve already paid for. Two defects met, and
+neither is visible without the other:
+
+- **A truncated member was recorded as FAILED.** IPOPT returns
+  `Maximum_Iterations_Exceeded`, `_solve_nlp` raised `SolveFailure`, and at
+  `--max-iter 3` that is EVERY member by construction. So `ok` was empty.
+- **`optimize` then chose a champion from the empty list with a bare `max()`.**
+  `run` has raised a proper diagnosis for this exact shape since M1, on the
+  explicit grounds that a bare `max()` error "tells the user nothing, and this is
+  exactly where a broken install surfaces". `optimize` had the identical hole.
+  Nobody had fallen into it because until this flag existed, no battery had ever
+  had every member fail.
+
+The fix is in two halves, and the first is the interesting one. A deliberately
+truncated solve now **harvests its last iterate** through `opti.debug` — the
+same accessor the converged path uses, so the two cannot drift into reporting
+different fields. IPOPT keeps design variables inside their bounds, so the point
+is real; it is simply not optimal. Guarded three ways, because harvesting the
+wrong thing here puts a garbage champion into a run that looks complete: only
+when the cap was lowered ON PURPOSE (`max_iter < SOLVE_MAX_ITER`), only for the
+iteration status (a restoration failure or an infeasible corner has nothing
+worth keeping), and only if every harvested number is finite.
+
+The second half is `no_survivors_error`, grouped **by return status** — because
+a multistart is many attempts at ONE problem, so the way they all failed is the
+diagnosis. Every member `Infeasible_Problem_Detected` is an over-constrained
+aircraft; every member `Maximum_WallTime_Exceeded` is a cap to raise; a mixture
+is a badly scaled model. Three different fixes, and one flattened message picks
+the wrong one twice.
+
+### 27.2 A gate test spent 1 h 39 min proving that a frame stream replays
+
+`test_a_real_run_writes_frames_and_relocates_them` is marked `solve` and was
+assumed slow-by-design. It was slow by accident. It ran ~10 members to
+convergence, which wrote **1,062 frames** — one per solver iterate — and then
+rendered every one of them through Qt at 640x480, while its own docstring says
+what is under test is "the plumbing... not the optimizer". It was paying for
+convergence it explicitly disclaims, twice.
+
+Now `max_iter=3`: three iterates per member exercise the same callback, the same
+ordering, the same relocation and the same renderer as a hundred do. **1 h 39 min
+-> ~2 min.**
+
+`test_m3_optimize_smoke` was deliberately NOT given the same treatment, and the
+distinction is the point. It asserts a CONVERGED champion — static margin inside
+its window, trim inside its throws, a negative shadow price — and every one of
+those assertions is meaningless on a truncated solve. Capping it would leave the
+assertions passing while testing nothing, which is worse than slow. Its ~10 real
+solves are inherent; the measured costs of both now sit in `pyproject.toml`,
+because "minutes of runtime and GB of RAM" was the estimate and it was wrong by
+an order of magnitude.
+
+### 27.3 The two models disagreed by 53% and the artifact did not mention it
+
+`nlp_vs_reeval_gap` compares the NLP's objective against the numeric
+re-evaluation of the SAME design vector. It has been recorded since M2. Nothing
+has ever read it.
+
+The 2026-08-06 smoke battery recorded **64.16 min on a 120 min champion — 53%**
+— and its artifact said nothing at all. Both numbers describe one design vector,
+so a gap that size means one of them is describing a different aeroplane.
+
+What makes this more than an oversight: **the project already had a declared
+tolerance and had put it in the wrong place.** `test_m3_optimize_smoke` has
+asserted `abs(gap) < 0.1 * objective` since M3. So the property was ENFORCED on
+one aircraft in the test suite and UNREPORTED on every run of every other
+aircraft. That is §20's split exactly — a thing the project knows, kept
+somewhere the artifact cannot reach.
+
+`NLP_REEVAL_GAP_FRAC` is now declared once, read by the run and by the test, and
+pinned by a test that fails if either re-spells the literal. The note names the
+causes in the order worth checking, and the order is deliberate: iteration
+truncation first (cheap to confirm, and the usual answer during a smoke run), a
+filter-limited re-evaluation second (`airworthiness_price` — in which case the
+two are answering DIFFERENT questions rather than disagreeing), and a genuine
+divergence between the in-loop and numeric models last, because it is the one
+that matters and the one worth ruling out properly.
+
+### 27.4 The pattern
+
+All three, and §26, are the same defect wearing different clothes: **a quantity
+the run computes, stores, and never adjudicates.** The active ingredient in
+finding them was not cleverness, it was execution — §26 needed a differently
+shaped AIRCRAFT, §27.1 needed a flag nobody had used, §27.3 needed a run
+degenerate enough to make a silent number loud. A guard evaluated only on inputs
+that pass it has not been tested, and a number reported only where nobody reads
+it has not been reported.

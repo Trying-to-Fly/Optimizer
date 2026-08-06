@@ -508,6 +508,26 @@ def test_the_closest_miss_rides_along_when_a_member_recorded_one():
     assert "Closest miss on any member: L == weight_n" in str(err)
 
 
+def test_the_reeval_tolerance_is_one_number_the_run_and_the_test_share():
+    """`test_m3_optimize_smoke` asserted this and the artifact never mentioned
+    it, so a 64.16 min gap on a 120 min champion shipped unremarked. Two copies
+    of a threshold is how that happens twice."""
+    import inspect
+
+    from planeopt import solve as s
+
+    assert 0 < s.NLP_REEVAL_GAP_FRAC < 1
+    # comments stripped: the prose in `optimize` quotes the old literal while
+    # explaining why it is no longer spelled out, and a check that cannot tell
+    # code from commentary would forbid saying so
+    code = "\n".join(
+        line for line in inspect.getsource(s.optimize).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert "NLP_REEVAL_GAP_FRAC" in code, "the run must read the declared number"
+    assert "0.1 *" not in code, "and must not re-spell it"
+
+
 def test_a_member_with_no_status_is_reported_as_unknown_not_dropped():
     """A worker that died before the solver produced stats still has to appear —
     a cause list that silently omits members is how a crash reads as a quiet
