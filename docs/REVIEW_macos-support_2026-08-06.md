@@ -1,5 +1,26 @@
 # Code review — `macos-support` (commit 66ffbf7)
 
+> **Resolved 2026-08-06.** All eight findings are fixed on `main`, after the
+> branch was merged. Two details of the report did not survive contact with the
+> merged tree and are corrected below: `test_prop_screen.py` holds eight tests
+> rather than seven (six need the checkpoint, two do not), and the review's
+> "Verified clean" list predates the two commits that landed after 66ffbf7.
+>
+> What each fix is pinned by, since a fix with no test is a fix until the next
+> session: finding 1 by a seven-row truth table over `_make_fork_safe_on_macos`
+> plus an end-to-end check that a shell-pinned, NumPy-first process is not
+> refused; finding 2 by an offscreen dialog test counting runs-directory scans
+> across spinner ticks, and by a probe count over `plan_parallel`; finding 4 by
+> a fork test that runs on any POSIX host rather than only on a Mac; finding 6
+> by running the suite with the checkpoint moved away. Findings 3, 5, 7 and 8
+> are covered by the existing tests they touch, plus a new `test_fonts.py` for
+> the consolidated `fonts.mono`. The loose `> 0` assertion this report calls out
+> in the macOS forked-child test is now bounded, so a unit slip fails it.
+>
+> Each fix was confirmed to fail before it was applied — the truth-table rows
+> were run against the old branch, the fork hook was unplugged, the scan was put
+> back in the tick handler, and the checkpoint was hidden.
+
 Reviewed 2026-08-06. Scope: the committed diff vs `main` ("The app ran on a Mac; none of the guards that stop it eating the machine did"). Method: 8 finder angles followed by 4 adversarial verifier passes; every finding below survived an attempt to refute it against the committed code. Uncommitted working-tree edits (a concurrent work stream) were excluded; `cli.py` and `solve.py` were verified via `git show HEAD:`.
 
 ## Confirmed findings, ranked

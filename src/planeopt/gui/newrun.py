@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -64,6 +63,13 @@ class NewRunDialog(QDialog):
         self._workspace = workspace
         self._missions_dir = workspace.missions_dir
         self._runs_dir = workspace.runs_dir
+        # Read once, here, rather than from `_update_memory_note`. That note is
+        # rebuilt on every `valueChanged` of the budget spinner — every arrow
+        # click and every keystroke — and `observed_peak_gb` lists `runs/` and
+        # parses up to 25 `run.json` files off disk to answer. What past runs
+        # measured cannot change while a modal dialog is open, so the scan is
+        # pure cost per tick.
+        self._measured_peak_gb = memory.observed_peak_gb(self._runs_dir)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(14)
@@ -303,7 +309,7 @@ class NewRunDialog(QDialog):
 
     def _update_memory_note(self) -> None:
         total_gb, avail_gb = memory.machine_ram()
-        measured = memory.observed_peak_gb(self._runs_dir)
+        measured = self._measured_peak_gb
         per = measured or memory.DEFAULT_PER_SOLVE_GB
         source = "measured" if measured else "estimated"
         have = f"{avail_gb:.0f} GB free of {total_gb:.0f} GB" if total_gb else "memory unknown"
@@ -318,7 +324,12 @@ class NewRunDialog(QDialog):
         # and, only when it applies, the one caveat that changes what the user
         # should do.
         budget = self.memory_budget.value()
-        width, _ = memory.plan_parallel(budget, per_solve_gb=measured)
+        # The machine facts are already in hand from the `machine_ram()` above;
+        # passing them spares `plan_parallel` from probing for them again.
+        width, _ = memory.plan_parallel(
+            budget, per_solve_gb=measured,
+            available_gb=avail_gb, ceiling_gb=total_gb + memory.swap_gb(),
+        )
         plural = "" if width == 1 else "s"
         text = f"{have}. {width} concurrent solve{plural} at ~{per:.0f} GB each ({source})."
         if not memory.parallel_supported():

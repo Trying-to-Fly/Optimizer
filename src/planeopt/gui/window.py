@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QFont, QTextCursor
+from PySide6.QtGui import QAction, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -32,11 +32,11 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__, liveframe
-from . import queuestore, runindex
+from . import fonts, queuestore, runindex
 from .jobs import Job, JobState
 from .newrun import NewRunDialog
 from .runner import RunQueue
-from .views import MONO_FAMILIES, CompareView, DetailView
+from .views import CompareView, DetailView
 from .workspace import Workspace, resolve
 
 _STATE_MARK = {
@@ -286,11 +286,7 @@ class MainWindow(QMainWindow):
         self.log.setMaximumBlockCount(2000)
         # Absolute paths wrap into a wall of text otherwise; scroll instead.
         self.log.setLineWrapMode(QPlainTextEdit.NoWrap)
-        font = QFont()
-        font.setFamilies(MONO_FAMILIES)
-        font.setStyleHint(QFont.Monospace)
-        font.setPointSize(9)
-        self.log.setFont(font)
+        self.log.setFont(fonts.mono(9))
         self.log.setPlaceholderText("Progress from a running solve appears here.")
         log_layout.addWidget(self.log)
         panel.addWidget(log_panel)

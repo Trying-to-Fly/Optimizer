@@ -43,6 +43,7 @@ battery that thrashes for hours rather than one that dies quickly.
 from __future__ import annotations
 
 import ctypes
+import functools
 import json
 import logging
 import os
@@ -165,32 +166,52 @@ class _XswUsage(ctypes.Structure):
     ]
 
 
+@functools.cache
 def _libsystem():
-    """libSystem, loaded once and cached. None anywhere it is not macOS."""
+    """libSystem, loaded once and cached. None anywhere it is not macOS.
+
+    The cache holds the failure too: a machine where the dylib will not load is
+    not going to start loading it between one probe and the next, and a RAM
+    probe must never be the reason a solve stops. Tests that move `sys.platform`
+    around have to `_libsystem.cache_clear()` for the same reason.
+    """
     if sys.platform != "darwin":
         return None
-    lib = getattr(_libsystem, "_cached", None)
-    if lib is None:
-        try:
-            lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
-            lib.mach_task_self.restype = ctypes.c_uint
-            lib.mach_host_self.restype = ctypes.c_uint
-        except OSError as e:  # a RAM probe must never break a solve
-            log.debug("libSystem unavailable: %s", e)
-            lib = False
-        _libsystem._cached = lib
-    return lib or None
+    try:
+        lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+        lib.mach_task_self.restype = ctypes.c_uint
+        lib.mach_host_self.restype = ctypes.c_uint
+    except OSError as e:  # a RAM probe must never break a solve
+        log.debug("libSystem unavailable: %s", e)
+        return None
+    return lib
+
+
+@functools.cache
+def _mach_host_port() -> int | None:
+    """The host port, acquired once for the process. None off macOS.
+
+    `mach_host_self` returns a SEND RIGHT, and every call adds a user reference
+    to the name that only `mach_port_deallocate` takes back. Called per probe it
+    is a slow uref leak — XNU saturates the count rather than growing kernel
+    memory, so nothing breaks, but there is no reason to spend them. The port is
+    the same for the life of the task, and a name is inherited across `fork`, so
+    one acquisition serves the process and its children alike.
+    """
+    lib = _libsystem()
+    return None if lib is None else lib.mach_host_self()
 
 
 def _vm_statistics() -> tuple[_VMStatistics64, int] | None:
     """(counts, page_size) from Mach, or None if the call fails."""
     lib = _libsystem()
-    if lib is None:
+    host = _mach_host_port()
+    if lib is None or host is None:
         return None
     st = _VMStatistics64()
     count = ctypes.c_uint(ctypes.sizeof(st) // ctypes.sizeof(_natural_t))
     if lib.host_statistics64(
-        lib.mach_host_self(), _HOST_VM_INFO64, ctypes.byref(st), ctypes.byref(count)
+        host, _HOST_VM_INFO64, ctypes.byref(st), ctypes.byref(count)
     ) != 0:
         return None
     return st, os.sysconf("SC_PAGE_SIZE")
@@ -299,15 +320,23 @@ class _FootprintSampler:
     it tries to report, on a window of a few microseconds, thousands of times a
     battery. So:
 
-    - the pid is checked BEFORE the lock is taken, which keeps a forked child
-      off it entirely on the one path a child actually uses, and
-    - `os.register_at_fork` replaces the lock outright in the child, so even a
-      caller that does reach for it finds a fresh one.
+    - `peak_gb` checks the pid BEFORE the lock is taken, which keeps a forked
+      child off it entirely on the one path a child actually uses, and
+    - `os.register_at_fork` (registered on `_SAMPLER`, below the class) replaces
+      the lock outright in the child, so even a caller that does reach for it
+      finds a fresh one.
 
     Neither alone is enough: the pid check leaves `restart` exposed, and the
     at-fork hook only runs for forks that Python itself performs. The child
     loses nothing by being locked out — it performs exactly one solve, so its
     own `ru_maxrss` is already the per-solve peak this class exists to recover.
+
+    `_run` does NOT check the pid, though it once did. A fork carries only the
+    calling thread, so this loop cannot exist in a child to observe one — and
+    the check sat AFTER `with self._lock`, so the ghost thread it was written
+    against would have deadlocked on the inherited lock a line before reaching
+    it. It read as defence in depth while being unreachable and, had it ever
+    been reached, too late.
     """
 
     INTERVAL_S = 0.25
@@ -315,24 +344,21 @@ class _FootprintSampler:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._peak = 0.0
-        self._started = False
         self._pid = os.getpid()
+        # Doubles as "was this ever started": None is the inert state, and there
+        # is no separate flag to drift out of step with it.
         self._thread: threading.Thread | None = None
-        if hasattr(os, "register_at_fork"):  # POSIX only; Windows never forks
-            os.register_at_fork(after_in_child=self._reset_after_fork)
 
     def _reset_after_fork(self) -> None:
         """Drop the parent's lock, thread and reading — none of them survived."""
         self._lock = threading.Lock()
         self._peak = 0.0
-        self._started = False
         self._thread = None
         self._pid = os.getpid()
 
     def restart(self) -> None:
         with self._lock:
             self._peak = _darwin_footprint_gb()
-            self._started = True
             self._pid = os.getpid()
             if self._thread is not None and self._thread.is_alive():
                 return
@@ -346,8 +372,6 @@ class _FootprintSampler:
         while True:
             now = _darwin_footprint_gb()
             with self._lock:
-                if os.getpid() != self._pid:
-                    return  # forked child: this thread is a ghost of the parent
                 self._peak = max(self._peak, now)
             time.sleep(self.INTERVAL_S)
 
@@ -363,7 +387,7 @@ class _FootprintSampler:
         a forked worker makes, and a child that took a lock inherited from its
         parent mid-update would never come back out of it.
         """
-        if not self._started or os.getpid() != self._pid:
+        if self._thread is None or os.getpid() != self._pid:
             return 0.0
         with self._lock:
             return max(self._peak, _darwin_footprint_gb())
@@ -372,6 +396,16 @@ class _FootprintSampler:
 #: Process-global for the same reason `solve.RUN_PEAK` is: the thing it samples
 #: is process-global. Only ever started on macOS, and only by `reset_peak_rss`.
 _SAMPLER = _FootprintSampler()
+
+
+if hasattr(os, "register_at_fork"):  # POSIX only; Windows never forks
+    # Registered once for the module, against the one sampler that exists,
+    # rather than per instance from `__init__`. There is no API to UNregister an
+    # at-fork hook, so a per-instance registration pins every instance ever made
+    # — and its lock — for the life of the process, and grows a list the
+    # interpreter walks on every fork. Production only ever builds `_SAMPLER`,
+    # so the cost landed on tests, which build one per case.
+    os.register_at_fork(after_in_child=_SAMPLER._reset_after_fork)
 
 
 # --- what the machine has -------------------------------------------------
@@ -518,6 +552,63 @@ def reset_peak_rss() -> bool:
     return True
 
 
+def _windows_peak_gb() -> float | None:
+    """Peak working set of this process in GB, or None if the call fails."""
+    try:
+        class Counters(ctypes.Structure):
+            """`PROCESS_MEMORY_COUNTERS` — what `GetProcessMemoryInfo` fills in."""
+
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        c = Counters()
+        c.cb = ctypes.sizeof(Counters)
+        handle = ctypes.windll.kernel32.GetCurrentProcess()
+        if not ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(c), c.cb):
+            return None
+        return c.PeakWorkingSetSize / GB
+    except Exception as e:  # noqa: BLE001 — a RAM probe must never break a solve
+        log.debug("peak working set unavailable: %s", e)
+        return None
+
+
+def _rusage_peak_gb(children: bool) -> float | None:
+    """`ru_maxrss` in GB, or None where `resource` cannot answer.
+
+    The unit is the trap. `ru_maxrss` counts BYTES on macOS and KILOBYTES on
+    Linux, a factor of 1024 that no plausibility check catches because both
+    readings look like a number of gigabytes once divided by something. The
+    macOS scale read 1024 until 2026-08-05 — six orders of magnitude out, which
+    turned a 14.5 GB solve into a peak of 15 million and would have gone
+    straight into the budget arithmetic as "this aircraft needs more RAM than
+    exists". It survived because the only assertion over it,
+    `test_peak_rss_is_positive_and_in_gigabytes`, had never been run on a Mac.
+
+    So the unit is named rather than folded into a divisor: what differs between
+    the platforms is what one count IS, and `GB` does the conversion once.
+    """
+    try:
+        import resource
+
+        who = resource.RUSAGE_CHILDREN if children else resource.RUSAGE_SELF
+        maxrss = resource.getrusage(who).ru_maxrss
+    except Exception as e:  # noqa: BLE001 — a RAM probe must never break a solve
+        log.debug("rusage unavailable: %s", e)
+        return None
+    bytes_per_count = 1 if sys.platform == "darwin" else 1024
+    return maxrss * bytes_per_count / GB
+
+
 def peak_rss_gb(children: bool = False) -> float:
     """High-water mark of this process (or of its reaped children) in GB.
 
@@ -538,58 +629,17 @@ def peak_rss_gb(children: bool = False) -> float:
         if sampled > 0:
             return sampled
     if sys.platform == "win32":
-        if children:
-            return 0.0
-        try:
-            import ctypes
-
-            class Counters(ctypes.Structure):
-                _fields_ = [
-                    ("cb", ctypes.c_ulong),
-                    ("PageFaultCount", ctypes.c_ulong),
-                    ("PeakWorkingSetSize", ctypes.c_size_t),
-                    ("WorkingSetSize", ctypes.c_size_t),
-                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                    ("PagefileUsage", ctypes.c_size_t),
-                    ("PeakPagefileUsage", ctypes.c_size_t),
-                ]
-
-            c = Counters()
-            c.cb = ctypes.sizeof(Counters)
-            handle = ctypes.windll.kernel32.GetCurrentProcess()
-            if not ctypes.windll.psapi.GetProcessMemoryInfo(
-                handle, ctypes.byref(c), c.cb
-            ):
-                return 0.0
-            return c.PeakWorkingSetSize / GB
-        except Exception:  # noqa: BLE001
-            return 0.0
-    try:
-        import resource
-
-        who = resource.RUSAGE_CHILDREN if children else resource.RUSAGE_SELF
-        maxrss = resource.getrusage(who).ru_maxrss
-    except Exception:  # noqa: BLE001
-        return 0.0
-    # ru_maxrss is kB on Linux and BYTES on macOS, so the conversion to GB is
-    # 1024**2 there and 1024**3 here. The macOS scale read 1024 until 2026-08-05
-    # — six orders of magnitude out, which turned a 14.5 GB solve into a peak of
-    # 15 million and would have been read straight into the budget arithmetic as
-    # "this aircraft needs more RAM than exists". It was invisible because the
-    # only assertion over it, `test_peak_rss_is_positive_and_in_gigabytes`, had
-    # never been run on a Mac.
-    scale = 1024**3 if sys.platform == "darwin" else 1024**2
-    return maxrss / scale
+        # No `RUSAGE_CHILDREN` equivalent, and nothing to ask it for: without
+        # `fork` the batch never has children to reap (`solve.check_parallel`).
+        return 0.0 if children else (_windows_peak_gb() or 0.0)
+    return (_rusage_peak_gb(children) or 0.0)
 
 
 def observed_peak_gb(runs_root: Path, limit: int = 25) -> float | None:
     """Largest per-solve peak recorded by recent runs, or None if never measured.
 
     This is what makes the budget arithmetic honest: dividing by a hard-coded
-    a hard-coded figure is folklore, dividing by what this aircraft measured last week is data.
+    figure is folklore, dividing by what this aircraft measured last week is data.
     """
     try:
         dirs = sorted((p for p in Path(runs_root).iterdir() if p.is_dir()), reverse=True)
@@ -651,11 +701,14 @@ def plan_parallel(
             "Solving one at a time."
         )
 
-    if available_gb is None:
-        _, available_gb = machine_ram()
-    if ceiling_gb is None:
-        total, _ = machine_ram()
-        ceiling_gb = total + swap_gb()
+    # One probe, not one per missing fact: `machine_ram` answers both questions
+    # at once, and on macOS each call is a Mach round trip.
+    if available_gb is None or ceiling_gb is None:
+        total, available = machine_ram()
+        if available_gb is None:
+            available_gb = available
+        if ceiling_gb is None:
+            ceiling_gb = total + swap_gb()
 
     # The budget is a declaration, not a request: the user is saying how much of
     # their machine this app may have, and they may legitimately mean more than

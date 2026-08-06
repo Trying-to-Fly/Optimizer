@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFont
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -27,21 +27,6 @@ from PySide6.QtWidgets import (
 
 from . import fonts, runindex
 from .runindex import RunSummary
-
-
-MONO_FAMILIES = fonts.families()
-
-
-def _mono(size: int = 0, bold: bool = False) -> QFont:
-    # setFamilies, not QFont("a, b, c"): Qt treats a comma-joined string as one
-    # family name and silently falls back to the UI font when it does not exist.
-    font = QFont()
-    font.setFamilies(MONO_FAMILIES)
-    font.setStyleHint(QFont.Monospace)
-    if size:
-        font.setPointSize(size)
-    font.setBold(bold)
-    return font
 
 
 def _fmt(value, spec: str = ".3f", suffix: str = "") -> str:
@@ -105,7 +90,7 @@ class MetricGrid(QWidget):
         name = QLabel(label)
         name.setStyleSheet("color:#9a9aa0; font-size:11px;")
         val = QLabel(value)
-        val.setFont(_mono())
+        val.setFont(fonts.mono())
         val.setTextInteractionFlags(Qt.TextSelectableByMouse)
         row = self._row if column == 0 else self._row - 1
         self._grid.addWidget(name, row, column * 2)
@@ -174,7 +159,7 @@ class DetailView(QScrollArea):
         self._layout.addWidget(_fixed_height(subtitle))
 
         headline = QLabel(summary.objective_text)
-        headline.setFont(_mono(22, bold=True))
+        headline.setFont(fonts.mono(22, bold=True))
         headline.setStyleSheet("color:#8ab4f8; margin-top:10px;")
         self._layout.addWidget(_fixed_height(headline))
         objective_label = QLabel(summary.objective)
@@ -409,7 +394,7 @@ class CompareView(QWidget):
                     text = "—"
                 values.append(text)
                 item = QTableWidgetItem(text)
-                item.setFont(_mono())
+                item.setFont(fonts.mono())
                 self._table.setItem(row, column, item)
 
             row_differs = len(set(values)) > 1  # the point of the view: what changed
