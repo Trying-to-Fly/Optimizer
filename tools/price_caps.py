@@ -477,13 +477,22 @@ def reevaluate(nominal: dict, args) -> None:
         "member": "nominal", "relax": "none:reeval", "status": "reevaluated",
         "run_dir": str(run_dir),
         "candidates_source": d.get("candidates_source"),
-        "rule_violations": d.get("rule_violations"),
+        # The broken rules with BOTH numbers, under the name `solve.run` gives
+        # them. `rule_violations` is the FUNCTION that computes this; the
+        # diagnostic it lands in is `reported_point_violations`, and reading the
+        # wrong one returns None silently — which reads as "nothing violated".
+        "reported_point_violations": d.get("reported_point_violations"),
         "airworthiness_price": d.get("airworthiness_price"),
+        # notes[0] is where FINDINGS 28 puts the fallback statement, ahead of
+        # every standing caveat, so it is the one line to carry forward.
+        "note_zero": (result.notes or [None])[0],
+        "objective_value": result.performance.get("best", {}).get("objective_value"),
         "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     append_cell(rec)
     print(f"  candidates_source: {rec['candidates_source']}", flush=True)
-    for v in rec["rule_violations"] or []:
+    print(f"  {rec['note_zero']}", flush=True)
+    for v in rec["reported_point_violations"] or []:
         print(f"    violates {v}", flush=True)
     print(f"  {run_dir}", flush=True)
 
