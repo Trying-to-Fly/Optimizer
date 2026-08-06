@@ -69,6 +69,16 @@ def _make_fork_safe_on_macos() -> None:
     things, because they deserve different treatment: the first is refused, and
     the second is left alone. A `setdefault` that the enforcement point then
     overruled would be an override in name only.
+
+    A preset of exactly `"1"` is safe whatever the import order was, and is
+    checked first for that reason. It is the value this function would have set
+    and the remedy `check_parallel`'s own error message prescribes, so it
+    reaches us from the environment the process started with — Accelerate read
+    it at ITS first use, which is the only moment that matters, and our own
+    `setdefault` is then a no-op rather than a miss. Folding it in with the
+    unset case instead closed a loop with no way out: a numpy-first process
+    (embedding, notebook, array-first test) was refused, and the refusal told
+    the user to set the variable they had already set.
     """
     global _FORK_SAFE_MACOS
     if _sys.platform != "darwin":
@@ -76,7 +86,9 @@ def _make_fork_safe_on_macos() -> None:
     preset = _os.environ.get("VECLIB_MAXIMUM_THREADS")
     in_time = "numpy" not in _sys.modules
     _os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
-    if preset is not None and preset != "1":
+    if preset == "1":
+        _FORK_SAFE_MACOS = True  # pinned from process start, import order moot
+    elif preset is not None:
         _FORK_SAFE_MACOS = None  # the caller's decision, and the caller's risk
     else:
         _FORK_SAFE_MACOS = in_time

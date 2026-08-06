@@ -11,6 +11,9 @@ null-space direction names the duplicated rows, with source file and line.
     uv run python tools/degeneracy.py --mount pusher    # a discrete-study member
     uv run python tools/degeneracy.py                   # the nominal solve
 
+    # any aircraft package, and any discrete attribute a study sets:
+    uv run python tools/degeneracy.py --aircraft vtail_rcv2 --set tail_type=ttail
+
 Found this way (2026-07-30, FINDINGS §14.5.3): the flatness sweep's first member
 pins `span` at its own declared lower bound with an equality, so `span >= 1.5`
 and `span == 1.5` are both active — the same constraint twice.
@@ -28,8 +31,16 @@ HERE.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(REPO / "src"))
 
 ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+ap.add_argument("--aircraft", default="vtail_sample",
+                help="aircraft package under aircraft/ (default: vtail_sample)")
 ap.add_argument("--span", type=float, help="hold span at this value (a flatness member)")
 ap.add_argument("--mount", help="motor_mount to study, e.g. pusher")
+ap.add_argument("--set", action="append", default=[], metavar="ATTR=VALUE",
+                help="set a discrete attribute before solving, e.g. tail_type=ttail; "
+                     "repeatable. This is how a DISCRETE-STUDY member is reproduced, "
+                     "and the reason the tool is not tied to one aircraft: a "
+                     "degeneracy is a property of a model, and every aircraft "
+                     "package here builds a different one.")
 ap.add_argument("--printed-scale", type=float, default=1.0)
 ap.add_argument("--iters", type=int, default=60,
                 help="how far to run before inspecting the iterate")
@@ -42,10 +53,19 @@ import numpy as np  # noqa: E402
 from planeopt import solve as S  # noqa: E402
 from planeopt.cli import load_aircraft, load_mission  # noqa: E402
 
-aircraft, _ = load_aircraft(REPO / "aircraft" / "vtail_sample")
+aircraft, _ = load_aircraft(REPO / "aircraft" / args.aircraft)
 mission, _ = load_mission(REPO / "missions" / "endurance_sample.py")
 if args.mount:
     aircraft.motor_mount = args.mount
+for assignment in args.set:
+    attr, _, raw = assignment.partition("=")
+    if not hasattr(aircraft, attr):
+        raise SystemExit(f"{args.aircraft} has no attribute {attr!r}")
+    # match the declared type, so `--set tail_type=ttail` and
+    # `--set span_cap_m=2.5` both do the right thing without a type flag
+    current = getattr(aircraft, attr)
+    setattr(aircraft, attr, type(current)(raw) if isinstance(current, (int, float))
+            and not isinstance(current, bool) else raw)
 
 # --- constraint provenance ------------------------------------------------
 # solve._solve_nlp already labels every row (solve._ConstraintLabels), so this

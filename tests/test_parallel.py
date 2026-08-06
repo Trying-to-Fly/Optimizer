@@ -135,6 +135,78 @@ def test_fork_guard_is_silent_where_it_does_not_apply(monkeypatch, state):
     solve.check_parallel(4)
 
 
+@pytest.mark.parametrize("platform,preset,numpy_first,expected,env_after", [
+    # The pin is ours to make and it landed: verified safe.
+    ("darwin", None,  False, True,  "1"),
+    # The pin is ours to make and it missed — NumPy had already started the
+    # dispatch pool. This is the one state `check_parallel` refuses.
+    ("darwin", None,  True,  False, "1"),
+    # Already pinned to the value we would have set. It came from the
+    # environment the process started with, so Accelerate honoured it at its own
+    # first use and the import order cannot matter. Safe BOTH ways round — the
+    # numpy-first row is the bug: it read False, so following the error
+    # message's advice could never clear the error.
+    ("darwin", "1",   False, True,  "1"),
+    ("darwin", "1",   True,  True,  "1"),
+    # A deliberate width other than 1: not our call, and not ours to overrule.
+    ("darwin", "4",   False, None,  "4"),
+    ("darwin", "4",   True,  None,  "4"),
+    # Nothing to do anywhere else; Accelerate is an Apple library.
+    ("linux",  None,  True,  None,  None),
+])
+def test_the_fork_pin_grades_every_environment_it_can_meet(
+    monkeypatch, platform, preset, numpy_first, expected, env_after
+):
+    """The truth table, because the flag decides whether a battery may run wide.
+
+    Both mistakes it can make are expensive and neither is visible at the time:
+    grading an unpinned process safe hands back workers that segfault hours in,
+    and grading a pinned one unsafe refuses a width that would have worked.
+
+    `_sys`/`_os` are replaced wholesale rather than monkeypatched in place. The
+    real `sys.modules` cannot be asked what a NumPy-free process looks like —
+    this suite imports NumPy long before it gets here — and `setdefault` writes
+    to the real environment. Stubs make it a pure function of its inputs.
+    """
+    import planeopt
+
+    env = {} if preset is None else {"VECLIB_MAXIMUM_THREADS": preset}
+    monkeypatch.setattr(planeopt, "_os", SimpleNamespace(environ=env))
+    monkeypatch.setattr(planeopt, "_sys", SimpleNamespace(
+        platform=platform, modules={"numpy": object()} if numpy_first else {}
+    ))
+    monkeypatch.setattr(planeopt, "_FORK_SAFE_MACOS", "untouched")
+
+    planeopt._make_fork_safe_on_macos()
+
+    if platform != "darwin":
+        assert planeopt._FORK_SAFE_MACOS == "untouched", "must not touch the flag"
+        assert env == {}, "must not set an Apple-only variable off Apple"
+    else:
+        assert planeopt._FORK_SAFE_MACOS is expected
+        assert env["VECLIB_MAXIMUM_THREADS"] == env_after
+
+
+def test_a_process_pinned_before_launch_is_never_told_to_pin_it(monkeypatch):
+    """The closed loop, end to end: `VECLIB_MAXIMUM_THREADS=1` exported in the
+    shell and NumPy imported first — a notebook, an embedding, `pytest` reaching
+    for an array. The refusal tells the user to set the variable they have
+    already set, so there is no action left that could clear it."""
+    import planeopt
+
+    monkeypatch.setattr(planeopt, "_os", SimpleNamespace(
+        environ={"VECLIB_MAXIMUM_THREADS": "1"}
+    ))
+    monkeypatch.setattr(planeopt, "_sys", SimpleNamespace(
+        platform="darwin", modules={"numpy": object()}
+    ))
+    monkeypatch.setattr(planeopt, "_FORK_SAFE_MACOS", None)
+    monkeypatch.setattr(solve, "parallel_available", lambda: True)
+
+    planeopt._make_fork_safe_on_macos()
+    solve.check_parallel(4)  # must not raise
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only")
 def test_macos_pin_is_in_place_for_this_process():
     """The pin only works if it lands before NumPy is imported, so assert the

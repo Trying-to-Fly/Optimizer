@@ -35,14 +35,21 @@ REPO = Path(__file__).parent.parent
 #: went unrun on a clean checkout, on every platform, and the summary blamed a
 #: propeller test. A checkout that cannot run its own tests reads as a broken
 #: checkout.
+#:
+#: The skip belongs to the `screen` fixture rather than the module. Two tests
+#: below never run a screen at all — they assert what the AIRCRAFT declares —
+#: and a module-level `pytestmark` took them down with the rest, so the
+#: `discrete_screen` invariants were unenforced on every fresh checkout and in
+#: all CI, which is exactly where a declaration drifts unnoticed.
 _INCUMBENT_PATH = REPO / "runs/_checkpoints_chord275/multistart__nominal.json"
 try:
     INCUMBENT = json.loads(_INCUMBENT_PATH.read_text())
+    _WHY_NO_INCUMBENT = ""
 except (OSError, ValueError) as _e:
     INCUMBENT = None
-    pytestmark = pytest.mark.skip(
-        reason=f"needs the 2026-07-31 battery's checkpoint at {_INCUMBENT_PATH}, "
-               f"which is not in version control ({_e.__class__.__name__})"
+    _WHY_NO_INCUMBENT = (
+        f"needs the 2026-07-31 battery's checkpoint at {_INCUMBENT_PATH}, "
+        f"which is not in version control ({_e.__class__.__name__})"
     )
 #: That run's measured shadow price, minutes per gram of structure.
 SHADOW_PER_G = -0.0776
@@ -50,6 +57,12 @@ SHADOW_PER_G = -0.0776
 
 @pytest.fixture()
 def screen(sample_aircraft, sample_mission):
+    # Every test that screens anything needs the incumbent operating point, and
+    # only those tests do. Asking here keeps `INCUMBENT is None` from reaching
+    # `screen_discrete` as a silent None.
+    if INCUMBENT is None:
+        pytest.skip(_WHY_NO_INCUMBENT)
+
     def run(candidates=None, top_n=4, shadow_per_g=SHADOW_PER_G):
         cands = candidates if candidates is not None else [
             c for c in sample_aircraft.discrete_options["prop_choice"]

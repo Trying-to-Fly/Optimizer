@@ -510,6 +510,31 @@ CG {{ "%.1f"|format(eq["closure"]["est"]["x_cg_m"]*1000) }} mm → {{ "%.1f"|for
 <p class="meta">The last column is the part of each requirement this model never
 looked at — antenna geometry, cooling paths, hatch access, orientation. Those
 stay the builder's.</p>
+
+{% set pa = eq.get("placement_activity") %}
+{% if pa and pa["n_placed"] %}
+<h3>Did a free station per item buy anything?</h3>
+<p>{{ pa["verdict"] }}. <b>Room</b> is how far a part could move with the others
+held, so a part with none either way holds a number the packing rows already fix;
+anything under {{ pa["tolerance_mm"] }} mm counts as none.</p>
+<div class="scroll">
+<table class="parts">
+<tr><th>part</th><th class="num">station (mm)</th><th class="num">room fwd (mm)</th>
+<th class="num">room aft (mm)</th><th>held by</th></tr>
+{% for row in pa["items"] %}<tr>
+<td>{{ row["item"] }}</td>
+<td class="num">{{ "%.1f"|format(row["station_mm"]) }}</td>
+<td class="num">{{ "%.1f"|format(row["room_fwd_mm"]) }}</td>
+<td class="num">{{ "%.1f"|format(row["room_aft_mm"]) }}</td>
+<td>{{ row["pinned_by"]|join(", ") or "nothing — free to move either way" }}</td>
+</tr>{% endfor %}
+</table>
+</div>
+<p class="meta">This is the measurement <code>EQUIPMENT_PLAN.md</code> attached to
+the "free station per item" decision. It cannot come from <code>active_bounds</code>:
+a placement variable's declared box is a wide numeric backstop, and its real
+bounds are the symbolic lane rows.</p>
+{% endif %}
 {% endif %}
 
 {% if r.notes %}

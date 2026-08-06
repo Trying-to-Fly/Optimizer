@@ -7,6 +7,7 @@ arithmetic is pure and injected-fact based, and this is where it is pinned.
 """
 
 import json
+import os
 import sys
 import time
 
@@ -16,6 +17,11 @@ from planeopt import memory
 
 
 PER = 13.0  # per-solve peak used throughout, matching the observed figure
+
+#: The Mach probes only exist on macOS. Hoisted rather than pasted per test,
+#: matching `needs_fork` in test_parallel.py — five copies had already drifted
+#: into two different reason strings for the same condition.
+darwin_only = pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only")
 
 
 def plan(budget, **kw):
@@ -76,6 +82,31 @@ def test_tiny_budget_still_runs_one_solve_and_warns():
     width, why = plan(4.0, ceiling_gb=8.0, available_gb=8.0)
     assert width == 1
     assert "OOM" in why or "swapping" in why
+
+
+def test_the_plan_probes_the_machine_at_most_once(monkeypatch):
+    """Two facts, one probe — and none at all when the caller already has them.
+
+    `machine_ram` returns total AND available together, so asking it twice buys
+    nothing. It matters because of who calls this: the GUI's budget spinner
+    replans on every arrow click and every keystroke, and on macOS each probe is
+    a Mach round trip rather than a read of `/proc`.
+    """
+    calls = []
+    monkeypatch.setattr(
+        memory, "machine_ram", lambda: (calls.append("ram"), (32.0, 24.0))[1]
+    )
+    monkeypatch.setattr(memory, "swap_gb", lambda: 4.0)
+
+    memory.plan_parallel(20.0, per_solve_gb=PER, fork=True, cpu_count=8)
+    assert calls == ["ram"], f"probed {len(calls)}x for facts one call answers"
+
+    calls.clear()
+    memory.plan_parallel(
+        20.0, per_solve_gb=PER, fork=True, cpu_count=8,
+        available_gb=24.0, ceiling_gb=36.0,
+    )
+    assert calls == [], "facts the caller supplied must not be re-probed"
 
 
 def test_machine_ram_and_swap_are_plausible():
@@ -173,7 +204,7 @@ def test_reset_reports_failure_rather_than_lying(monkeypatch):
     assert memory.reset_peak_rss() is False
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+@darwin_only
 def test_macos_sampler_makes_the_next_reading_per_solve():
     """The macOS half of the test above. No `clear_refs` here, so the same
     guarantee is reconstructed by sampling: after a reset the reading must
@@ -200,7 +231,7 @@ def test_macos_sampler_makes_the_next_reading_per_solve():
     assert memory.peak_rss_gb() < raised - 0.3, "the reading still carries the old peak"
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+@darwin_only
 def test_macos_sampler_is_inert_until_started():
     """`peak_rss_gb` answers 'how big did this get', so before any reset it must
     fall through to the watermark rather than report a spot footprint — which
@@ -209,7 +240,50 @@ def test_macos_sampler_is_inert_until_started():
     assert sampler.peak_gb() == 0.0
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs a real fork")
+def test_the_fork_hook_resets_the_sampler_in_the_child(monkeypatch):
+    """The at-fork hook must actually be attached to `_SAMPLER`.
+
+    Its macOS twin below asserts the same guarantee through real Mach readings;
+    this one asserts the wiring, and runs everywhere `fork` does — the hook is
+    plain Python state, so a Linux CI can catch it coming unplugged. It is the
+    registration that is easy to get wrong: hooks cannot be removed once added,
+    so it moved from `__init__` (one per instance, forever) to one module-level
+    registration, and a module-level hook naming the wrong object fails silently
+    and only on the platform that forks.
+
+    No thread is started. `_thread` stands in as the "was started" marker, so a
+    sentinel exercises the reset without leaving a sampler running for the rest
+    of the suite.
+    """
+    import multiprocessing as mp
+
+    monkeypatch.setattr(memory._SAMPLER, "_peak", 9.9)
+    monkeypatch.setattr(memory._SAMPLER, "_thread", object())
+
+    def child(conn):
+        s = memory._SAMPLER
+        conn.send((s._peak, s._thread is None, s._pid == os.getpid(), s.peak_gb()))
+        conn.close()
+
+    ctx = mp.get_context("fork")
+    rx, tx = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=child, args=(tx,))
+    proc.start()
+    tx.close()
+    peak, thread_cleared, pid_is_own, reported = rx.recv()
+    proc.join(30)
+
+    assert proc.exitcode == 0
+    assert peak == 0.0, "the child kept the parent's reading"
+    assert thread_cleared, "the child kept a thread that the fork did not carry"
+    assert pid_is_own, "the hook did not re-stamp the pid"
+    assert reported == 0.0, "the child must refuse to answer, not guess"
+    # ...and the parent is untouched by its child's reset.
+    assert memory._SAMPLER._peak == 9.9
+
+
+@darwin_only
 def test_macos_forked_child_does_not_inherit_the_parents_peak():
     """A fork carries the memory but not the sampling thread, so the child's
     copy is a frozen parent reading attached to a dead thread — and a lock the
@@ -239,10 +313,15 @@ def test_macos_forked_child_does_not_inherit_the_parents_peak():
 
     assert proc.exitcode == 0
     assert sampled == 0.0, "the child answered with the parent's sampler"
-    assert reported > 0, "the child should still report its own watermark"
+    # Bounded, not merely positive. This is the ONLY test of the macOS
+    # forked-child fallback, and that fallback is `ru_maxrss` — whose unit is
+    # bytes here and kilobytes on Linux. `> 0` passes just as happily on a
+    # reading that is out by 1024, or by 1024**2, which is exactly the slip that
+    # shipped once already (`_rusage_peak_gb`).
+    assert 0.005 < reported < 64.0, f"implausible child peak {reported} GB — check units"
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Mach probes are macOS-only")
+@darwin_only
 def test_macos_readings_agree_with_the_system_tools():
     """The Mach structures are hand-laid `ctypes`, and a layout that drifted
     would return plausible-looking nonsense rather than an error. Pin each one
@@ -272,7 +351,7 @@ def test_macos_readings_agree_with_the_system_tools():
     assert 0.2 * rss_gb < memory._darwin_footprint_gb() < 5 * rss_gb
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only")
+@darwin_only
 def test_macos_compressed_memory_is_reported_and_bounded():
     """It is a headline number on a Mac — several GB of what the machine is
     using can be sitting compressed — but it can never exceed the machine."""
@@ -287,26 +366,34 @@ def test_macos_compressed_memory_is_reported_and_bounded():
 # cannot otherwise check.
 
 
-#: Whether the real machine could honour a Linux reset, so the assertion below
-#: does not demand one from a Linux path merely simulated on a Mac.
-_CAN_CLEAR_REFS = sys.platform == "linux"
-
-
 @pytest.mark.parametrize("platform", ["win32", "linux"])
 def test_the_macos_probes_are_unreachable_off_macos(monkeypatch, platform):
     """Every Mach entry point must answer neutrally rather than reach for a
-    libSystem that is not there."""
+    libSystem that is not there.
+
+    This asserts only what it owns: the Mach half. `reset_peak_rss` on the
+    simulated "linux" pass is deliberately NOT checked here — the honest
+    expectation would reduce to "whatever this host does", since a container
+    with a masked `/proc`, or a kernel without `clear_refs`, returns False for
+    reasons that have nothing to do with the macOS gating under test. Worse, on
+    a real Linux host asserting it means PERFORMING the write, which resets this
+    process's RSS watermark in the middle of a suite that measures it.
+    `test_resetting_the_mark_makes_the_next_reading_per_solve` owns that path on
+    the platform that has it, and `test_reset_reports_failure_rather_than_lying`
+    already pins both ways it can refuse.
+    """
     monkeypatch.setattr(memory.sys, "platform", platform)
-    memory._libsystem._cached = None  # it is cached per process; re-decide it here
+    memory._libsystem.cache_clear()  # cached per process; re-decide it here
+    memory._mach_host_port.cache_clear()
     try:
         assert memory._libsystem() is None
         assert memory.compressed_gb() == 0.0
         assert memory._darwin_ram() is None
         assert memory._darwin_swap() == 0.0
         assert memory._darwin_footprint_gb() == 0.0
-        assert memory.reset_peak_rss() is (platform == "linux" and _CAN_CLEAR_REFS)
     finally:
-        memory._libsystem._cached = None
+        memory._libsystem.cache_clear()
+        memory._mach_host_port.cache_clear()
 
 
 @pytest.mark.parametrize("platform,probe", [

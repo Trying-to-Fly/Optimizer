@@ -757,6 +757,7 @@ class VTailRCv2(_base.VTailSample):
         max-weight closure check can be answered, and without it the block still
         carries the placements and the totals.
         """
+        d = self.DV_DEFAULTS | (dv or {})
         items = self.manifest()
         where = {k: float(v) for k, v in self.placements(dv).items()}
         block = {
@@ -766,6 +767,12 @@ class VTailRCv2(_base.VTailSample):
             "totals_max": equipment.totals(items, "max"),
             "placements_mm": {k: round(v * 1000, 1) for k, v in where.items()},
             "rows": equipment.rows(items, where, self.equipment_mass_basis),
+            # Whether a free station per item bought this aeroplane anything —
+            # the measurement EQUIPMENT_PLAN.md attached to that decision, which
+            # `active_bounds` could not make (see `equipment.placement_activity`)
+            "placement_activity": equipment.placement_activity(
+                items, self.lanes(d, items), where, self.separations()
+            ),
         }
         if other is not None:
             block["closure"] = equipment.mass_closure(

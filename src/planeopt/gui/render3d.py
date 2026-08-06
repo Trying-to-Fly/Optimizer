@@ -527,15 +527,8 @@ def draw_model(
 
 # --- chrome ----------------------------------------------------------------
 
-MONO_FAMILIES = fonts.families()
-
-
 def mono_font(size: int = 9) -> QFont:
-    font = QFont()
-    font.setFamilies(MONO_FAMILIES)
-    font.setStyleHint(QFont.Monospace)
-    font.setPointSize(size)
-    return font
+    return fonts.mono(size)
 
 
 COLORBAR_WIDTH = 16
