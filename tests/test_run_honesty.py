@@ -508,6 +508,59 @@ def test_the_closest_miss_rides_along_when_a_member_recorded_one():
     assert "Closest miss on any member: L == weight_n" in str(err)
 
 
+# --- when NOTHING in the sweep is legal ------------------------------------
+#
+# `candidates = legal if legal else feasible` silently changes what "best"
+# means. The first `vtail_rcv2` battery (2026-08-06) hit it: nine of eighteen
+# speeds failed to trim and all nine that trimmed exceeded the control throw, so
+# the run reported a champion trimming at -27.55 deg against a 6.53 deg cap,
+# with a static margin of 0.439 against a required [0.08, 0.15]. The only trace
+# was `sm_in_range: false` in a table beside a cap the artifact never printed.
+#
+# `airworthiness_price` cannot catch this and is not meant to: it asks which
+# rule excluded a BETTER point, and here every point was excluded.
+
+RCV2_LIMITS = {
+    "trim_throw": ("trim deflection", lambda s: abs(s["deflection_deg"]), 6.5294, " deg"),
+}
+
+
+def test_a_violated_rule_is_quoted_with_both_numbers():
+    """"violates trim_throw" sends the reader to the aircraft file; "27.55 deg
+    against a 6.53 deg limit" does not — and the cap appears nowhere else."""
+    got = solve.rule_violations(
+        _tp(12.5, 44.71, -27.553), RCV2_RULES, RCV2_LIMITS
+    )
+
+    assert [v["rule"] for v in got] == ["trim_throw"]
+    assert got[0]["value"] == pytest.approx(27.553)
+    assert got[0]["limit"] == pytest.approx(6.5294)
+    assert "27.55 deg against a 6.529 deg limit" in got[0]["text"]
+
+
+def test_a_legal_point_reports_no_violations():
+    assert solve.rule_violations(_tp(12.5, 44.71, -3.0), RCV2_RULES, RCV2_LIMITS) == []
+
+
+def test_a_rule_with_no_way_to_quote_it_degrades_to_silence():
+    """A predicate added without a matching limit entry must not raise KeyError
+    inside a finished run — the diagnostic is the last thing that should be able
+    to destroy hours of solving."""
+    rules = {**RCV2_RULES, "mystery": lambda s: False}
+
+    got = solve.rule_violations(_tp(12.5, 44.71, -27.553), rules, RCV2_LIMITS)
+
+    assert [v["rule"] for v in got] == ["trim_throw"]
+
+
+def test_an_undeclared_limit_is_skipped_rather_than_formatted_as_none():
+    """`trim_deflection_limit_deg` is optional — an aircraft that declares no
+    cap has no violation to report, not a 'None deg limit'."""
+    limits = {"trim_throw": ("trim deflection", lambda s: 1.0, None, " deg")}
+
+    assert solve.rule_violations(_tp(12.5, 44.71, -27.553), RCV2_RULES, limits) == []
+
+
 def test_the_reeval_tolerance_is_one_number_the_run_and_the_test_share():
     """`test_m3_optimize_smoke` asserted this and the artifact never mentioned
     it, so a 64.16 min gap on a 120 min champion shipped unremarked. Two copies
@@ -535,3 +588,80 @@ def test_a_member_with_no_status_is_reported_as_unknown_not_dropped():
     err = solve.no_survivors_error(["a"], [{"failed": "worker died"}])
 
     assert "unknown [a]" in str(err)
+
+
+# --- the case above, end to end (needs a real aero evaluation) --------------
+
+#: The champion `vtail_rcv2` returned on 2026-08-06 at `--max-iter 3`. Pinned
+#: as data because the run directory it came from was a scratch artifact, and
+#: this is the only aeroplane this project has produced for which NO speed in
+#: the sweep is airworthy. Not optimized — that is the point; what it
+#: reproduces is the FALLBACK, not a design.
+RCV2_ILLEGAL_CHAMPION = {
+    "ballast_kg": 0.06282218278514194,
+    "c_root": 0.26391043211434456,
+    "cs_frac": 0.23604430383472771,
+    "d_exp": 0.5114776683683473,
+    "dihedral_tip": 3.108708241417302,
+    "eta_break": 0.2686540986342541,
+    "fin_c_root": 0.13380840053218196,
+    "fin_height": 0.1997596912423295,
+    "fin_sweep": 15.134897835573843,
+    "fin_taper": 0.7271782089117856,
+    "fullness": 1.1101424174951524,
+    "le_shear": 0.07021809936227577,
+    "pod_bay": 0.4334615525559903,
+    "pod_bay_end": 0.48632163252680094,
+    "pod_nose": 0.04233996303142498,
+    "pod_tail": 0.16427102824636516,
+    "pod_wh": 0.8128986737399786,
+    "pod_xs": 1.0425625827484761,
+    "span": 1.801961561620828,
+    "spar_od_center": 0.010906108322096432,
+    "spar_od_outer": 0.009908234330043572,
+    "spar_wall_center": 0.0010453029498954996,
+    "spar_wall_outer": 0.0010193286396070493,
+    "t_c_root": 0.16718743496643365,
+    "t_span": 0.4180725537812581,
+    "t_sweep": 8.098563637955715,
+    "t_taper": 0.8245619841014549,
+    "tail_arm": 0.5713654105202417,
+    "taper": 0.715614837572725,
+    "washout_tip": -2.5419382322340445,
+    "wl_cant": 71.32494439750583,
+    "wl_cr": 0.7532922990370441,
+    "wl_len": 0.1210473893962054,
+    "wl_taper": 0.6989365674506756,
+    "wl_toe": -1.0528114238144235,
+    "x_airspeed_board": 0.44997844918983,
+    "x_battery": 0.14156494779147188,
+    "x_bec_pi": 0.30710343508019605,
+    "x_buzzer": 0.43481143664900157,
+    "x_companion_pi": 0.26110657725597636,
+    "x_esc": 0.28010602118739913,
+    "x_flight_controller": 0.3591506708060532,
+    "x_gps_compass": 0.3836812689985093,
+    "x_receiver_elrs": 0.41055273958080374,
+    "x_telemetry_sik": 0.2740740857139824,
+}
+
+
+@pytest.mark.solve  # a full 18-point sweep on the heavier aeroplane, ~20 min
+def test_a_sweep_with_no_legal_point_says_so_at_note_zero(
+    rcv2_aircraft, sample_mission, tmp_path
+):
+    """Nine of eighteen speeds fail to trim and all nine that trim exceed the
+    6.53 deg throw cap, so `candidates` falls back to `feasible` and the run
+    reports the least-bad ILLEGAL point. Before this it did so in silence."""
+    result, _ = solve.run(
+        rcv2_aircraft, sample_mission, runs_root=tmp_path,
+        dv=RCV2_ILLEGAL_CHAMPION,
+    )
+
+    assert result.diagnostics["candidates_source"] == "feasible_fallback"
+    broken = {v["rule"] for v in result.diagnostics["reported_point_violations"]}
+    assert "trim_throw" in broken
+    # the loudest thing the artifact says, ahead of every standing caveat
+    assert "NO AIRWORTHY OPERATING POINT EXISTS" in result.notes[0]
+    # and the numbers are IN the sentence, not left to the aircraft file
+    assert "against a" in result.notes[0]

@@ -449,6 +449,35 @@ def v_min_price(airworthy: list[dict], best: dict, v_min_ms: float, sign: int) -
     }
 
 
+def rule_violations(point: dict, rules: dict, limits: dict) -> list[dict]:
+    """Which airworthiness rules a point breaks, with the numbers to say so.
+
+    Exists because "violates trim_throw" sends a reader to the aircraft file to
+    discover by how much, while "27.55 deg against a 6.53 deg limit" does not —
+    and the cap is a value the artifact otherwise never prints anywhere.
+
+    `rules` maps name -> predicate and `limits` maps name -> (label, accessor,
+    limit, units); a rule present in one and not the other is simply skipped,
+    so a caller that adds a predicate without a way to quote it degrades to
+    silence about that rule rather than to a KeyError inside a finished run.
+    """
+    out = []
+    for name, ok in rules.items():
+        if name not in limits or ok(point):
+            continue
+        label, value_of, limit, units = limits[name]
+        if limit is None:
+            continue
+        out.append({
+            "rule": name, "what": label,
+            "value": float(value_of(point)), "limit": float(limit),
+            "units": units.strip() or None,
+            "text": f"{label} {value_of(point):.4g}{units} against a "
+                    f"{float(limit):.4g}{units} limit",
+        })
+    return out
+
+
 def no_survivors_error(keys: list[str], results: list[dict]) -> RuntimeError:
     """The error a multistart with no surviving member should raise.
 
@@ -750,12 +779,34 @@ def run(
             defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3
         ),
     }
+    #: The same rules, in a form that can be QUOTED. A note saying a point
+    #: "violates trim_throw" sends the reader to the aircraft file to find out
+    #: by how much; one saying "27.55 deg against a 6.53 deg limit" does not.
+    #: Parallel to the predicates rather than merged with them so
+    #: `airworthiness_price` keeps taking a plain {name: predicate} mapping.
+    airworthiness_limits = {
+        "gust_margin": ("CL", lambda s: s["CL"], 0.7 * stall["cl_max_3d"], ""),
+        "advance_ratio": ("advance ratio", lambda s: s["J"], j_cap, ""),
+        "trim_throw": (
+            "trim deflection", lambda s: abs(s["deflection_deg"]), defl_cap, " deg",
+        ),
+    }
 
     def _legal_but_for_v_min(s: dict) -> bool:
         return all(ok(s) for ok in airworthiness_rules.values())
 
     airworthy = [s for s in feasible if _legal_but_for_v_min(s)]
     legal = [s for s in airworthy if s["V_ms"] >= mission.v_min_ms - 1e-9]
+    # THE FALLBACK CHANGES WHAT "BEST" MEANS, so the artifact has to carry which
+    # one it got. With no legal point anywhere in the sweep this reports the
+    # least-bad ILLEGAL one, and until 2026-08-06 it did so in silence: the
+    # first `vtail_rcv2` battery returned a champion trimming at -27.55 deg
+    # against a 6.53 deg cap, with a static margin of 0.439 against a required
+    # [0.08, 0.15], and the only trace was `sm_in_range: false` in a table
+    # beside a cap the artifact never printed (FINDINGS §28). `airworthiness_price`
+    # cannot catch this — it asks which rule excluded a BETTER point, and here
+    # the rules excluded every point, so there is no better one to name.
+    candidates_source = "legal" if legal else "feasible_fallback"
     candidates = legal if legal else feasible
     if not candidates:
         # Every point failed to trim or to close the propulsion chain. Report the
@@ -794,6 +845,13 @@ def run(
     # exists, which is where the first rcv2 evaluation lost its headline.
     air_price = airworthiness_price(
         feasible, best, airworthiness_rules, mission.v_min_ms, sign
+    )
+    # ... and when NOTHING was legal, the far louder statement `air_price` is
+    # structurally unable to make.
+    best_violations = (
+        rule_violations(best, airworthiness_rules, airworthiness_limits)
+        if candidates_source == "feasible_fallback"
+        else []
     )
 
     # --- sweep points that dropped out, and on whose authority ---------------
@@ -893,6 +951,10 @@ def run(
             "v_min_price": vmin_price,
             # ... and None when the airworthiness filters are not either.
             "airworthiness_price": air_price,
+            # "legal", or "feasible_fallback" when NO point in the sweep was
+            # airworthy and the reported best is the least-bad illegal one.
+            "candidates_source": candidates_source,
+            "reported_point_violations": best_violations,
             "stall_detail": stall,
             "neutral_point_m": sm["x_np_m"],
             "sm_local_slopes": sm.get("sm_local_slopes"),
@@ -925,6 +987,20 @@ def run(
             + f". Relaxing the {mission.v_min_ms:.2f} m/s minimum-speed "
             "requirement, not the aircraft, is what buys that back."
         )
+    if best_violations:
+        # Inserted at position ZERO, ahead of every standing caveat: this one
+        # says the reported aeroplane may not legally be flown as reported, and
+        # a reader who stops after the first line must have read it.
+        broken = "; ".join(v["text"] for v in best_violations)
+        result.notes.insert(0, (
+            f"NO AIRWORTHY OPERATING POINT EXISTS IN THIS SWEEP. Every one of the "
+            f"{len(feasible)} speeds that trimmed breaks at least one airworthiness "
+            f"rule, so there was nothing legal to choose from and what is reported "
+            f"is the least-bad ILLEGAL point: {broken}. This is not a design. Read "
+            f"the objective as an upper bound the aeroplane cannot actually reach, "
+            f"and fix the aircraft — balance, control throw or wing loading — "
+            f"before reading anything else in this artifact."
+        ))
     if air_price is not None:
         by = ", ".join(air_price["peak_excluded_by"]) or "an airworthiness rule"
         counts = ", ".join(

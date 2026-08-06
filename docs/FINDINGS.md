@@ -2603,3 +2603,81 @@ shaped AIRCRAFT, §27.1 needed a flag nobody had used, §27.3 needed a run
 degenerate enough to make a silent number loud. A guard evaluated only on inputs
 that pass it has not been tested, and a number reported only where nobody reads
 it has not been reported.
+
+## 28. A sweep with no legal point at all, reported as a design (2026-08-06)
+
+The bug hunt's fifth defect, and the purest instance of the pattern §27.4 named.
+
+### 28.1 What the first `vtail_rcv2` battery returned
+
+The RC v2 package's first NLP (43 min, `--max-iter 3`) produced a champion, and
+the numeric re-evaluation of it reported **44.71 min at 12.5 m/s**. Its sweep:
+
+| | |
+|---|---|
+| speeds swept | 18 |
+| failed to trim at all | **9** (8.0 through 12.0 m/s) |
+| trimmed | 9, at deflections **-26.5 to -43.6 deg** |
+| against a throw cap of | **6.53 deg** |
+| passing that cap | **0** |
+
+Not one airworthy operating point exists anywhere in the sweep. The reported
+point trims at **4.2x its control limit** with a static margin of **0.439**
+against a required [0.08, 0.15].
+
+### 28.2 The fallback that changes what "best" means
+
+    candidates = legal if legal else feasible
+
+One line, present since M1, and correct as a policy — a run with nothing legal
+should still report SOMETHING rather than raise. What it must not do is report
+it in the same voice as a legal answer, and that is exactly what it did.
+
+**`airworthiness_price` (§26) cannot catch this, and is not meant to.** It asks
+which rule excluded a BETTER point. Here the rules excluded EVERY point, so
+there is no better one to name and it correctly returned `None`. The two are
+complementary: §26 is "a filter chose among the legal answers", §28 is "there
+were no legal answers". A reader seeing `airworthiness_price: null` would
+reasonably conclude the filters cost nothing, which was true and deeply
+misleading.
+
+**What the artifact actually said.** Eight notes. The closest were that the
+static margin is *mesh-dependent* — a statement about the PRECISION of an
+unbuildable margin — and that the NLP and re-evaluation disagree by 61% (§27.3,
+itself only added hours earlier). The sole trace of the real failure was
+`sm_in_range: false` in a constraints table, beside `trim_deflection_deg:
+-27.55` and a cap the artifact **never prints anywhere**. Note 4 honestly listed
+the nine speeds that did not trim. Nothing said the reported champion is
+illegal.
+
+### 28.3 The fix, and the two properties it has to have
+
+`diagnostics.candidates_source` is now `"legal"` or `"feasible_fallback"`, so
+the MEANING of the headline number is recorded rather than implied. When the
+fallback fires, `rule_violations` reports each broken rule with **both numbers**
+and the note goes in at **position zero** — ahead of every standing caveat,
+because a reader who stops after the first line must have read this one.
+
+Both details are load-bearing:
+
+- **Quoting the limit, not just the rule.** "Violates `trim_throw`" sends the
+  reader to the aircraft file to find out by how much. "trim deflection 27.55
+  deg against a 6.529 deg limit" does not, and the cap appears nowhere else in
+  the artifact.
+- **`rule_violations` degrades to silence, never to a raise.** A predicate added
+  without a matching limit entry is skipped, and an aircraft that declares no
+  throw cap reports no violation rather than "a None deg limit". A diagnostic is
+  the last thing that should be able to destroy hours of solving — the same
+  fail-open posture as the §22.2 gate.
+
+### 28.4 Why the aeroplane is like that, which is a separate question
+
+At 3 iterations this is not a design and the numbers are not a verdict on
+`vtail_rcv2` — the run says so at note zero already. But the DIRECTION is
+consistent with §26: the RC v2 manifest puts the motor at station 34.7 mm and
+the battery at 115 mm, and the spec geometry was nose-heavy enough to need more
+than its throw at every speed below 16.5 m/s. A truncated champion is worse
+balanced still. Whether a CONVERGED rcv2 battery solves its own balance — it
+has `ballast_kg`, ten placement variables and the throw limit as a hard NLP
+constraint, so it should — is the open question, and `candidates_source` is now
+the first thing to read in its artifact.
