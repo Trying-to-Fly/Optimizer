@@ -377,3 +377,56 @@ def test_sm_read_at_stays_quiet_when_the_design_itself_misses_the_window():
     champ = {"V_ms": 9.709, "static_margin": 0.061}
     _, note = solve.sm_read_at(champ, {"V_ms": 9.5}, {"sm_in_range": False}, SM_RANGE)
     assert note is None
+
+
+# --- where this feature meets the no-legal-point fallback -------------------
+#
+# `sm_read_at`'s premise is "the sweep picks the best AIRWORTHY point". That is
+# false when NOTHING in the sweep was airworthy and `run` fell back to the best
+# FEASIBLE one (FINDINGS §28). The two were written in separate sessions and
+# merged on 2026-08-06; separately each is correct, and together they put a
+# reassuring "the design meets its window at the speed it was solved for" one
+# line away from a champion trimming at 4.2x its control limit.
+
+
+def test_the_premise_is_restated_when_no_point_was_airworthy():
+    """The `why` text is the reader's explanation of what the two speeds MEAN,
+    and 'the best airworthy point' is exactly wrong in the fallback."""
+    champ = {"V_ms": 9.8, "static_margin": 0.10}
+
+    read_at, _ = solve.sm_read_at(
+        champ, {"V_ms": 12.5}, {"sm_in_range": True}, SM_RANGE,
+        candidates_source="feasible_fallback",
+    )
+
+    assert read_at["candidates_source"] == "feasible_fallback"
+    assert "NO point in the sweep was airworthy" in read_at["why"]
+    assert "best AIRWORTHY point" not in read_at["why"]
+
+
+def test_the_reassuring_note_refuses_to_read_as_an_all_clear():
+    """It stays — the NLP design really does meet its window at its own speed —
+    but it may not be the last word on a run with no legal operating point."""
+    champ = {"V_ms": 9.8, "static_margin": 0.10}
+
+    _, note = solve.sm_read_at(
+        champ, {"V_ms": 12.5}, {"sm_in_range": False}, SM_RANGE,
+        candidates_source="feasible_fallback",
+    )
+
+    assert "meets the window at the speed it was solved for" in note
+    assert "THIS IS NOT AN ALL-CLEAR" in note
+    assert "ILLEGAL" in note
+
+
+def test_a_normal_run_is_unchanged_by_any_of_this():
+    """The fallback is rare; the ordinary case must read exactly as before."""
+    champ = {"V_ms": 9.709, "static_margin": 0.07999999}
+
+    read_at, note = solve.sm_read_at(
+        champ, {"V_ms": 9.5}, {"sm_in_range": False}, SM_RANGE
+    )
+
+    assert read_at["candidates_source"] == "legal"
+    assert "best AIRWORTHY point" in read_at["why"]
+    assert "ALL-CLEAR" not in note

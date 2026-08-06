@@ -502,7 +502,8 @@ def _failed_entry(r: dict) -> dict:
 
 
 def sm_read_at(
-    champion: dict, best: dict, constraints: dict, sm_range: tuple[float, float]
+    champion: dict, best: dict, constraints: dict, sm_range: tuple[float, float],
+    candidates_source: str = "legal",
 ) -> tuple[dict | None, str | None]:
     """Name the operating point each static margin was read at, when they differ.
 
@@ -530,13 +531,29 @@ def sm_read_at(
     v_nlp, v_re = champion.get("V_ms"), best.get("V_ms")
     if v_nlp is None or v_re is None or abs(v_nlp - v_re) <= 1e-3:
         return None, None
+    # "The sweep picks the best AIRWORTHY point" is this function's whole premise
+    # and it is FALSE when nothing in the sweep was airworthy: `run` then falls
+    # back to the best FEASIBLE point, which may break any rule (FINDINGS §28).
+    # Merging the two sessions that wrote these paragraphs put a reassuring note
+    # — "the optimized design meets its window at the speed it was solved for" —
+    # one line away from a champion trimming at 4.2x its control limit. Both
+    # sentences were true; together they read as an all-clear.
+    fell_back = candidates_source == "feasible_fallback"
     read_at = {
         "nlp_V_ms": v_nlp,
         "reeval_V_ms": v_re,
-        "why": "the sweep picks the best AIRWORTHY point and its filter does "
-               "not carry the static-margin window, so these are two different "
-               "operating points; `static_margin_nlp` is the one the design was "
-               "optimized for",
+        "candidates_source": candidates_source,
+        "why": (
+            "NO point in the sweep was airworthy, so the re-evaluation reports "
+            "the best FEASIBLE point — an illegal one — while the NLP reports the "
+            "design it converged to; these are two different operating points and "
+            "neither is a flyable answer until the aircraft is fixed"
+            if fell_back else
+            "the sweep picks the best AIRWORTHY point and its filter does "
+            "not carry the static-margin window, so these are two different "
+            "operating points; `static_margin_nlp` is the one the design was "
+            "optimized for"
+        ),
     }
     note = None
     lo, hi = sm_range
@@ -554,6 +571,13 @@ def sm_read_at(
             f"window at the speed it was solved for ({v_nlp:.3f} m/s, SM "
             f"{sm_nlp:.5f}). The sweep's airworthiness filter does not carry the "
             f"SM window — see `constraints.sm_read_at`."
+            + (
+                " THIS IS NOT AN ALL-CLEAR: no point in the sweep was airworthy "
+                "at all, so the speed this margin is read at is an ILLEGAL "
+                "operating point and the comparison says nothing about whether "
+                "the aeroplane can be flown."
+                if fell_back else ""
+            )
         )
     return read_at, note
 
@@ -2744,8 +2768,10 @@ def optimize(
         # floor), and the artifact then reported `sm_in_range: False` for a
         # design that meets its window at the speed it was optimized for — a
         # reader has no way to tell that from an unstable aeroplane.
-        read_at, note = sm_read_at(champion, best, result.constraints,
-                                   mission.static_margin_range)
+        read_at, note = sm_read_at(
+            champion, best, result.constraints, mission.static_margin_range,
+            result.diagnostics.get("candidates_source", "legal"),
+        )
         if read_at:
             result.constraints["sm_read_at"] = read_at
         if note:
