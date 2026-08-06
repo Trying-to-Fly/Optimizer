@@ -285,6 +285,135 @@ def _convergence_trace(stats: dict, tail: int = 25) -> dict:
         return {}
 
 
+#: Relative slack under which a champion counts as sitting ON a declared pod
+#: limit. Far above IPOPT's own constraint tolerance (the 2026-08-07 rcv2
+#: champion missed by 8e-08 on fineness and 1e-07 on the boat-tail floor) and
+#: far below any interior value worth calling interior (`pod_nose` cleared its
+#: floor by 9.5% in the same run), so there is no band where this is a guess.
+POD_LIMIT_ACTIVE_REL = 1e-6
+
+
+def _shadow_price_provenance(
+    final_bump: dict,
+    screen_per_g: float | None,
+    screen_measured_on: float | None,
+    champion_objective: float,
+) -> tuple[float | None, dict]:
+    """The mass trade rate, AND which aeroplane it was measured on.
+
+    The re-solve battery re-runs the +20 g bump on the shipped design for one
+    reason: a shadow price quoted against a superseded prop is not this design's
+    trade rate. When that bump fails the code falls back to the multistart
+    screen's value — the very number the phase exists to replace — and until
+    2026-08-07 the artifact recorded the result with nothing saying so.
+
+    Live instance: the `20260807T061330` rcv2 battery lost its final bump to the
+    wall clock and reported -0.0709 per gram, measured on the 105.818 min
+    pre-study aeroplane on the INCUMBENT prop, beside a 122.123 min champion
+    flying `ancf_12x10`. Neither bump member is recorded in the artifact (both
+    are skipped as non-sensitivities), so the provenance could not be
+    reconstructed from it either.
+
+    Same shape as FINDINGS 28's `candidates = legal if legal else feasible`: a
+    fallback that is correct as a POLICY and silently changes what the number
+    it produces MEANS.
+    """
+    if "failed" not in final_bump:
+        return (final_bump["objective_value"] - champion_objective) / 20.0, {
+            "source": "final_design",
+            "measured_on_objective": champion_objective,
+            "reported_beside_champion": champion_objective,
+            "final_bump_failed": None,
+        }
+    return screen_per_g, {
+        # `none` rather than `multistart_screen` when the screen bump failed too:
+        # "measured on the wrong aeroplane" and "not measured at all" are
+        # different claims and only one of them has a number behind it.
+        "source": "multistart_screen" if screen_per_g is not None else "none",
+        "measured_on_objective": screen_measured_on if screen_per_g is not None else None,
+        "reported_beside_champion": champion_objective,
+        "final_bump_failed": final_bump.get("failed"),
+    }
+
+
+def _pod_limit_activity(aircraft, dv: dict, ab: dict, result) -> dict:
+    """Are the two declared pod limits BINDING, and say so if they are.
+
+    Both are model-validity bounds rather than physics, and the artifact used to
+    record the raw numbers while leaving the reader to do the subtraction that
+    says whether either is active. That is the split this project keeps finding:
+    `fineness`'s own constraint comment reads "Landing on it is a defect report,
+    not an optimum", and the 2026-08-07 rcv2 champion landed on it at
+    8.000000080 against a ceiling of 8.0 in an artifact that said nothing.
+
+    The two readings are opposite in what they license, which is why they are
+    separate flags rather than one:
+
+    - **the fineness ceiling** is a MODEL limit. Binding means the optimizer is
+      buying minutes by making the pod slender past where the form-factor curve
+      is trustworthy, and is being stopped by a declared number rather than by
+      the aeroplane. It is a defect report against the drag model.
+    - **the boat-tail floor** is a PROXY kept deliberately for one battery
+      (FUSELAGE_DRAG_PLAN 7). Inactive licenses deleting it as a measured
+      no-op; still active means the afterbody term is too weak to replace it,
+      and the constants need revisiting rather than the floor deleting.
+
+    Fail-open: an aircraft that declares neither limit reports neither, and a
+    topology the rows do not apply to is skipped rather than described wrongly.
+    """
+    if getattr(aircraft, "fuselage_topology", None) != "pod_boom":
+        return {}
+    out: dict = {}
+    ceiling = getattr(aircraft, "fineness_max", None)
+    if ceiling:
+        out["fineness_max"] = float(ceiling)
+        out["fineness_ceiling_active"] = bool(
+            ab["fineness"] >= float(ceiling) * (1 - POD_LIMIT_ACTIVE_REL)
+        )
+        if out["fineness_ceiling_active"]:
+            result.notes.append(
+                f"THE FINENESS CEILING IS BINDING: the pod sits at f = "
+                f"{ab['fineness']:.6f} against a declared ceiling of "
+                f"{float(ceiling):g}. That ceiling is a MODEL-validity bound — "
+                "the Hoerner form factor keeps falling to f ~ 16 while the real "
+                "minimum-drag band for a body of revolution is f ~ 6-7 — so the "
+                "optimizer is being stopped by a declared number rather than by "
+                "the aeroplane, and the slenderness it wants is not established "
+                "to be real. Landing on it is a defect report against the "
+                "fuselage drag model, not an optimum."
+            )
+    floor_factor = getattr(aircraft, "boat_tail_min_d_eq", None)
+    if floor_factor:
+        try:
+            p = aircraft.pod_dims(aircraft.DV_DEFAULTS | dv)
+            d_eq, tail_len = float(p["d_eq"]), float(p["tail_len"])
+        except Exception:  # noqa: BLE001 — a diagnostic must never cost the run
+            return out
+        ratio = tail_len / d_eq if d_eq else None
+        if ratio is not None:
+            out["boat_tail_d_eq"] = ratio
+            out["boat_tail_min_d_eq"] = float(floor_factor)
+            out["boat_tail_floor_active"] = bool(
+                ratio <= float(floor_factor) * (1 + POD_LIMIT_ACTIVE_REL)
+            )
+            if out["boat_tail_floor_active"]:
+                result.notes.append(
+                    f"THE BOAT-TAIL FLOOR IS STILL ACTIVE: pod_tail sits at "
+                    f"{ratio:.6f} x d_eq against a floor of "
+                    f"{float(floor_factor):g}, with theta_max "
+                    f"{ab.get('theta_max_deg', float('nan')):.1f} deg against a "
+                    f"{ab.get('theta_sep_deg', float('nan')):.0f} deg separation "
+                    "threshold. The floor is a PROXY for the afterbody physics "
+                    "and was kept for one battery to find out whether the new "
+                    "base-drag term had made it inactive. It has not: the term "
+                    "does not hold the tail cone open on its own, so the floor "
+                    "must NOT be deleted as a measured no-op and the "
+                    "correlation constants are what to revisit "
+                    "(docs/FUSELAGE_DRAG_PLAN.md 7)."
+                )
+    return out
+
+
 def _worst_violations(opti, labels: dict[int, str], top: int = 5) -> list[dict]:
     """Which constraints the last iterate could not satisfy, worst first.
 
@@ -2346,6 +2475,11 @@ def optimize(
         if "failed" not in bumped
         else None
     )
+    #: Which aeroplane the screen price was measured on, kept because `champion`
+    #: is rebound to the post-study design below and the sentence above ("the
+    #: number reported in the artifact is re-measured on that design") stops
+    #: being true whenever the final bump fails.
+    screen_shadow_measured_on = champion["objective_value"]
 
     # discrete studies (MODEL_DETAILS 6.3): the aircraft declares
     # `discrete_options = {attr: [candidate values]}` — e.g. fuselage topology
@@ -2662,11 +2796,11 @@ def optimize(
                 "ballast_kg": r["dv"]["ballast_kg"],
             }
     final_bump = battery_results["mass_bump"]
-    shadow_per_g = (
-        (final_bump["objective_value"] - champion["objective_value"]) / 20.0
-        if "failed" not in final_bump
-        else screen_shadow_per_g
+    shadow_per_g, shadow_price_source = _shadow_price_provenance(
+        final_bump, screen_shadow_per_g, screen_shadow_measured_on,
+        champion["objective_value"],
     )
+    bump_failed = shadow_price_source["source"] != "final_design"
 
     # What the champion is PINNED against, in the progress log as well as the
     # artifact: this is the "what to relax next" list, and the run it was added
@@ -2947,6 +3081,7 @@ def optimize(
                 # of the WHOLE body drag area (skin friction + excrescence +
                 # base), so it reads as a share of what the buildup reports
                 ab["share_of_body_drag"] = ab["base_drag_area_m2"] / total if total else None
+                ab |= _pod_limit_activity(aircraft, champion["dv"], ab, result)
                 result.diagnostics["afterbody"] = ab
         except Exception as e:  # noqa: BLE001 — a diagnostic must never cost the run
             log.warning("afterbody diagnostics failed: %s: %s", type(e).__name__, e)
@@ -2982,6 +3117,7 @@ def optimize(
         ],
         "multistart_objective_spread": spread,
         "shadow_price_obj_per_gram": shadow_per_g,
+        "shadow_price_source": shadow_price_source,
         "flatness_span": flat,
         "nlp_vs_reeval_gap": (
             champion["objective_value"]
@@ -2994,6 +3130,24 @@ def optimize(
         "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar "
         "stress/deflection sizing, ballast cap, battery-position balance."
     )
+    if bump_failed and shadow_per_g is not None:
+        result.notes.append(
+            f"THE SHADOW PRICE IS NOT THIS DESIGN'S: the +20 g bump on the "
+            f"final design failed ({final_bump.get('failed')}), so the reported "
+            f"{shadow_per_g:.5f} per gram is the multistart screen's value, "
+            f"measured on the {shadow_price_source['measured_on_objective']:.3f} "
+            f"aeroplane BEFORE the discrete studies chose the design — and it is "
+            f"quoted beside a champion of {champion['objective_value']:.3f}. A "
+            "trade rate measured on a superseded prop is not this design's trade "
+            "rate, which is the entire reason the final bump is solved at all. "
+            "Treat it as an order of magnitude, not as this aeroplane's."
+        )
+    elif bump_failed:
+        result.notes.append(
+            "NO SHADOW PRICE: both the final +20 g bump and the multistart bump "
+            "failed, so nothing in this run says what a gram costs. Any mass "
+            "trade quoted from this artifact is unsupported."
+        )
     # Do the two models agree about the aeroplane the run is shipping? The NLP
     # objective and the numeric re-evaluation of the SAME design vector are
     # independent arithmetic over the same physics, so a large disagreement

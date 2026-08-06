@@ -207,6 +207,18 @@ class VTailSample:
     #: pod-boom only — see `geometry_constraints`, where the integrated
     #: topology's own fineness is measured and this bound is shown not to apply.
     fineness_max = 8.0
+    #: Boat-tail floor, as a multiple of d_eq. A PROXY for physics that used to
+    #: be missing: before the afterbody term existed the buildup could not see
+    #: closure angle at all, so the optimizer shortened the tail cone until a
+    #: geometric floor stopped it. The rollout (docs/FUSELAGE_DRAG_PLAN.md 7) is
+    #: measure-then-move — keep the floor one battery, then delete it as a
+    #: measured no-op if the term has made it inactive.
+    #:
+    #: Named rather than written as a literal in `geometry_constraints` so the
+    #: row the solver enforces and the slack the artifact reports cannot drift
+    #: apart. It is reported by `diagnostics.afterbody.boat_tail_floor_active`,
+    #: which is what the delete-or-keep decision is read from.
+    boat_tail_min_d_eq = 1.8
     tip_dihedral_max_deg = 20.0  # raised to ~88 only by the continuous-cant study (solve.py)
     # Outer-panel cant ceiling for the two-panel dihedral form. 60 deg is a
     # MODEL limit, not a structural one: past it a Schrenk station on a
@@ -1137,7 +1149,7 @@ class VTailSample:
             usable_nose = self.nose_split(dv)["usable_nose"]
             opti.subject_to(usable_nose / motor["length"] >= 1.0)
         if self.fuselage_topology == "pod_boom":
-            opti.subject_to(dv["pod_tail"] >= 1.8 * d_eq)
+            opti.subject_to(dv["pod_tail"] >= self.boat_tail_min_d_eq * d_eq)
             # Fineness ceiling (`fineness_max`) — a MODEL-validity bound, kept
             # dimensionless per the standing rule. Landing on it is a defect
             # report, not an optimum.
