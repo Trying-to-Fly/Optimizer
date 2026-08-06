@@ -32,6 +32,17 @@ from lwpla_a1 import (  # construction profiles
     LWPLA_A1_WINGLET,
 )
 
+def _mm(v) -> str:
+    """Metres as whole millimetres, for the build document and the brief.
+
+    Rounds to `int` rather than formatting with `.0f`, which is the difference
+    between a nosecone that runs from "station 0 mm" and one that runs from
+    "station -0 mm". The nose tip sits a rounding error behind the datum; a
+    builder with a ruler does not have a -0 to measure from.
+    """
+    return f"{round(float(v) * 1000)} mm"
+
+
 def _folding_prop_candidates(diameter_max_in: float) -> dict[str, dict]:
     """Every MEASURED, FOLDING table that fits the declared diameter limit.
 
@@ -397,9 +408,21 @@ class VTailSample:
     # --- tail policy + directional floor (MODEL_DETAILS section 8) ---
     TAIL_THROW_TE_M = 0.012  # available +/- TE throw at low rates (linkage geometry)
     TRIM_THROW_FRACTION = 1 / 3  # policy: cruise trim uses <= 1/3 of available throw
-    # LL has no yaw axis, so without a floor fins optimize to zero and V-tails
-    # shed angle. Declared value 0.030: the spec's own tail works out to
-    # Vv = 0.034, and ~0.02-0.04 is the class practice band.
+    # Without a floor fins optimize to zero and V-tails shed angle. Declared
+    # value 0.030: the spec's own tail works out to Vv = 0.034, and ~0.02-0.04
+    # is the class practice band.
+    #
+    # This used to say "LL has no yaw axis". Measured false on asb 4.2.10
+    # (2026-08-06): LL answers sideslip, it just over-predicts Cn_beta by
+    # 1.34-2.15x against a VLM ensemble. The floor stays a proxy for THAT
+    # reason.
+    #
+    # Measuring it also VALIDATED the declared 0.030: it puts the champion's
+    # Cn_beta at 0.0717/rad, inside the conventional 0.04-0.10/rad band. Do not
+    # loosen it on the observation that the aeroplane still weathercocks at
+    # gamma = 20 deg -- per degree that reads fine, per RADIAN it is 0.0121,
+    # about 4x below the band. See MODEL_DETAILS 8.4 and FINDINGS 21;
+    # aero.vlm_directional_check measures it on every champion.
     v_tail_volume_min = 0.030
     # stab-on-fin mount for the T-tail candidate: reinforced fin tip + joiner
     # hardware (declared ballpark, same uncalibrated caveat as the profiles)
@@ -436,6 +459,39 @@ class VTailSample:
     #: 12% of d_eq (7.4 mm at the champion) while the boom was 12 mm, i.e. the
     #: boom was LARGER than the hole it sockets into. `pod_dims` now derives
     #: `r_cap` from this, which is what `aircraft/speed_sample` already did.
+    #:
+    #: **A CONSTANT ON PURPOSE — do not promote it to a design variable without
+    #: first giving the boom its physics (user decision, 2026-08-06).** Asked
+    #: whether freeing it would move the answer, the honest reading of the model
+    #: is that it would SHRINK to its lower bound, and that the shrink would be
+    #: an artefact. Only one gradient acts on this number today — boom DRAG, via
+    #: `boom_body(od=...)`, whose wetted area is linear in it — against one weak
+    #: opposing term, the steeper afterbody closure that a smaller `r_cap`
+    #: implies. What does NOT act on it:
+    #:
+    #:   - MASS. `structure_extras` charges the boom `0.056 * boom_len`, a flat
+    #:     56 g/m annotated "12x10 CF". A 4 mm boom would weigh what a 12 mm one
+    #:     weighs, so thinning it is free.
+    #:   - STRUCTURE. `structure_constraints` calls `structures.spar_constraints`
+    #:     exactly twice, both times for a WING spar. The boom has no stress and
+    #:     no deflection check anywhere; the only constraint mentioning it is a
+    #:     LENGTH one (`geometry_constraints`: an exposed boom must exist).
+    #:
+    #: So the optimizer would read a pure drag saving with no mass penalty and
+    #: no stiffness floor, and buy a 5 mm tube holding a V-tail out on an arm
+    #: that `tail_arm` may stretch to 1.2 m. That is the model failing to have
+    #: been asked, not a design.
+    #:
+    #: This is the OPPOSITE case to `spar_od_center`'s ceiling, which was freed
+    #: the same day: that bound was a stale duplicate of a fit constraint the
+    #: model already enforced honestly, so removing it let real physics bind.
+    #: This constant is the only thing standing in for physics that is absent.
+    #:
+    #: To reopen, in this order: (1) boom mass from `structures.tube_mass(od,
+    #: wall, len)` with a `boom_wall` variable beside it, (2) a bending +
+    #: deflection constraint under tail load over `tail_arm` — `spar_constraints`
+    #: is already the right shape and should be reused, (3) accept that `r_cap`
+    #: becomes symbolic, which `pod_dims` and the afterbody terms must tolerate.
     BOOM_OD_M = 0.012
     # packaging envelopes (m) — user-input data in the app (M5); spec values here
     COMPONENT_ENVELOPES = {
@@ -638,8 +694,49 @@ class VTailSample:
             "t_span": (0.25, 1.20), "t_c_root": (0.06, 0.22),
             "t_taper": (0.40, 1.0), "t_sweep": (0.0, 25.0),
             "cs_frac": (0.20, 0.40),
-            "spar_od_center": (0.006, 0.014), "spar_wall_center": (0.0006, 0.002),
-            "spar_od_outer": (0.005, 0.012), "spar_wall_outer": (0.0005, 0.0018),
+            # Spar tubes. The OD ceilings are deliberately SLACK — they are
+            # numerical backstops, not the physics. What actually limits a spar
+            # is that it must fit inside the section it runs through, and that
+            # is enforced symbolically in geometry_constraints against the
+            # chord the optimizer is choosing (`spar_od <= depth(c)`, plus the
+            # curve's sag).
+            #
+            # 14 mm used to be the ceiling here, and FINDINGS §2 records its
+            # origin as "fit in the root section" — i.e. the SAME constraint,
+            # hard-coded. It equals 0.70*t_c*c_root evaluated at c_root = 0.22 m
+            # (14.17 mm) and was frozen when c_root was not yet free. It is now:
+            # at the 0.275 m c_root cap the section admits 17.71 mm, so the box
+            # was silently overriding the real constraint by up to 3.7 mm and
+            # holding `spar_od_center` active in every recent champion (§19.4).
+            # A duplicated constraint that binds before the honest one is worse
+            # than no constraint — it answers a question the model can already
+            # answer, at a value that stopped being true.
+            #
+            # 20 mm clears the widest section any declared c_root can offer, so
+            # the fit constraint is what binds. Keep a finite ceiling regardless:
+            # the box is what `detect_simple_bounds` lifts out of `g`, and an
+            # unbounded OD lets an interior-point iterate wander somewhere the
+            # tube algebra is meaningless.
+            # The OUTER spar's 12 mm ceiling was the same artefact as the
+            # centre's 14 mm and was active alongside it, so freeing one alone
+            # would only have moved the binding row. It is freed to the same
+            # 20 mm, because everything that should limit it already does:
+            # `spar_od_outer <= spar_od_center` (structure_constraints, so the
+            # outer tube can still socket into the centre joiner), the section
+            # fit at its own outboard stations, and stress + tip deflection at
+            # 5 g through `structures.spar_constraints`.
+            #
+            # The LOWER bounds are guards, not physics — nothing wants a thin
+            # spar, and stress alone would keep them off zero. They exist
+            # because `structures.tube` forms `id = od - 2*wall` and an
+            # interior-point iterate may pass through points its constraints
+            # forbid: below od = 2*wall the section area and I change SIGN, and
+            # the solve is then optimizing a tube turned inside out rather than
+            # rejecting the point. `wall <= od/2 * 0.45` says the same thing as
+            # a constraint; this says it as a box, which IPOPT cannot violate.
+            # Same reasoning as geometry.smooth_floor.
+            "spar_od_center": (0.006, 0.020), "spar_wall_center": (0.0006, 0.002),
+            "spar_od_outer": (0.005, 0.020), "spar_wall_outer": (0.0005, 0.0018),
             # x_battery's real bounds are symbolic (inside the lofted bay,
             # geometry_constraints) — the box bound is just a wide backstop
             "ballast_kg": (0.0, 0.200), "x_battery": (-0.10, 0.40),
@@ -975,10 +1072,11 @@ class VTailSample:
             limit = self.trim_deflection_limit_deg(dv)
             opti.subject_to(deflection_deg <= limit)
             opti.subject_to(deflection_deg >= -limit)
-        # directional proxy (MODEL_DETAILS 3.4): LL has no yaw axis, so a
-        # declared vertical-tail-volume floor stands in — without it fins
-        # optimize to zero and V-tails shed angle. l_v ~ tail_arm (CG sits near
-        # the wing AC at this fidelity); reference S*b is the wing's.
+        # directional proxy (MODEL_DETAILS 3.4): a declared vertical-tail-volume
+        # floor — without it fins optimize to zero and V-tails shed angle. l_v ~
+        # tail_arm (CG sits near the wing AC at this fidelity); reference S*b is
+        # the wing's. NOT because "LL has no yaw axis" (measured false, 8.4) but
+        # because LL's yaw axis is the right shape at the wrong magnitude.
         s_wing = 2 * sum(a for a, _, _ in panels)
         if self.tail_type == "vtail":
             # effective vertical area of a V-tail: S_tail * sin^2(dihedral)
@@ -1469,7 +1567,7 @@ class VTailSample:
         x_tail = WING_X_LE + 0.25 * 0.201 + d["tail_arm"]
         pod_end = p["bay_end"] + p["tail_len"]
         split = self.nose_split(d)
-        mm = lambda v: f"{v * 1000:.0f} mm"
+        mm = _mm
 
         brief = {
             "Cross-section (front view)": {
@@ -1661,7 +1759,7 @@ class VTailSample:
                           "spec": f"{self.DIHEDRAL_JOINER_KG * 1000:.0f} g each",
                           "length_mm": "", "qty": 2})
 
-        mm = lambda v: f"{v * 1000:.0f} mm"
+        mm = _mm
         throw_deg = float(self.trim_deflection_limit_deg(dv))
         c_cs = d["cs_frac"] * d["t_c_root"] * (1 + d["t_taper"]) / 2
         # The nosecone is a SEPARATE PRINTED PART and was on no parts list: the

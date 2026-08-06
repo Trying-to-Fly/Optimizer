@@ -84,13 +84,21 @@ def body_cd0(bodies: list[dict], V: float, s_ref: float, rho=1.225, mu=1.81e-5) 
 LL_VORTEX_CORE_RADIUS = 1e-4
 
 
-def _run_ll(airplane, V, alpha, deflection, x_cg, control_name="ruddervator"):
+def _run_ll(airplane, V, alpha, deflection, x_cg, control_name="ruddervator",
+            spanwise_resolution=None):
     p = airplane.with_control_deflections({control_name: float(deflection)})
+    # Omitted rather than defaulted when unset: the NLP runs at AeroSandbox's
+    # own default, and passing a number that merely happens to equal it today
+    # would silently pin this to a value the library could change underneath.
+    res = {} if spanwise_resolution is None else {
+        "spanwise_resolution": spanwise_resolution
+    }
     return asb.LiftingLine(
         airplane=p,
         op_point=asb.OperatingPoint(velocity=V, alpha=float(alpha)),
         xyz_ref=[x_cg, 0, 0],
         vortex_core_radius=LL_VORTEX_CORE_RADIUS,
+        **res,
     ).run()
 
 #: Resolution the champion's drag is re-checked at, and how far the in-loop
@@ -101,9 +109,27 @@ LL_CHECK_RESOLUTION = 16
 LL_CHECK_TOL = 0.10
 
 
+#: How far the static margin may move between the in-loop mesh and the fine one
+#: before the reported margin is the DISCRETIZATION's rather than the
+#: aeroplane's. Absolute, not fractional: SM is already a small dimensionless
+#: number and a champion can sit near zero, where a ratio means nothing.
+#: Set to the magnitude ALREADY KNOWN to change verdicts on this project rather
+#: than to a round number: HANDOFF issue 5 records a ~0.002 estimator difference
+#: reading, for four champions running, as the design missing its own floor. A
+#: mesh that moves the margin by that much has moved the answer.
+#:
+#: The spec aircraft measures -0.0050 across a 4x refinement (0.0541 → 0.0491,
+#: still falling at 16 panels), so it FAILS this and should: that is 2.5x the
+#: known-consequential magnitude and 7% of the 0.07-wide stability window. An
+#: earlier draft of this constant sat at 0.005, which the measured case passed
+#: by 1e-5 — a threshold chosen to be survived rather than to mean something.
+LL_SM_MESH_TOL = 0.002
+
+
 def mesh_convergence_check(
     airplane, V: float, alpha: float, deflection: float, x_cg: float,
     control_name: str = "ruddervator",
+    c_ref: float | None = None, bodies: list[dict] | None = None,
 ) -> dict:
     """Is the champion's drag a property of the aircraft or of the panel count?
 
@@ -118,6 +144,17 @@ def mesh_convergence_check(
     runs at one operating point, against a battery measured in hours, and it
     turns "the model was wrong here" from something a person has to notice in a
     number into something the run says about itself.
+
+    Given `c_ref` it also asks the same question of the STATIC MARGIN, which is
+    a different question and a more important one. Drag is compared at a single
+    operating point; the margin is a SLOPE over an alpha window, and a slope can
+    be mesh-dependent while every individual point looks fine. Cm at the trim
+    point is not the quantity to compare — trim drives it to ~0 by construction,
+    so a delta there is noise about nothing. `dCm/dCL` is the quantity, and the
+    verdict that matters is whether a sign change inside the window SURVIVES
+    refinement: one that vanishes is a discretization artefact, one that
+    persists is the model telling you something about the aeroplane. Costs two
+    more sweeps (2 x 5 lifting-line runs), still seconds against hours.
     """
     plane = airplane.with_control_deflections({control_name: float(deflection)})
     op = asb.OperatingPoint(velocity=V, alpha=float(alpha))
@@ -136,6 +173,40 @@ def mesh_convergence_check(
     out["converged"] = bool(
         d_loop > 0 and d_fine > 0 and abs(out["delta_frac"]) <= LL_CHECK_TOL
     )
+
+    if c_ref is not None:
+        sm = {}
+        for label, res in (("in_loop", 4), ("fine", LL_CHECK_RESOLUTION)):
+            s = static_margin(
+                airplane, V, x_cg, c_ref, alpha0=alpha, bodies=bodies,
+                spanwise_resolution=res,
+            )
+            local = [p["sm_local"] for p in s["sm_local_slopes"]]
+            sm[label] = {
+                "spanwise_resolution": res,
+                "static_margin": s["static_margin"],
+                "sm_local_slopes": s["sm_local_slopes"],
+                # same rule as `solve.sm_sign_flip`: an already-negative margin
+                # is not a hidden sign change, it is an obvious one
+                "sign_consistent": bool(
+                    s["static_margin"] <= 0 or all(v >= 0 for v in local)
+                ),
+            }
+        delta = sm["fine"]["static_margin"] - sm["in_loop"]["static_margin"]
+        sm["delta"] = float(delta)
+        sm["converged"] = bool(abs(delta) <= LL_SM_MESH_TOL)
+        # The diagnosis, and the reason this exists: does the pathology survive
+        # a 4x finer mesh? If both meshes agree it is there, refinement is not
+        # the explanation and the nonlinearity is the model's — for this project
+        # that points at the viscous Cm, since the inviscid VLM sweep over the
+        # same window is monotone (`vlm_static_margin_check`).
+        sm["sign_flip_survives_refinement"] = bool(
+            not sm["in_loop"]["sign_consistent"] and not sm["fine"]["sign_consistent"]
+        )
+        sm["sign_flip_is_mesh_artefact"] = bool(
+            not sm["in_loop"]["sign_consistent"] and sm["fine"]["sign_consistent"]
+        )
+        out["static_margin"] = sm
     return out
 
 
@@ -276,7 +347,8 @@ def static_margin_from_polar(cls, cms, offsets_deg, bodies, s_ref, c_ref):
 
 
 def static_margin(
-    airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0, bodies: list[dict] | None = None
+    airplane, V: float, x_cg: float, c_ref: float, alpha0=2.0,
+    bodies: list[dict] | None = None, spanwise_resolution: int | None = None,
 ) -> dict:
     """SM = -dCm/dCL about the CG; x_np = x_cg + SM * c_ref.
 
@@ -290,7 +362,11 @@ def static_margin(
     constrains; the intermediate alphas feed only the diagnostic."""
     offsets = sorted(SM_ALPHA_OFFSETS + SM_DIAGNOSTIC_OFFSETS)
     alphas = np.array([alpha0 + d for d in offsets])
-    runs = {d: _run_ll(airplane, V, alpha0 + d, 0.0, x_cg) for d in offsets}
+    runs = {
+        d: _run_ll(airplane, V, alpha0 + d, 0.0, x_cg,
+                   spanwise_resolution=spanwise_resolution)
+        for d in offsets
+    }
     cls = {d: float(r["CL"]) for d, r in runs.items()}
     cms = {d: float(r["Cm"]) for d, r in runs.items()}
     sm = float(
@@ -503,6 +579,306 @@ def vlm_induced_check(
     return out
 
 
+# --- lateral-directional: the yaw axis LL was believed not to have -----------
+#
+# MODEL_DETAILS 8.4 built the whole directional floor on "LL has no yaw axis".
+# On asb 4.2.10 that is measurably false: LiftingLine answers sideslip with the
+# right sign and a clean monotonic trend in V-angle. What it does NOT get right
+# is the MAGNITUDE — on the 2026-08-05 champion geometry it over-predicts
+# Cn_beta by 2.15x at t_dihedral 20 deg, easing to 1.34x at 55 deg. So LL's yaw
+# axis is a usable SHAPE and an unusable NUMBER, and this check supplies the
+# number the in-loop constraint is calibrated against.
+#
+# The guard cannot be the induced check's. That one leans on an inviscid polar
+# having a shape — drag rising with lift — and a sideslip sweep has no such
+# curve to lean on. It leans on SYMMETRY instead, which is both stronger and
+# free: an aircraft symmetric about y = 0 must return Cn(-beta) = -Cn(beta)
+# exactly, and a healthy VLM does. The champion returns +-0.006482 at +-4 deg to
+# every digit it prints. A mesh that breaks antisymmetry has a broken AIC no
+# matter how plausible its slope looks — which is the failure mode HANDOFF 0a
+# is about, and it is still live: the DV_DEFAULTS geometry at (8, 8) returns
+# CL = +123.1 against LiftingLine's 0.52 on the same aeroplane.
+#: Sideslip stations. Zero is omitted deliberately — it is identically zero by
+#: symmetry, so it costs a solve and constrains nothing.
+LAT_BETAS = (-4.0, -2.0, 2.0, 4.0)
+#: How far Cn(-b) + Cn(+b) may drift from zero, as a fraction of the sweep's
+#: own largest |Cn|. Not zero: the far field is truncated slightly differently
+#: on either side of a swept panel. The champion sits at ~1e-9 of this.
+LAT_ASYM_TOL = 0.02
+#: An inviscid CL above this at cruise alpha is a collapsed AIC, not an
+#: aeroplane. Blunt on purpose — the failure it must catch returned 123.1.
+LAT_CL_SANE_MAX = 3.0
+
+
+def _vlm_lateral(plane, V: float, alpha: float, betas, mesh, x_cg: float) -> list[dict]:
+    """Inviscid lateral coefficients at each sideslip angle, on one mesh."""
+    spanwise, chordwise = mesh
+    out = []
+    for b in betas:
+        r = asb.VortexLatticeMethod(
+            airplane=plane,
+            op_point=asb.OperatingPoint(velocity=V, alpha=float(alpha), beta=float(b)),
+            xyz_ref=[x_cg, 0, 0],
+            spanwise_resolution=spanwise,
+            spanwise_spacing_function=np.linspace,
+            chordwise_resolution=chordwise,
+        ).run()
+        out.append({k: float(r[k]) for k in ("CL", "CY", "Cl", "Cn")})
+    return out
+
+
+def vlm_directional_check(
+    planes: dict, V: float, alpha: float, x_cg: float,
+    betas=LAT_BETAS, meshes=VLM_MESHES,
+) -> dict:
+    """Numeric second opinion on directional stability (MODEL_DETAILS 8.4).
+
+    Per configuration, sweep sideslip and fit the three lateral derivatives per
+    degree: `cn_beta` (weathercock — positive is stable), `cl_beta` (dihedral
+    effect — negative is stable) and `cy_beta` (side force, negative).
+
+    Same ensemble/majority posture as `vlm_induced_check`, and for the same
+    reason: the failure mode is a plausible number rather than a crash. The
+    reported value is the consensus of `meshes`, per-mesh values are kept under
+    `per_mesh` for audit, and an ensemble that cannot agree ships flagged with
+    `reliable = False` rather than silently.
+
+    A mesh is admitted only if it is SYMMETRIC — antisymmetric Cn about zero
+    sideslip to `LAT_ASYM_TOL`, with a sane CL. Note that Cn_beta > 0 is NOT an
+    admission test: an aircraft that is directionally unstable is a finding this
+    must be able to report, not a solve it should throw away.
+    """
+    # Pair each -b with its +b, ONCE. Without at least one pair the symmetry
+    # guard silently degrades to "everything passes", and a guard that quietly
+    # stops guarding is worse than one that was never there — so this refuses
+    # the sweep rather than returning numbers it cannot vouch for.
+    pairs = [
+        (i, j) for i, bi in enumerate(betas) for j, bj in enumerate(betas)
+        if bi == -bj and bi < 0
+    ]
+    if not pairs:
+        raise ValueError(
+            f"betas={tuple(betas)} contains no +/- pair, so the antisymmetry "
+            "guard cannot run. Pass symmetric sideslip stations (see LAT_BETAS)."
+        )
+
+    out = {}
+    for label, plane in planes.items():
+        per_mesh = []
+        for mesh in meshes:
+            rows = _vlm_lateral(plane, V, alpha, betas, mesh, x_cg)
+            cn = [r["Cn"] for r in rows]
+            slopes = {
+                f"{k.lower()}_beta": float(np.polyfit(betas, [r[k] for r in rows], 1)[0])
+                for k in ("Cn", "Cl", "CY")
+            }
+            # Symmetry: broken antisymmetry means the two halves of a symmetric
+            # aeroplane did not solve to the same answer, which no amount of
+            # slope-fitting can repair.
+            scale = max(abs(c) for c in cn) or 1.0
+            worst_asym = max(abs(cn[i] + cn[j]) / scale for i, j in pairs)
+            per_mesh.append({
+                "mesh": list(mesh), **slopes,
+                "worst_antisymmetry": float(worst_asym),
+                "physical": bool(
+                    worst_asym <= LAT_ASYM_TOL
+                    and all(abs(r["CL"]) < LAT_CL_SANE_MAX for r in rows)
+                ),
+                "cn": cn, "cl": [r["Cl"] for r in rows],
+                "cy": [r["CY"] for r in rows], "cl_lift": [r["CL"] for r in rows],
+            })
+
+        # Consensus on cn_beta — the derivative the floor exists to protect.
+        # Median as reference, for the same reason as the induced check: it
+        # survives exactly one blow-up, which is the case this guards.
+        usable = [m for m in per_mesh if m["physical"]]
+        agree = []
+        if usable:
+            median = float(np.median([m["cn_beta"] for m in usable]))
+            agree = [m for m in usable
+                     if abs(m["cn_beta"] - median) <= VLM_MESH_TOL * abs(median)]
+        reasons = []
+        averaged = agree
+        if len(agree) < VLM_MIN_CONSENSUS:
+            reasons.append(
+                f"fewer than {VLM_MIN_CONSENSUS} of {len(per_mesh)} meshes agree on "
+                "cn_beta: " + ", ".join(
+                    f"{m['cn_beta']:+.4g} at {tuple(m['mesh'])}"
+                    f"{'' if m['physical'] else ' (unphysical)'}" for m in per_mesh
+                )
+            )
+            averaged = usable or per_mesh
+
+        entry = {
+            k: float(np.mean([m[k] for m in averaged]))
+            for k in ("cn_beta", "cl_beta", "cy_beta")
+        }
+        entry |= {
+            # the verdict the declared floor is a stand-in for
+            "directionally_stable": bool(entry["cn_beta"] > 0),
+            "roll_stable": bool(entry["cl_beta"] < 0),
+            "meshes_in_consensus": [tuple(m["mesh"]) for m in agree],
+            "meshes_averaged": [tuple(m["mesh"]) for m in averaged],
+            "meshes_dropped_unphysical": [
+                tuple(m["mesh"]) for m in per_mesh if not m["physical"]
+            ],
+            "betas_deg": [float(b) for b in betas],
+            "alpha_deg": float(alpha),
+            "per_mesh": per_mesh,
+            "reliable": not reasons,
+        }
+        if reasons:
+            entry["unreliable_reason"] = "; ".join(reasons)
+        out[label] = entry
+    return out
+
+
+# --- the pitching moment, which nothing else in this app looks at twice ------
+#
+# Drag has two cross-checks (`mesh_convergence_check`, `vlm_induced_check`) and
+# the lateral derivatives now have one. Cm — and therefore the static margin —
+# had NONE, which is backwards: it is the quantity this project already knows is
+# its weakest, and the only one that decides whether the aeroplane is flyable.
+#
+# The 2026-08-05 champions report `static_margin = 0.0646` against a required
+# window of [0.08, 0.15], with the local dCm/dCL running -0.0114 → +0.1805 over
+# four degrees. The reported margin is a least-squares slope through points
+# whose slope changes SIGN. Two very different things produce that, and no
+# number from LiftingLine can separate them:
+#
+#   (a) Cm(alpha) really is that nonlinear on this airframe, or
+#   (b) LiftingLine's Cm is noisy at 4 panels per section.
+#
+# (b) is not hypothetical. FINDINGS §18 is a 4-panel artefact that produced a
+# winglet contributing -0.93 N and an L/D of 889. So this asks an independent
+# METHOD — the VLM, which shares the library but not the discretization or the
+# solution scheme — the same question over the same alpha window, and reports
+# whether it sees the sign flip too.
+#
+# What it is NOT: a verdict. The VLM here is inviscid, so its Cm omits the
+# viscous contribution LiftingLine gets from NeuralFoil, and the two will not
+# agree in absolute value. The comparable quantity is the SHAPE — whether the
+# local slope changes sign inside the window — which is what `sign_consistent`
+# reports on each side.
+
+
+def _vlm_pitch(plane, V: float, alphas, mesh, x_cg: float) -> list[dict]:
+    """Inviscid CL/Cm at each alpha, on one mesh."""
+    spanwise, chordwise = mesh
+    out = []
+    for a in alphas:
+        r = asb.VortexLatticeMethod(
+            airplane=plane,
+            op_point=asb.OperatingPoint(velocity=V, alpha=float(a)),
+            xyz_ref=[x_cg, 0, 0],
+            spanwise_resolution=spanwise,
+            spanwise_spacing_function=np.linspace,
+            chordwise_resolution=chordwise,
+        ).run()
+        out.append({"CL": float(r["CL"]), "Cm": float(r["Cm"])})
+    return out
+
+
+def vlm_static_margin_check(
+    planes: dict, V: float, alpha_trim: float, x_cg: float, c_ref: float,
+    bodies: list[dict] | None = None, meshes=VLM_MESHES,
+) -> dict:
+    """Second opinion on SM = -dCm/dCL, by an independent method.
+
+    Samples the SAME window the in-loop estimator uses (`SM_ALPHA_OFFSETS`,
+    plus `SM_DIAGNOSTIC_OFFSETS` for the nonlinearity diagnostic) and runs it
+    through the SAME estimator (`static_margin_from_polar`, including the Munk
+    fuselage term when `bodies` is given), so the only difference between this
+    number and LiftingLine's is the aerodynamic method.
+
+    Reports `sign_consistent`: False when a local dCm/dCL goes negative inside a
+    positive reported margin — the exact pathology `solve.sm_sign_flip` finds on
+    the LL side. Agreement between the two is evidence the nonlinearity is the
+    AIRFRAME's; disagreement points at the discretization.
+
+    Same ensemble/majority guard as the other VLM checks, admitting a mesh only
+    if CL is sane and RISES with alpha. A lifting surface whose lift falls with
+    incidence has not solved.
+    """
+    offsets = sorted(SM_ALPHA_OFFSETS + SM_DIAGNOSTIC_OFFSETS)
+    alphas = [alpha_trim + d for d in offsets]
+    out = {}
+    for label, plane in planes.items():
+        per_mesh = []
+        for mesh in meshes:
+            rows = _vlm_pitch(plane, V, alphas, mesh, x_cg)
+            cls = {d: rows[i]["CL"] for i, d in enumerate(offsets)}
+            cms = {d: rows[i]["Cm"] for i, d in enumerate(offsets)}
+            sm = float(static_margin_from_polar(
+                [cls[d] for d in SM_ALPHA_OFFSETS],
+                [cms[d] for d in SM_ALPHA_OFFSETS],
+                list(SM_ALPHA_OFFSETS), bodies,
+                float(plane.s_ref), c_ref,
+            ))
+            local = [
+                {"alpha": float(alphas[i]),
+                 "sm_local": -float((cms[offsets[i + 1]] - cms[offsets[i]])
+                                    / (cls[offsets[i + 1]] - cls[offsets[i]]))}
+                for i in range(len(offsets) - 1)
+                # a zero CL step would divide by zero; that mesh is caught by
+                # the monotonicity guard below rather than crashing here
+                if cls[offsets[i + 1]] != cls[offsets[i]]
+            ]
+            lifts = [r["CL"] for r in rows]
+            per_mesh.append({
+                "mesh": list(mesh), "static_margin": sm,
+                "sm_local_slopes": local,
+                "sign_consistent": bool(
+                    sm <= 0 or all(p["sm_local"] >= 0 for p in local)
+                ),
+                "physical": bool(
+                    lifts == sorted(lifts)
+                    and len(set(lifts)) == len(lifts)
+                    and all(abs(c) < LAT_CL_SANE_MAX for c in lifts)
+                ),
+                "cl": lifts, "cm": [r["Cm"] for r in rows],
+            })
+
+        usable = [m for m in per_mesh if m["physical"]]
+        agree = []
+        if usable:
+            median = float(np.median([m["static_margin"] for m in usable]))
+            agree = [m for m in usable
+                     if abs(m["static_margin"] - median) <= VLM_MESH_TOL * abs(median)]
+        reasons = []
+        averaged = agree
+        if len(agree) < VLM_MIN_CONSENSUS:
+            reasons.append(
+                f"fewer than {VLM_MIN_CONSENSUS} of {len(per_mesh)} meshes agree on "
+                "static_margin: " + ", ".join(
+                    f"{m['static_margin']:+.4g} at {tuple(m['mesh'])}"
+                    f"{'' if m['physical'] else ' (unphysical)'}" for m in per_mesh
+                )
+            )
+            averaged = usable or per_mesh
+
+        sm = float(np.mean([m["static_margin"] for m in averaged]))
+        entry = {
+            "static_margin": sm,
+            "x_np_m": x_cg + sm * c_ref,
+            # the SHAPE question, which is the comparable one across methods
+            "sign_consistent": bool(all(m["sign_consistent"] for m in averaged)),
+            "sm_local_slopes": averaged[0]["sm_local_slopes"] if averaged else [],
+            "alpha_window_deg": [float(alpha_trim + d) for d in SM_ALPHA_OFFSETS],
+            "meshes_in_consensus": [tuple(m["mesh"]) for m in agree],
+            "meshes_averaged": [tuple(m["mesh"]) for m in averaged],
+            "meshes_dropped_unphysical": [
+                tuple(m["mesh"]) for m in per_mesh if not m["physical"]
+            ],
+            "per_mesh": per_mesh,
+            "reliable": not reasons,
+        }
+        if reasons:
+            entry["unreliable_reason"] = "; ".join(reasons)
+        out[label] = entry
+    return out
+
+
 # ---------------------------------------------------------------- stall (M3.5)
 # Critical-section method (MODEL_DETAILS 3.4): Schrenk spanwise loading + local
 # 2D cl_max at local Re; the wing "stalls" when any station hits its section
@@ -548,7 +924,7 @@ def critical_section_ratios(stations, S, b, CL, V, clmax_ab, rho=1.225, mu=1.81e
     Schrenk: c_S = (c + c_ell)/2; cl = CL*c_S/c + a_2d*(twist - twist_bar) with
     the loading-weighted mean twist. sqrt is regularized at the tip."""
     A, B = clmax_ab
-    c_s, cl_base = [], []
+    c_s = []
     for st in stations:
         eta = 2 * st["y"] / b
         c_ell = (4 * S / (np.pi * b)) * (1 - eta**2 + 1e-4) ** 0.5

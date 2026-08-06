@@ -47,11 +47,40 @@ dev = [
 # bare `pytest` should ever start by surprise. They are deselected by default and
 # run explicitly with `-m solve` (or `-m "solve or not solve"` for everything).
 #
-# `slow` marks the two end-to-end M1 tests. Neither optimizes anything — the
+# What `-m solve` COSTS, measured on the 16 GB Mac (2026-08-06), because "minutes
+# of runtime" was the estimate and it was wrong by an order of magnitude:
+#
+#   test_a_real_run_writes_frames_and_relocates_them   1 h 39 min -> ~2 min
+#   test_m3_optimize_smoke                             ~80-130 min, unchanged
+#
+# The first was an accident and is fixed at the test: it ran ~10 members to
+# convergence, wrote 1,062 frames, and then rendered every one of them through
+# Qt to prove a frame stream replays. It now passes `max_iter=3`, which is the
+# economy FINDINGS §24.2 added the flag for.
+#
+# The second is NOT an accident and must not be "fixed" the same way. It is the
+# M3 gate: it asserts a CONVERGED champion (static margin inside its window,
+# trim inside its throws, a negative shadow price), and every one of those
+# assertions is meaningless on a truncated solve. Its cost is ~10 real solves —
+# `multistart=1, flatness=False` still runs the prop screen, the discrete
+# studies, the winglet study and the 5-member re-solve battery. Budget an hour,
+# do not run it alongside anything, and expect ~60% CPU efficiency on a machine
+# this size: the rest goes to memory compression (FINDINGS §23.4).
+#
+# `slow` marks the end-to-end M1 tests. Neither optimizes anything — the
 # time is report rendering, and between them they were ~20 minutes of a suite
 # that is otherwise about a minute, which is long enough that the suite stops
 # being something you run after every edit. Deselected with the same default and
-# run with `-m slow`; CI should use `-m "slow or not slow"`.
+# run with `-m slow`; CI should use **`-m "not solve"`** for everything else.
+#
+# NOT `-m "slow or not slow"`, which this line recommended until 2026-08-06.
+# That expression is a tautology: it matches every test, silently re-enabling
+# the `solve` tests the paragraph above exists to keep off a bare run. It
+# collects 454 of 454. Two of those runs started at once will sit on ~9 GB each
+# and take the machine into swap — which is precisely the surprise the default
+# was written to prevent, arriving through the command that documents it.
+# Marker expressions are not selection lists: `not solve` is the one that
+# actually subtracts something.
 addopts = "-m 'not solve and not slow'"
 markers = [
     "solve: runs a full optimizer solve — minutes of runtime and GB of RAM",

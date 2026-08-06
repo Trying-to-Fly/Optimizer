@@ -797,7 +797,6 @@ class VTailRCv2(_base.VTailSample):
         is too pessimistic.
         """
         d = self.DV_DEFAULTS | (dv or {})
-        p = self.pod_dims(d)
         # Cut at the TAIL BLOCK, not at the pod cap. The spec's weight budget
         # lists "tail <= 120 g" and "boom + hardware" as separate lines, so a
         # cut that swept up the boom and its harness would be comparing a

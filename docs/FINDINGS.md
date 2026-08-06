@@ -90,8 +90,9 @@ regularly sees >6–7 m/s wind, that's the trade to argue about.
   alpha (raw local slopes at the old champion: 0.12 → −0.01 → 0.06). Numeric
   cross-check at the new champion: SM 0.097 vs the NLP's 0.080 — same window,
   consistent. Residual caveats: the Munk term is a slender-body estimate for a
-  fat pod, and LL's Cm noise is averaged, not eliminated — flow5 should still
-  own the final stability verdict. Remaining NLP-vs-re-eval gap ~4% is
+  fat pod, and LL's Cm noise is averaged, not eliminated — an external tool was
+  to own the final stability verdict (that gate was removed 2026-08-06, §21;
+  flight test now owns it). Remaining NLP-vs-re-eval gap ~4% is
   V-grid quantization plus this SM estimator difference.
 - Tripped Δ(objective) ≈ −9 to −11 min across candidates: the design survives
   losing its laminar runs, but calibrating print-surface reality matters.
@@ -312,8 +313,9 @@ Caveats and flags:
 - **SM estimator gap now straddles the window floor**: NLP 0.080 (active)
   vs numeric re-eval 0.0745 → `sm_in_range: false` in the re-eval. Known
   ~0.006 estimator difference (Munk + regression vs re-eval window), but
-  this is the first champion where it crosses the line — flow5 should own
-  the final stability check before anything is built.
+  this is the first champion where it crosses the line — at the time this
+  called for an external stability check before building (gate removed
+  2026-08-06, §21).
 - **`printed_mass_x1.10` re-solve FAILED to converge** (first battery
   member ever to fail; IPOPT assertion at the tight cap). The −10% and
   both η members are fine. Worth a re-run when the parallel battery lands.
@@ -483,7 +485,8 @@ Multistart spread 1.1e-9; NLP-vs-re-eval −1.5e-5 min; shadow price
 
 - **SM still lands at 0.0787 against the 0.08 floor** (`sm_in_range: false`) —
   the third champion in a row to cross it. This is now a standing defect in the
-  SM estimator, not a one-off. flow5 should own the stability verdict.
+  SM estimator, not a one-off — and since 2026-08-06 (§21) no external tool is
+  scheduled to adjudicate it.
 - **Two solves failed to converge**: `motor_mount: pusher` and the
   `printed_mass_x1.10` re-solve, both IPOPT assertions at the tight span cap.
   The pusher failure means **puller was retained by default, not by winning** —
@@ -1936,3 +1939,566 @@ concurrency the machine cannot honour and the OOM killer takes a battery
 measured in hours, while pessimism costs one concurrent solve on a machine that
 is single-core-bound anyway. Now 14.5, with the prose in `memory.py`, `cli.py`,
 `geometry.py` and `solve.py` agreeing.
+
+## 21. The yaw axis LL was believed not to have, and the gate that was removed (2026-08-06)
+
+Two decisions in one session, one of them a correction and one of them a trade
+the user made with the cost stated. Both concern the same question: **who checks
+this aeroplane?**
+
+### 21.1 "LL has no yaw axis" was false
+
+`MODEL_DETAILS` §8.4, and the same sentence copied into `aircraft.py` twice,
+justified the declared vertical-tail-volume floor with "LL has no yaw axis:
+without a constraint, fins optimize to zero and V-tails shed angle." The second
+clause is true. **The first is not, on asb 4.2.10.** LiftingLine answers sideslip
+with the correct sign and a clean monotonic trend in V-angle.
+
+What it gets wrong is the magnitude, measured against a 3-mesh VLM ensemble on
+the 2026-08-05 champion:
+
+| Γ | LL `Cn_β`/deg | VLM ensemble | LL over-predicts |
+| --- | --- | --- | --- |
+| 20° | +0.000454 | +0.000211 | **2.15×** |
+| 30° | +0.000789 | +0.000472 | 1.67× |
+| 40° | +0.001151 | +0.000785 | 1.47× |
+| 55° | +0.001678 | +0.001252 | 1.34× |
+
+So the floor remains a proxy — but for a completely different and much narrower
+reason than the one recorded. LL's yaw axis is a usable **shape** and an unusable
+**number**. `aero.vlm_directional_check` now supplies the number on every
+champion.
+
+**The floor turns out to be well calibrated — and "per degree" nearly hid that.**
+`Cn_β = 0.000116 + 0.002245·sin²Γ` fits within 2.5% at every angle measured, so
+the tail's own `sin²Γ` scaling is right, though the constant is not zero: ~7% of
+directional stability comes from the winglet, wing and fuselage, which `Vv`
+credits to nobody.
+
+The trap is what to conclude from that. The champion returns a positive `Cn_β`
+even at Γ = 20°, which reads as "the floor is loose, tail area is being wasted,
+go and recalibrate it." **That conclusion is wrong, and only the unit conversion
+shows why.**
+
+| Γ | `Cn_β`/deg | `Cn_β`/rad | vs the conventional 0.04–0.10/rad band |
+| --- | --- | --- | --- |
+| 20° | +0.000211 | 0.0121 | ~4× below |
+| 40° | +0.000785 | 0.0450 | at the lower edge |
+| 55° | +0.001251 | 0.0717 | inside |
+
+Γ = 20° weathercocks in the arithmetic sense and nowhere else. The declared
+0.030 — whose entire stated provenance was "the spec's own tail works out to
+0.034, and 0.02–0.04 is class practice" — lands `Cn_β` exactly where an
+independent directional-stiffness argument would have put it. The floor was a
+better constraint than its own justification claimed, and it took measuring to
+find that out. **Do not loosen it.**
+
+**The V-angle was investigated for un-pinning and should stay pinned.** Γ sits on
+its 55° bound every run, and the natural suspicion is that a steep V hides an
+unmodeled handling cost. Measured through LL (the VLM ignores control-surface
+deflections entirely — identical `CL`/`Cm` at 0° and 10° ruddervator):
+
+| Γ | pitch authority | yaw authority | `\|Cl_δr/Cn_δr\|` |
+| --- | --- | --- | --- |
+| 20° | 1.55× | 0.43× | 0.346 |
+| 55° | 1.00× | 1.00× | 0.141 |
+
+Adverse roll per unit yaw command **improves** 2.46× with steepness and yaw
+authority more than doubles. The only cost that rises with angle is reduced pitch
+authority, and that is already modeled — the V-tail is real canted geometry and
+the trim-throw constraint is active at the champion. Adding a yaw-aware
+control-authority budget would pin Γ *harder*. §9's original reading stands: how
+steep a V is acceptable is a build and handling decision, not a model output.
+
+### 21.2 The external stability gate was removed, and what that costs
+
+Every prior session deferred the stability verdict to flow5 — "an external tool,
+not a code change, and it gates BUILDING rather than running" (HANDOFF issue 2).
+**On 2026-08-06 the user removed that gate**, on the argument that the app should
+stand on its own. All 12 references are gone.
+
+The cost, stated plainly because a removed safety gate should never be
+discoverable only by its absence:
+
+- **Every cross-check this app performs is AeroSandbox checking AeroSandbox.**
+  `mesh_convergence_check`, `vlm_induced_check` and `vlm_directional_check` are
+  independent *methods* sharing one *implementation*. They catch discretization
+  and mesh artefacts. They cannot catch a systematic error in the library.
+- **That failure mode is live, not historical.** §16 is the precedent — an
+  induced-drag check that shipped `k = -0.50` in every run it ever ran in. And
+  during this session the VLM returned `CL = +123.1` on the sample aircraft's own
+  DV_DEFAULTS geometry at mesh (8, 8), where LiftingLine returns 0.52 on the same
+  aeroplane. The ensemble caught it. An ensemble of the same code is what caught
+  it, which is exactly the limit being described.
+- **The `sm_local_slopes` fidelity issue is now unadjudicated.** It was open,
+  known, and explicitly assigned to the external tool. It is still open and now
+  assigned to nothing but flight test.
+
+The guard that made the directional check survivable is worth recording, because
+it is not the induced check's guard. A sideslip sweep has no polar shape to lean
+on, so it leans on symmetry: a symmetric aeroplane must return
+`Cn(-β) = -Cn(β)`. **That was not sufficient.** The blown-up (8, 8) mesh returned
+`cn_beta = +1.849` — positive, reading as a comfortably stable aircraft, 830×
+too large — and it was *perfectly antisymmetric*. Symmetry alone admits it. The
+blunt sanity bound on CL is what rejected it. Both guards are load-bearing, and
+`tests/test_directional_check.py` pins that with the measured numbers.
+
+## 22. The static margin is the aeroplane's, and the guards moved earlier (2026-08-06)
+
+### 22.1 Cm now has a second opinion, and it settled where the nonlinearity lives
+
+§21.2 recorded that drag had two cross-checks and Cm had none — backwards,
+since Cm is the quantity this project already calls its weakest and the only one
+that decides whether the aeroplane is flyable. Both halves of that gap are now
+closed, and between them they diagnose the standing static-margin defect.
+
+`aero.vlm_static_margin_check` samples the SAME alpha window through the SAME
+estimator (`static_margin_from_polar`, Munk term included), so the only
+difference from the in-loop number is the aerodynamic method. On the spec
+aircraft at the 2026-08-06 run's own trim point (V 10.5, α 6.078):
+
+| | static margin | local dCm/dCL across the window |
+| --- | --- | --- |
+| LiftingLine (in-loop) | 0.054 | −0.022 → +0.037 → +0.125 → +0.159 |
+| VLM (inviscid) | 0.113 | +0.124 → +0.127 → +0.131 → +0.135 |
+
+The VLM is very nearly linear — 9% spread, never negative — and lands mid-window
+where LL lands below the floor. **Read alone this looks like an exoneration. It
+is not.**
+
+`mesh_convergence_check` now asks the same question of the margin that it always
+asked of drag, and that is what settles it:
+
+| LL spanwise | SM | first local slope |
+| --- | --- | --- |
+| 4 | +0.0541 | −0.0220 |
+| 8 | +0.0515 | −0.0255 |
+| 16 | +0.0491 | −0.0281 |
+
+The sign change **does not wash out under refinement — it deepens**, while the
+margin is still falling at 16 panels. So three explanations existed and two are
+now eliminated: it is not a discretization artefact (it converges), and it is not
+the inviscid geometry or load distribution (the VLM sweep is monotone). What
+remains is the **viscous Cm at Re ≈ 46 k**, which is exactly where laminar
+separation bubble behaviour lives.
+
+**The uncomfortable conclusion is the supported one: the low margin and the sign
+change are most likely real.** The design does sit below its 0.08 floor and does
+lose pitch stiffness at the fast end of its window. The cross-checks did not
+clear the aeroplane; they removed the excuses.
+
+Note what Cm is NOT compared at: the trim point. Trim drives Cm to ~0 by
+construction, so a delta there is noise about nothing. The comparable quantity is
+the slope, and the verdict that matters is whether a sign change survives
+refinement — `sign_flip_survives_refinement` and `sign_flip_is_mesh_artefact` say
+which, and demand opposite responses.
+
+`LL_SM_MESH_TOL` is 0.002, set to the magnitude ALREADY known to change verdicts
+here (HANDOFF issue 5: a ~0.002 estimator difference read, for four champions
+running, as the design missing its floor). The spec aircraft moves 0.0050 across
+a 4× refinement and therefore fails it, correctly. An earlier draft sat at 0.005,
+which the measured case passed by 1e-5 — a threshold chosen to be survived rather
+than to mean something.
+
+### 22.2 The guards moved to where the decisions are
+
+Every expensive failure this project has had was a **selection-time** failure
+found late: the L/D 889 aeroplane (§18), the winglet cross-check measuring its
+own mesh, the in-loop model making thrust. In each the model was untrustworthy
+*while the studies were choosing the design*, and nothing said so until the run
+was over. §20's fix moved characterization AFTER the studies so it describes the
+shipped design; this is the complementary half.
+
+**A candidate is no longer adopted on an untrusted objective.** A discrete study
+wins by comparing its objective against the incumbent's, and that comparison is
+meaningless if the drag is the mesh's. `objective_is_mesh_trustworthy` — the
+drag half of the mesh check, well under a second — now runs at the moment of
+adoption. A candidate that wins on a mesh-dependent number is refused, the
+incumbent stands, and the run says so.
+
+**An untrusted champion is no longer characterized.** The flatness sweep plus
+four full re-optimizations are the most expensive phase after the multistart, and
+all of them describe the objective the design reports. A gate between "design is
+final" and "characterize it" costs under a second and skips both when the
+objective is not trustworthy — keeping `mass_bump`, which is not a sensitivity
+member but the only source of the shadow price the rest of the run quotes.
+
+Deliberately **fail-open**: a member carrying no operating point, or a check that
+raises, counts as trustworthy. A guard that read "I cannot tell" as "reject"
+would delete candidates for having crashed rather than for being wrong.
+
+The gate is the DRAG half only. The reporting cross-checks — static margin,
+lateral derivatives — still run against the re-evaluated champion afterwards, so
+no number the artifact quotes changed. The gate answers go/no-go; it does not
+report.
+
+## 23. The chord family cannot reach an ellipse, and more stations cannot help (2026-08-06)
+
+Asked whether the wing is "still generated in paneled sections", and whether the
+superellipse should become a spline. Both halves were measured rather than
+argued, and both answers are no — for reasons that are worth keeping because the
+obvious reading of each is wrong.
+
+### 23.1 The parameterization stopped being paneled; the geometry did not
+
+`superellipse_chords` is a continuous chord law and the optimizer no longer picks
+panel breaks or panel chords. But `station_grid` samples it at **5 stations**
+(`WING_STATIONS_INNER/OUTER = 2`), those become 5 `asb.WingXSec`s, and
+AeroSandbox lofts straight lines between them. The built wing is a four-trapezoid
+piecewise-linear loft; LiftingLine's 4x spanwise subdivision refines the solution
+*on* that loft, not the loft itself.
+
+This is self-consistent, which is the property that matters. Lift, drag, `s_ref`,
+`c_ref`, mass (`massmodel.printed_surface`) and every geometry constraint all
+read the faceted object. There is no seam where the objective sees a smooth
+curve and the mass model sees a trapezoid, so no solve can buy free area. The
+one place two representations of one curve coexist — `_wing_curve_z`'s analytic
+small-angle integral for the spar-sag constraint, against the built loft's
+midpoint-sampled dihedral accumulation — agrees to **under 5 mm** at semi = 1.5 m
+across the whole `dihedral_tip`/`d_exp` box, against spar depths in the tens of
+mm.
+
+What the faceting costs, at `DV_DEFAULTS` (c_root 220 mm, taper 0.682, eta_break
+0.389), 4 panels against the curve being sampled:
+
+| fullness | max chord error | area error |
+|---|---|---|
+| 1.0 | 0.0 mm (exact) | 0.00% |
+| 2.0 | 10.7 mm (4.9% of root) | −1.17% |
+| 4.0 | 30.7 mm (13.9% of root) | −2.00% |
+
+At `a = 1` the loft is exact: the family degenerates to what four trapezoids can
+represent, which is where the champion sits.
+
+### 23.2 `a = 2` is not an ellipse at any taper this project can build
+
+The law is `c = c_root·[lam + (1−lam)(1−eta^a)^(1/a)]`, so the `lam` term is a
+constant chord added under the whole span and `a = 2` gives a rectangle-plus-
+ellipse blend. It becomes a true ellipse only as `lam -> 0`, and `taper`'s
+declared floor is 0.35. **The docstring's claim that a = 2 is "a true ellipse"
+was wrong for every reachable design** and has been corrected.
+
+Planar span efficiency by classical lifting line (Glauert/Fourier, validated
+against the exact case — `lam = 0, a = 2` returns e = 1.0000):
+
+| taper \ fullness | 1.0 | 1.5 | 2.0 | 3.0 | 4.0 |
+|---|---|---|---|---|---|
+| 0.35 (floor) | 0.9798 | **0.9891** | 0.9815 | 0.9652 | 0.9552 |
+| 0.55 | 0.9720 | 0.9729 | 0.9666 | 0.9554 | 0.9487 |
+| 0.682 (defaults) | 0.9613 | 0.9613 | 0.9569 | 0.9492 | 0.9446 |
+| 1.0 | 0.9352 | 0.9352 | 0.9352 | 0.9352 | 0.9352 |
+
+**e has an INTERIOR maximum in `a`** — visible in the 0.35 row above, where it
+rises 0.9798 -> 0.9891 and then falls — and the peak sits near a = 1.2-1.5 for
+tapers below ~0.6, flattening onto the 1.0 edge as taper rises. Past the peak,
+pushing "toward the ellipse" makes loading LESS elliptic, because at nonzero lam
+a larger `a` is a fuller MID-SPAN, not a rounder tip.
+
+That single curve explains both behaviours the project has seen, and neither is a
+discretization artefact:
+
+| configuration | taper | `fullness` | e-optimum here | reading |
+|---|---|---|---|---|
+| `vtail_sample` @ span 2.0 m | 0.5456 | **1.305, interior** | a ~ 1.2 | sitting essentially ON the optimum |
+| span300 champion (§19.4) | — | **1.0, pinned** | at/below the box edge | peak has flattened onto the bound |
+
+So `fullness` is a knob the optimizer USES and solves to its physical optimum
+when the taper leaves it room, and pins only where the peak has migrated to the
+edge of the declared box. **Correction to an earlier draft of this section**,
+which claimed e falls monotonically with `a` and that `fullness` always pins at
+1.0: both were wrong, generalized from the span300 champion alone, and
+contradicted by this section's own 0.35 row.
+
+### 23.3 The faceting FLATTERS fullness, so refining stations pushes the wrong way
+
+The natural hypothesis — 4 panels cannot resolve a tip curve, so the ellipse's
+benefit is hidden and `fullness` pins low as an artefact — is backwards. The
+4-facet loft reports e = 0.9606 at `a = 2` against the true curve's 0.9569, and
+0.9538 against 0.9446 at `a = 4`. Truncating the tip **raises** computed span
+efficiency by up to ~1%. Refining the stations would make high fullness look
+slightly *worse* and drive `fullness` harder into the bound it already occupies.
+
+### 23.4 What stations cost, measured on the 16 GB Mac
+
+Full converged solves, `endurance_sample` / `vtail_sample_v1.7`:
+
+| panels | stations | iters | build | solve | total | peak |
+|---|---|---|---|---|---|---|
+| **4** (current) | 5 | 85 | 17.4 s | 441.0 s | **7.8 min** | **10.18 GB** |
+| 5 | 6 | 101 | 17.9 s | 603.3 s | **10.6 min** | **12.09 GB** |
+| 6 | 7 | — | 23.5 s | — | — | **13.15 GB** |
+| 8 | 9 | — | — | — | — | **killed at 14.54 GB** |
+
+The 6- and 8-panel peaks come from 3-iteration runs, which is sound because the
+full solves validated the capped ones exactly (10.18 vs 10.19; 12.09 vs 12.10):
+**peak is established within the first three iterations and never rises again.**
+
+Two corrections to standing assumptions:
+
+- **The CasADi graph is not the memory.** Build is 17–24 s and never exceeds
+  0.81 GB. All of the peak is IPOPT's function generation and factorization.
+  `geometry.station_grid`'s docstring reasoning — that stations grow the graph
+  and the graph is the peak — is right about direction and wrong about mechanism.
+- **The 14.5 GB figure is the 25 GB WSL box's, not this machine's.** Here a
+  4-panel solve peaks at 10.18 GB against 16 GB total. `plan_parallel` returns
+  width 1 at *every* station count, so there is no concurrency to lose — extra
+  per-solve time multiplies straight through a battery. One added panel is +35%
+  wall clock and +19% IPOPT iterations (the NLP also gets harder to converge, not
+  just slower per step); the §19 span300 battery would go 127 -> ~172 min.
+
+### 23.5 Verdict: no spline, no extra stations
+
+A spline sampled at 5 stations produces the identical 4-facet loft, so it changes
+the reachable family and nothing else. A knotted B-spline is additionally
+excluded: `eta_break` is a design variable, so evaluating one means comparing a
+DV against a knot, which is the branching-on-a-DV-value that the whole module
+forbids. (A Bernstein/Bézier basis would be admissible and would delete the
+`exp(a·ln eta)` NaN hazard the current law needs analytic endpoints to survive —
+worth knowing, not worth doing.)
+
+The cost is +35% on every battery, on a machine with no headroom, and the case
+for spending it is weaker than "the optimizer wants shapes it cannot reach". It
+already reaches the one it wants: `vtail_sample` solves `fullness` to 1.305
+against a computed e-optimum of ~1.2, with `taper` interior at 0.5456. Two knobs,
+one landing on its physical optimum and the other freely chosen — that is a
+family with SLACK in it, and slack is not fixed by adding knobs.
+
+This is §19's verdict a second time: **a better parameterization, not a better
+wing.** Reopen only on evidence of a wanted shape the family cannot express —
+e.g. an aircraft whose `taper` pins at the 0.35 floor while `fullness` also
+saturates, which would mean the peak has left the box rather than been found
+inside it.
+
+## 24. A run that could not reproduce itself, and a way to exercise it cheaply (2026-08-06)
+
+### 23.1 The artifact was missing its own input
+
+`EXECUTION_PLAN` §2 has described `run.json` as carrying "design vector,
+constraint activity, shadow prices, re-solve battery, diagnostics" for as long
+as it has existed. **It carried four of those five.** There was no design vector
+anywhere in a run directory.
+
+Everything the artifact recorded was an OUTPUT. `geometry` gives span, area,
+aspect ratio and mean chord, and none of those invert back to taper, fullness,
+washout, dihedral exponent or the seven tail variables — so rebuilding a
+champion meant re-running the optimizer that produced it. This was found by
+trying to reproduce the 2026-08-05 champion for the static-margin cross-check
+(§22) and having to fall back to `DV_DEFAULTS`, which is a different aeroplane.
+
+`RunResult.design_vector` now records the **complete effective vector** —
+defaults with any overrides merged in, never a diff, because a diff sends the
+reader to a Python file that has since changed.
+
+**The trap, which caught the first implementation.** The obvious reading is that
+`dv=None` means "the defaults". It does not. `aircraft.geometry`'s own docstring
+says `dv=None` builds *"the fixed v1.2 spec design; else the parametric
+architecture"*, and those are materially different aeroplanes:
+
+| | `geometry(None)` | `geometry(DV_DEFAULTS)` |
+| --- | --- | --- |
+| wing area | 0.3575 m² | 0.3330 m² |
+| projected span | 1.7985 m | 1.8609 m |
+| mean chord | 0.1986 m | 0.1850 m |
+
+7% in area. So filling the field with `DV_DEFAULTS` for a spec-design run would
+have written an authoritative-looking vector that rebuilds an aeroplane the run
+never evaluated — **strictly worse than the empty field it was fixing**, because
+nothing would flag it. The field is `{}` for a spec run, disambiguated by
+`diagnostics["design_source"]` (`"spec"` / `"parametric"`), and `{}` round-trips
+correctly since `geometry(recorded or None)` is `geometry(None)`. A test pins
+that the two geometries really do differ, because the fact is surprising enough
+to be "simplified" away by a later reader.
+
+A second defect surfaced from a test rather than from reasoning: `np.float64`
+subclasses `float`, so `isinstance(v, (int, float))` catches it — but
+**`np.int64` subclasses neither** and would have reached `json.dump` uncoerced,
+failing at write time, after the solving was done. The coercion keys on
+`numbers.Real` with `bool` excluded explicitly (`bool` IS a `Real`, and a
+discrete flag recorded as 1.0 rebuilds the aircraft with a float where it
+declared a switch).
+
+### 23.2 `--max-iter`, and why it has to shout
+
+`SOLVE_MAX_ITER` was a module constant. It is now `--max-iter`, threaded
+CLI → `optimize` → `_solve_many` → `_solve_nlp` → `opti.solve`, defaulting to
+the same 1000 so an ordinary run is unchanged.
+
+The point is bug-hunting at a cost the machine can absorb. Most defects this
+project ships are in plumbing — graph construction, study branching, artifact
+writing, the GUI lifecycle — not in whether IPOPT converged, and all of that is
+exercised by a solve that merely TERMINATES. At `--max-iter 3` the whole
+pipeline runs in seconds instead of hours. Unlike `--solve-timeout-min` it is
+deterministic, which is what makes it usable as a test oracle; wall-clock
+truncation is not reproducible.
+
+**A capped run produces a complete artifact** — champion, discrete studies,
+sensitivities, a build document — describing an aeroplane no solver ever
+finished converging. That is the easiest false claim this project has ever been
+able to make by accident (§20 is a list of seven it made on purpose-built
+code). So `diagnostics["max_iter"]` is always recorded, `iteration_truncated`
+is set whenever it is below the default, and a note is inserted at **position
+zero** of `notes`: *"THIS RUN IS NOT AN OPTIMIZATION."*
+
+The tests pin the cap arriving at every member rather than merely being accepted
+by the CLI. The dangerous failure is not a wrong cap — it is a flag that looks
+applied and silently does nothing, which would burn exactly the hours it was
+invoked to avoid.
+
+## 25. The spar ceilings were a constraint the model already had (2026-08-06)
+
+§19.4 named `spar_od_center` "the one to move next", reading its 14 mm ceiling as
+a purchasing limit quietly setting an aerodynamic answer. It was not a purchasing
+limit. It was **a hard-coded copy of a constraint the model already enforces
+honestly**, and the copy had gone stale.
+
+### 25.1 Where 14 mm came from
+
+§2 records the bound's origin as "Spar OD <= 14 mm (fit in the root section)".
+`geometry_constraints` now enforces exactly that, symbolically, against the chord
+the optimizer is choosing: `spar_od <= SPAR_DEPTH_FRACTION * t_c * c`, plus the
+dihedral curve's sag. Evaluate it by hand:
+
+| `c_root` | section admits `0.70 * t_c * c` |
+|---|---|
+| 0.160 m | 10.30 mm |
+| **0.220 m** | **14.17 mm** — where 14 came from |
+| 0.275 m (the cap) | 17.71 mm |
+
+The number was frozen when `c_root` was not yet free. It is now, so the box was
+overriding the real constraint by up to 3.7 mm. The outer spar's 12 mm ceiling
+was the same artefact and was active alongside it, so freeing one alone would
+only have moved the binding row. Both went to 20 mm — clear of the widest
+section any declared `c_root` offers, so the fit constraint is what binds.
+
+The lower bounds stayed. They are not physics — stress alone would keep a spar
+off zero — but `structures.tube` forms `id = od - 2*wall`, and below `od = 2*wall`
+the section area and I change SIGN. An interior-point iterate may pass through
+points its constraints forbid, so that has to be a box, which IPOPT cannot
+violate, rather than only `wall <= od/2 * 0.45`, which it can.
+
+### 25.2 What it bought, measured
+
+Paired single solves, `endurance_sample` / `vtail_sample_v1.7`, same initial
+guesses. The baseline arm pins both ODs at the bounds they were ACTIVE against,
+which reproduces the pre-change optimum exactly:
+
+| | baseline | freed | delta |
+|---|---|---|---|
+| endurance | 119.4946 min | **119.7810 min** | **+0.29 min** |
+| AUW | 1.8510 kg | **1.8411 kg** | **-9.9 g** |
+| drag | 0.83813 N | 0.83422 N | -0.0039 N |
+| `spar_od_center` | 0.0140 (pinned) | 0.0151 | left the active set |
+| `spar_od_outer` | 0.0120 (active) | 0.0065 | left the active set |
+| wall clock | 626 s | 548 s | — |
+
+Both OD bounds are now interior and **`spar_wall_center` and `spar_wall_outer`
+are the binding structural rows instead.** That is the honest next question, and
+unlike the ODs it is probably real: 0.5 mm is about the thinnest CF tube wall
+that can be bought and socketed without crushing. Treat it as a decision, not a
+cleanup.
+
+**Read the magnitude with care.** One solve per arm, no multistart, and the outer
+spar reversing from *pressed against* 12 mm to *choosing* 6.5 mm is a large
+enough move that the arms may not sit in the same basin. The direction and the
+change in the active set are solid; +0.29 min is not a precision figure. An
+earlier attempt at the freed arm also hit `Maximum_WallTime_Exceeded` at 205
+iterations under a 20 min cap and needed 45 min to converge — freeing a bound
+that was holding a variable still is not free for the solver.
+
+### 25.3 The boom is a constant ON PURPOSE, and that is the opposite case
+
+Asked the same question of `BOOM_OD_M`, the answer inverts. Freeing it would make
+the boom SHRINK to its bound, and the shrink would be an artefact:
+
+- MASS does not respond. `structure_extras` charges `0.056 * boom_len`, a flat
+  56 g/m annotated "12x10 CF". A 4 mm boom weighs what a 12 mm boom weighs.
+- STRUCTURE does not respond. `structure_constraints` calls
+  `structures.spar_constraints` exactly twice, both times for a WING spar. The
+  boom has no stress and no deflection check; the only constraint naming it is a
+  LENGTH one.
+
+So only drag pulls on it, against one weak opposing term (a smaller `r_cap`
+steepens the pod's afterbody closure). The optimizer would buy a 5 mm tube
+holding a V-tail out on an arm `tail_arm` may stretch to 1.2 m.
+
+**The distinction worth carrying:** `spar_od_center`'s ceiling was a duplicate of
+a constraint that EXISTS, so deleting it let real physics bind. `BOOM_OD_M` is
+the only stand-in for physics that is ABSENT, so deleting it would remove the
+last thing holding the answer up. Two bounds that look identical from the outside
+and want opposite treatment. Held at 12 mm by user decision; the reopen order is
+recorded at the constant itself.
+
+## 26. The first `vtail_rcv2` evaluation, and a filter that chose the answer (2026-08-06)
+
+Today's session changed 17 files and none of it had been run. The bug-hunting
+pass that followed found its first defect in the cheapest stage available — an
+M1 evaluation, no optimizer, ~9 minutes — and it was not in any of the new code.
+It was in code that has been shipping since M1 and had never met an aeroplane
+that provoked it.
+
+### 26.1 An endurance aeroplane whose best point was its fastest speed
+
+`vtail_rcv2` has never been executed. Its first run reported:
+
+    best 53.76 min at V = 16.5 m/s
+
+16.5 m/s is the FASTEST speed the sweep samples, which for a loiter design is
+the wrong end of the curve by construction. The sweep's own peak is **71.16 min
+at 12.0 m/s** — 32% more endurance, at a speed the run never mentions.
+
+Nothing was wrong with the arithmetic. `best = max(candidates, key=objective)`
+is correct, and `candidates` is correct too: of the thirteen speeds that
+trimmed, twelve were removed by the **trim-throw limit**. The RC v2 equipment
+package puts the motor at station 34.7 mm and the battery at 115 mm, which makes
+the spec aeroplane nose-heavy enough (static margin 0.85 against a required
+0.08–0.15) to need more than its 6.53 deg of ruddervator at every speed below
+16.5. One point survived, and that point became the headline.
+
+### 26.2 Why nothing said so, and why the existing mechanism could not
+
+§20 built `v_min_price` for exactly this shape of claim: *"the best this
+aeroplane can do"* and *"the best it may do at or above 9.5 m/s"* are different
+sentences and the artifact could only write the first. That fix is structurally
+unable to see this case:
+
+    feasible ──[gust margin, advance ratio, trim throw]──> airworthy ──[v_min]──> legal
+                                                              ^
+                                                    v_min_price starts HERE
+
+By the time `v_min_price` is called, the twelve points are already gone. It
+looked at a one-element list, found its peak was the reported best, and
+correctly returned `None`.
+
+**The trap is what the artifact says instead.** `constraints.trim_deflection_deg`
+read **-6.29 deg** against a 6.53 deg cap — comfortably inside, apparently a
+design with throw to spare. It is the deflection of the one point the cap
+admitted. The same is true of the reported CL and advance ratio. Every number in
+that run was correct and the run as a whole was not readable: a nose-heavy
+aeroplane that cannot trim across its own speed range presented as a healthy one
+with mediocre endurance.
+
+### 26.3 The fix
+
+`solve.airworthiness_price` asks `v_min_price`'s question of the filters that
+run before it, and the filter predicates now live in one named dict that both
+the filter and the pricing read — a rule cannot be priced in one place and
+applied in another. It reports the excluded peak, which rules excluded it, what
+it costs, and **how many speeds each rule removed**, because "one awkward point
+dropped out" and "this filter chose the answer" are different findings and the
+count is what separates them. It returns `None` when the reported best already
+is the peak, so a healthy run carries no note rather than an empty one.
+
+`run.json` gets `diagnostics.airworthiness_price`, `report.html` gets it under
+the existing "What limits this result" heading next to the v_min price, and the
+note ends by naming the trap directly: read the reported deflection, advance
+ratio and CL as properties of the point that SURVIVED the filters.
+
+### 26.4 What this says about where to look next
+
+The defect was reachable from an M1 evaluation with no optimizer, no NLP and no
+new code — it needed a new AIRCRAFT. Four aircraft packages have been run
+against this pipeline and all four were comfortable inside their throw limits,
+so the branch that reports on the filter had never been asked for. The general
+form is worth keeping: **a guard that has only ever been evaluated on designs
+that pass it has not been tested**, and the cheapest way to test one is a
+differently-shaped aeroplane rather than a longer solve.

@@ -123,6 +123,15 @@ def optimize(
         "4-10 min; a diverging one has no natural end and can otherwise own the "
         "whole run. Members that hit the cap are recorded and the battery goes on.",
     ),
+    max_iter: int = typer.Option(
+        solve.SOLVE_MAX_ITER, "--max-iter",
+        help="IPOPT iteration ceiling for ONE member solve. Lower it hard (2-5) "
+        "to exercise the whole pipeline — graph construction, every study, the "
+        "artifacts — in seconds instead of hours. The aeroplane that comes out "
+        "is NOT optimized and the run says so; this is for finding bugs, not "
+        "designs. Unlike --solve-timeout-min it is deterministic, so it is the "
+        "one to use as a test oracle.",
+    ),
     checkpoint: Path = typer.Option(
         None, "--checkpoint",
         help="Directory for per-member results. A battery runs for hours; with a "
@@ -183,7 +192,7 @@ def optimize(
             multistart=multistart, flatness=flatness, parallel=parallel,
             memory_budget_gb=memory_budget_gb,
             warm_start=warm, warm_start_from=warm_from,
-            solve_timeout_min=solve_timeout_min,
+            solve_timeout_min=solve_timeout_min, max_iter=max_iter,
             checkpoint_dir=checkpoint, pause_file=pause_file,
             live_dir=live_dir,
         )
