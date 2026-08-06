@@ -17,13 +17,18 @@ validated on `vtail_sample`, where relaxing the SM floor 0.08 -> 0.05 turned two
 chronic timeouts into converged solves in ~5 minutes each and identified the
 third corner as genuinely empty.
 
-    # the whole overnight plan, resumable, one solve per process
-    .runqueue/runlock uv run python tools/price_caps.py drive
+    # the whole overnight plan, resumable, one solve per process.
+    # NOTHING ELSE MAY BE SOLVING: a cell peaks near 15 GB and so does a
+    # battery, and two of them on one machine is the swap path solve.py warns
+    # about. There is no lock that enforces this — check with `ps` first.
+    uv run python tools/price_caps.py drive
 
     # one cell, if you want to check something by hand
     uv run python tools/price_caps.py cell --member tail_ttail --relax sm_floor_0.05
 
-    # what has been measured so far
+    # what has been measured so far. Cells land in `runs/_capprice/` (untracked);
+    # the ones committed with this tool are read with
+    #   PRICE_CAPS_OUT=docs/studies/rcv2_cap_pricing uv run python tools/price_caps.py report
     uv run python tools/price_caps.py report
 
 WHY ONE PROCESS PER CELL
@@ -502,7 +507,18 @@ def reevaluate(nominal: dict, args) -> None:
 def report(args) -> None:
     cells = load_cells()
     if not cells:
-        raise SystemExit(f"nothing measured yet — {CELLS} is empty or absent")
+        # The committed cells live under docs/, not in the untracked run
+        # directory this writes to, so the bare command reads as "nothing has
+        # ever been measured" on a fresh clone that ships four measured cells.
+        committed = REPO / "docs" / "studies" / "rcv2_cap_pricing"
+        hint = (
+            f"\n  {committed / 'cells.jsonl'} DOES exist — read it with:"
+            f"\n      PRICE_CAPS_OUT={committed.relative_to(REPO)} "
+            f"uv run python tools/price_caps.py report"
+            if (committed / "cells.jsonl").exists()
+            else ""
+        )
+        raise SystemExit(f"nothing measured yet — {CELLS} is empty or absent{hint}")
     members = sorted({r["member"] for r in cells.values()})
     relaxes = sorted({r["relax"] for r in cells.values()})
     width = max(len(m) for m in members) + 2

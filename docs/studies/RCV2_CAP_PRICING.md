@@ -1,13 +1,24 @@
 # Pricing the caps behind the rcv2 corners
 
-> **STATUS: INTERIM — the battery that produces this is still running** (started
-> 2026-08-07 00:26 local, 9-hour budget, branch `rcv2-cap-pricing`). Numbers
-> below are every cell measured so far and nothing else. Raw data:
-> `docs/studies/rcv2_cap_pricing/cells.jsonl`, one JSON line per cell, appended
-> as each lands.
+> **STATUS: INTERIM, AND NOT RUNNING.** The driver was started 2026-08-07 00:26
+> local on a 9-hour budget and stopped after stage A's first four cells; nothing
+> has run since (checked 2026-08-07 06:30, no process, `runs/_capprice/` absent).
+> Stages B through F below were never reached. Numbers here are those four cells
+> and nothing else. Raw data: `docs/studies/rcv2_cap_pricing/cells.jsonl`, one
+> JSON line per cell.
 >
 > **The headline is already a reversal, so read the caveat in §3 before acting
 > on it.**
+>
+> ### Stage C is answered, by a different run
+>
+> Stage C asked whether a CONVERGED rcv2 design is airworthy at all. The
+> 2026-08-07 battery `runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2`
+> settles it: **`candidates_source: "legal"`**, `reported_point_violations`
+> empty, trim −3.33° against a 6.53° cap. So the FINDINGS §28 failure was the
+> 3-iteration truncation, not the aeroplane — a converged rcv2 champion does
+> solve its own balance. That battery also independently reproduces this study's
+> `nominal` (105.8 against 105.818) and its five-limits-at-once signature.
 
 ## 1. Why
 
@@ -102,6 +113,13 @@ member converges in a battery.
 
 ## 6. Reproducing
 
-    .runqueue/runlock uv run python tools/price_caps.py drive
-    uv run python tools/price_caps.py report
+`drive` must have the machine to itself — a cell peaks near 15 GB and so does a
+battery. There is no lock that enforces it; check `ps` first.
+
+    uv run python tools/price_caps.py drive
     uv run python tools/price_caps.py cell --member tail_ttail --relax sm_floor_0.05
+
+`report` reads `runs/_capprice/` (untracked, written by `drive`). The four cells
+committed with this study are under `docs/`, so reading THEM takes the override:
+
+    PRICE_CAPS_OUT=docs/studies/rcv2_cap_pricing uv run python tools/price_caps.py report
