@@ -335,13 +335,31 @@ def constraints(
                 # `item` is declared AFT of `prev`, so this is one-sided and
                 # smooth — no absolute value anywhere in the packing.
                 #
-                # This one DOES have a natural scale and was raw metres until
-                # 2026-08-06: the required gap is the distance the row is about,
-                # items pack at it, and dividing by it moves this row from 0.047
-                # to 1.05 at the initial point. Dividing by a positive constant
-                # cannot move the feasible set (FINDINGS 14.5.1, verified on
-                # this model to five significant figures).
-                opti.subject_to((xi - x[f"x_{prev.name}"]) / (gap or 1.0) >= 1.0)
+                # RAW METRES, like the two containment rows above, and this one
+                # was MEASURED rather than argued. Dividing by `gap` is the
+                # textbook application of the module rule — the required spacing
+                # is the distance the row is about, items pack at it, and it
+                # moves the row from 0.047 to 1.05 at the initial point. It was
+                # tried on 2026-08-06 and REVERTED the same day.
+                #
+                # It is solution-preserving, exactly as FINDINGS 14.5.1 says a
+                # positive constant must be: across nine members of the
+                # `vtail_rcv2` battery the objectives matched to EIGHT
+                # significant figures (relative 2.4e-08 to 1.3e-07). What it was
+                # not is free. Converged members ran ~45% slower,
+                # `winglet_study__off` went 5.18 -> 27.50 min, and
+                # `winglet_study__continuous_cant` — 11.97 min and converged
+                # before — ran out of its 30-minute budget at iteration 314 with
+                # inf_du 1.9e-01 and mu descending, i.e. still converging and
+                # simply too slow. A rescale that costs a member is not a
+                # scaling fix.
+                #
+                # 14.5.1's rescale earned its place with a measured 228 -> 194
+                # iterations. This one measured the other way, so it goes. The
+                # rule is "dimensionless wherever a natural scale exists"; the
+                # scale exists here and using it still loses, which is worth
+                # knowing before anyone reaches for it again.
+                opti.subject_to(xi - x[f"x_{prev.name}"] >= gap)
             prev = item
         # --- across the section: the lane must admit its widest occupant ---
         if lane.width_m is not None:

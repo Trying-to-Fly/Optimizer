@@ -362,11 +362,14 @@ def test_placement_activity_covers_the_real_manifest(rcv2):
     assert all(r["room_fwd_mm"] >= 0.0 for r in act["items"])
 
 
-def test_packing_rows_stay_exact_after_being_made_dimensionless(rcv2):
-    """Dividing a row by a positive constant must not move the feasible set.
+def test_packing_rows_are_exact_at_the_ordering_limit(rcv2):
+    """One micrometre either side of the ordering row's limit.
 
-    One micrometre either side of the ordering row's limit, which is the
-    tightest thing the rescale could plausibly have broken.
+    This row was briefly rewritten as `(xi - x_prev) / gap >= 1.0` on
+    2026-08-06 and reverted the same day for costing a member (see
+    `equipment.constraints`). The gate stays: it is the tightest thing either
+    form could get wrong, and it is what proves the revert did not move the
+    feasible set back the other way.
     """
     items = rcv2.manifest()
     d = dict(rcv2.DV_DEFAULTS)
