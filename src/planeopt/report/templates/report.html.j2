@@ -230,6 +230,65 @@ drag alone — the study's verdict above also charges its mass and profile drag.
 recorded as <code>Maximum_WallTime_Exceeded</code> and the batch carries on.</p>
 {% endif %}
 
+{% set smc = r.diagnostics.get("sm_cross_check") %}
+{% if smc and "static_margin" in smc %}
+{# Cm is the quantity this project already knows is its weakest, and until
+   2026-08-06 it was the only one nothing looked at twice while drag had two
+   cross-checks. The comparable thing across methods is the SHAPE — whether the
+   local slope changes sign — not the level, since this sweep is inviscid. #}
+<h2>Static margin cross-check (independent method)</h2>
+<table>
+<tr><th></th><th>lifting line (in-loop)</th><th>VLM (inviscid)</th></tr>
+<tr><td>static margin</td>
+<td>{{ "%.4f"|format(smc["ll_static_margin"]) if smc.get("ll_static_margin") is not none else "—" }}</td>
+<td>{{ "%.4f"|format(smc["static_margin"]) }}</td></tr>
+<tr><td>slope sign constant across the window</td>
+<td>{% if r.constraints.get("sm_sign_consistent") is sameas false %}<span class="bad">no</span>{% else %}<span class="ok">yes</span>{% endif %}</td>
+<td>{% if smc["sign_consistent"] %}<span class="ok">yes</span>{% else %}<span class="bad">no</span>{% endif %}</td></tr>
+<tr><td>mesh ensemble</td><td>—</td>
+{% if smc.get("reliable") %}<td class="ok">{{ smc["meshes_in_consensus"]|length }} of {{ smc["per_mesh"]|length }} agreed</td>
+{% else %}<td class="bad">not reliable — {{ smc.get("unreliable_reason", "") }}</td>{% endif %}</tr>
+</table>
+<p style="color:#9a9aa0;font-size:12px;">The two methods are sampled over the
+<b>same</b> alpha window and run through the <b>same</b> estimator, so the only
+difference between these numbers is the aerodynamics. They are not expected to
+agree in LEVEL — this sweep is inviscid and carries no viscous Cm — so the row
+that matters is the middle one. LL reporting a sign change that the VLM does not
+see places the nonlinearity in LL's viscous Cm or its discretization, and is not
+by itself a verdict on the aeroplane (FINDINGS §21).</p>
+{% endif %}
+{% set dir = r.diagnostics.get("directional_check") %}
+{% if dir and "cn_beta" in dir %}
+{# The verdict the declared vertical-tail-volume floor has always been a
+   stand-in for, measured rather than assumed (MODEL_DETAILS 8.4, FINDINGS
+   §21). Before 2026-08-06 no run ever checked whether the aeroplane that met
+   the floor actually weathercocks. Guarded on the diagnostic itself and not on
+   the optimization block, so the measurement cannot go missing because some
+   unrelated key was empty. #}
+<h2>Directional stability (inviscid VLM sideslip sweep)</h2>
+<table>
+<tr><th>derivative</th><th>per degree</th><th>stable when</th><th>verdict</th></tr>
+<tr><td>Cn<sub>β</sub> — weathercock</td><td>{{ "%+.6f"|format(dir["cn_beta"]) }}</td><td>&gt; 0</td>
+{% if dir["directionally_stable"] %}<td class="ok">stable</td>{% else %}<td class="bad">UNSTABLE</td>{% endif %}</tr>
+<tr><td>Cl<sub>β</sub> — dihedral effect</td><td>{{ "%+.6f"|format(dir["cl_beta"]) }}</td><td>&lt; 0</td>
+{% if dir["roll_stable"] %}<td class="ok">stable</td>{% else %}<td class="bad">UNSTABLE</td>{% endif %}</tr>
+<tr><td>CY<sub>β</sub> — side force</td><td>{{ "%+.6f"|format(dir["cy_beta"]) }}</td><td>&lt; 0</td><td>—</td></tr>
+<tr><td>mesh ensemble</td><td colspan="2">{{ dir["meshes_in_consensus"]|length }} of {{ dir["per_mesh"]|length }} agreed</td>
+{% if dir.get("reliable") %}<td class="ok">agreed</td>
+{% else %}<td class="bad">not reliable</td>{% endif %}</tr>
+</table>
+{% if not dir.get("reliable") %}
+<p class="bad">{{ dir.get("unreliable_reason", "") }}</p>
+{% endif %}
+<p style="color:#9a9aa0;font-size:12px;">The in-loop constraint is a declared
+vertical-tail-volume floor, not this — <code>Vv</code> is a proxy for
+Cn<sub>β</sub> and the optimizer never sees the derivative itself. This is the
+check that the proxy meant what it claimed. Measured at
+α&nbsp;=&nbsp;{{ "%.1f"|format(dir["alpha_deg"]) }}° over sideslip
+{{ dir["betas_deg"]|join(", ") }}°, and it is an <b>inviscid</b> sweep from the
+same library as the in-loop model — a second opinion, not an independent one
+(FINDINGS §21).</p>
+{% endif %}
 {% set ab = r.diagnostics.get("afterbody") %}
 {% if ab %}
 {# The fuselage drag model could not see afterbody SHAPE until 2026-08-05: any
@@ -265,10 +324,11 @@ closure is ~14% steeper in tangent than reported here.</p>
 {% endif %}
 
 {% set vmp = r.diagnostics.get("v_min_price") %}
+{% set awp = r.diagnostics.get("airworthiness_price") %}
 {% set dropped = r.diagnostics.get("sweep_dropped") or {} %}
 {% set slopes = r.diagnostics.get("sm_local_slopes") or [] %}
 {% set unstable = slopes|selectattr("sm_local", "lt", 0)|list %}
-{% if vmp or dropped.get("trim_not_converged") or r.constraints.get("sm_sign_consistent") is sameas false %}
+{% if vmp or awp or dropped.get("trim_not_converged") or r.constraints.get("sm_sign_consistent") is sameas false %}
 {# What the headline number is limited BY, and what the sweep did NOT establish.
    Both were previously inferable only by reading run.json's sweep by hand. #}
 <h2>What limits this result</h2>
@@ -281,6 +341,33 @@ optimum is {{ "%.2f"|format(vmp["unconstrained_best_V_ms"]) }} m/s at
 <strong>{{ "%.2f"|format(vmp["cost_of_v_min"]) }} {{ r.performance["objective_units"] }}</strong>
 that the requirement is currently costing{% endif %}. Relax the requirement, not
 the aeroplane, to buy that back.</p>
+{% endif %}
+{% if awp %}
+{# The same question asked of the filters that run BEFORE v_min is consulted.
+   Without this the reported deflection, advance ratio and CL all read as
+   comfortably inside their limits, because they belong to the one point the
+   limits admitted. #}
+<p><strong>An airworthiness filter, not the aeroplane's best point.</strong> The
+sweep peaks at {{ "%.2f"|format(awp["unfiltered_objective"]) }}
+{{ r.performance["objective_units"] }} at
+{{ "%.2f"|format(awp["unfiltered_best_V_ms"]) }} m/s, and that point is excluded
+by <code>{{ awp["peak_excluded_by"]|join(", ") }}</code>. What is reported above is
+{{ "%.2f"|format(awp["reported_objective"]) }} {{ r.performance["objective_units"] }} —
+<strong>{{ "%.2f"|format(awp["cost_of_airworthiness"]) }}
+{{ r.performance["objective_units"] }}</strong> less.</p>
+<table>
+<thead><tr><th>filter</th><th>speeds it removed (m/s)</th><th>count</th></tr></thead>
+<tbody>
+{% for name, speeds in awp["excluded_by_rule"].items() %}
+<tr><td><code>{{ name }}</code></td>
+<td>{{ speeds|map("float")|map("round", 1)|join(", ") }}</td>
+<td>{{ speeds|length }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<p>Read the trim deflection, advance ratio and CL reported elsewhere in this
+document as properties of the point that <em>survived</em> these filters, not as
+evidence the design sits comfortably inside them.</p>
 {% endif %}
 {% if dropped.get("trim_not_converged") %}
 <p><strong>Not proven infeasible:</strong> trim did not converge at

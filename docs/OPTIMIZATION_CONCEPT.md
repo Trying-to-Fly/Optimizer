@@ -1,7 +1,7 @@
 # Design Optimization Framework — Concept
 
 Goal: a Python/AeroSandbox program that converges on a recommended aircraft design by
-co-optimizing geometry, mass, and trim — replacing manual trial-and-error in XFLR5/flow5.
+co-optimizing geometry, mass, and trim — replacing manual trial-and-error in a GUI panel code.
 This document defines the *idea and formulation only*. Detailed per-module
 formulations (equations, data, calibration) live in `MODEL_DETAILS.md`; execution
 details (stack, code structure, interfaces, milestones) live in `EXECUTION_PLAN.md`.
@@ -34,9 +34,11 @@ module among several:
 - Mission layer (declared objective + operating points; the framework owns no objective)
 - Optimizer (AeroSandbox's built-in gradient-based optimization)
 
-Tool roles: **AeroSandbox is the core loop** (built for exactly this). **flow5 is the
-validator** — champion designs get cross-checked there (and eventually flight-tested),
-not iterated there.
+Tool roles: **AeroSandbox is the core loop** (built for exactly this), and it is
+also the validator — champions are cross-checked by independent *methods* inside
+the app (finer-mesh lifting line, VLM induced-drag and sideslip ensembles) rather
+than by an independent *tool*. **Flight test is the only outside check.** That is
+a deliberate trade, not an oversight: see FINDINGS §21.
 
 ## 2. Objective — declared by the mission, never hardcoded
 
@@ -147,7 +149,11 @@ Each phase is independently useful; stop whenever the payoff stops:
   on the wrong airplane. For 3D printing, weight is driven by infill/walls/spar more
   than planform — calibrate against real test prints early.
 - **Fidelity ceiling unchanged.** VLM + 2D viscous corrections; the pusher prop in the
-  tail's wake remains unmodeled. flow5 cross-checks and flight tests close that gap.
+  tail's wake remains unmodeled — and no panel code models that, so it is flight
+  test's gap to close, not a cross-check's.
+- **The cross-checks share a library.** Every second opinion the app offers is
+  AeroSandbox, so they catch discretization and mesh artefacts but not a
+  systematic error in the method itself. Accepted knowingly (FINDINGS §21).
 - **Decision framing:** the optimizer's job is to answer "how far from optimal is v1,
   and does the delta justify redesign?" — "v1 is within a few percent, build it" is a
   valid and valuable outcome.

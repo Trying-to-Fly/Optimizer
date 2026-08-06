@@ -99,7 +99,12 @@ def test_m3_optimize_smoke(sample_aircraft, sample_mission, tmp_path):
     eps = 1e-6  # IPOPT bound slack
     assert 1.5 - eps <= champ["dv"]["span"] <= 3.0 + eps  # config bounds
     assert champ["objective_value"] > 60
-    assert abs(opt["nlp_vs_reeval_gap"]) < 0.1 * champ["objective_value"]
+    # the SAME tolerance the run now reports itself against (solve.py); a number
+    # enforced here and unreported there is how a 53% disagreement shipped
+    # unmentioned in the 2026-08-06 smoke battery
+    assert abs(opt["nlp_vs_reeval_gap"]) < (
+        solve.NLP_REEVAL_GAP_FRAC * champ["objective_value"]
+    )
     assert opt["shadow_price_obj_per_gram"] < 0  # more mass never helps endurance
 
     # M3 physics: trim inside throws, SM inside the window, ballast never negative

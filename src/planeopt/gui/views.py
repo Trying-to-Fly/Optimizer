@@ -25,11 +25,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import runindex
+from . import fonts, runindex
 from .runindex import RunSummary
 
 
-MONO_FAMILIES = ["Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Menlo", "monospace"]
+MONO_FAMILIES = fonts.families()
 
 
 def _mono(size: int = 0, bold: bool = False) -> QFont:

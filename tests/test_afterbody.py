@@ -606,7 +606,7 @@ def test_the_run_says_what_the_afterbody_cost_it(sample, champion_dv):
         geometry={}, masses={}, constraints={}, notes=[], performance={},
         diagnostics={"afterbody": ab},
     )
-    section = re.search(r"<h2>Afterbody.*?</table>", html.render(result), re.S)
+    section = re.search(r"<h2>Afterbody.*?</table>", html.render(result), re.DOTALL)
     assert section, "the report dropped the afterbody block entirely"
     text = section.group(0)
     assert "18.0°" in text and "separated" in text  # the verdict, not just a number

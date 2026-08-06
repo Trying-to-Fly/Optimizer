@@ -153,6 +153,24 @@ class RunResult:
     objective: str
     status: str
     created: str  # ISO timestamp
+    #: The EFFECTIVE design vector this run was evaluated at — the aircraft's
+    #: `DV_DEFAULTS` with any overrides applied, so it is the complete input and
+    #: not a diff against a default a reader would have to go and find. Rebuild
+    #: with `aircraft.geometry(result.design_vector or None)`.
+    #:
+    #: Absent until 2026-08-06, which made a run non-reproducible from its own
+    #: artifact: `geometry` records span, area and mean chord, none of which
+    #: invert back to taper, fullness, washout or the tail variables. Rebuilding
+    #: the champion meant re-running the optimizer. Everything else here is an
+    #: OUTPUT; this is what produced them.
+    #:
+    #: **Empty means the aircraft's fixed spec design, not a missing record** —
+    #: see `diagnostics["design_source"]`. An aircraft may treat `dv=None` as a
+    #: hardcoded as-built geometry distinct from its parametric family (the
+    #: sample one does, and the two differ by 7% in wing area), so filling this
+    #: in with defaults would name an aeroplane the run never evaluated. The
+    #: `or None` above is what makes both cases round-trip.
+    design_vector: dict[str, Any] = field(default_factory=dict)
     geometry: dict[str, Any] = field(default_factory=dict)
     masses: dict[str, Any] = field(default_factory=dict)
     performance: dict[str, Any] = field(default_factory=dict)

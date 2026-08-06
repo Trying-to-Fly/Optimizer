@@ -14,6 +14,8 @@ from pathlib import Path
 
 import typer
 
+import planeopt
+
 from . import __version__, solve
 from .report import assemble, html
 from .types import AircraftDefinition, MissionSpec
@@ -121,6 +123,15 @@ def optimize(
         "4-10 min; a diverging one has no natural end and can otherwise own the "
         "whole run. Members that hit the cap are recorded and the battery goes on.",
     ),
+    max_iter: int = typer.Option(
+        solve.SOLVE_MAX_ITER, "--max-iter",
+        help="IPOPT iteration ceiling for ONE member solve. Lower it hard (2-5) "
+        "to exercise the whole pipeline — graph construction, every study, the "
+        "artifacts — in seconds instead of hours. The aeroplane that comes out "
+        "is NOT optimized and the run says so; this is for finding bugs, not "
+        "designs. Unlike --solve-timeout-min it is deterministic, so it is the "
+        "one to use as a test oracle.",
+    ),
     checkpoint: Path = typer.Option(
         None, "--checkpoint",
         help="Directory for per-member results. A battery runs for hours; with a "
@@ -181,7 +192,7 @@ def optimize(
             multistart=multistart, flatness=flatness, parallel=parallel,
             memory_budget_gb=memory_budget_gb,
             warm_start=warm, warm_start_from=warm_from,
-            solve_timeout_min=solve_timeout_min,
+            solve_timeout_min=solve_timeout_min, max_iter=max_iter,
             checkpoint_dir=checkpoint, pause_file=pause_file,
             live_dir=live_dir,
         )
@@ -464,7 +475,15 @@ def info():
                f"{' (planeopt props to list)' if props else ''}")
     for d in propulsion.props_search_path():
         typer.echo(f"  search        {d} {'' if d.is_dir() else '(missing)'}")
-    typer.echo(f"parallel solves {'available' if solve.parallel_available() else 'unavailable (no fork)'}")
+    if not solve.parallel_available():
+        parallel_state = "unavailable (no fork)"
+    elif planeopt._FORK_SAFE_MACOS is False:
+        # Reported rather than left to be discovered, because the symptom is
+        # workers that segfault and are logged as running out of memory.
+        parallel_state = "UNSAFE — NumPy was imported before planeopt (see check_parallel)"
+    else:
+        parallel_state = "available"
+    typer.echo(f"parallel solves {parallel_state}")
 
     # RAM is the binding resource for this app, so the install report says what
     # this machine has and what a solve on it has actually cost.
@@ -474,10 +493,22 @@ def info():
     swap = memory_mod.swap_gb()
     measured = memory_mod.observed_peak_gb(Path("runs"))
     if total_gb:
-        typer.echo(
-            f"memory          {avail_gb:.1f} GB free of {total_gb:.1f} GB"
-            + (f" (+{swap:.0f} GB swap)" if swap else "")
-        )
+        # macOS gets two extra clauses because two of its numbers mean something
+        # different from their namesakes elsewhere: swap is provisioned on demand
+        # rather than fixed, so the figure is a floor; and several GB of what the
+        # machine is using may be sitting compressed, which is why a Mac can show
+        # very little free memory and still take a 14.5 GB solve.
+        clauses = []
+        if swap:
+            clauses.append(
+                f"+{swap:.0f} GB swap"
+                + (", grows on demand" if sys.platform == "darwin" else "")
+            )
+        compressed = memory_mod.compressed_gb()
+        if compressed:
+            clauses.append(f"{compressed:.1f} GB compressed")
+        detail = f" ({'; '.join(clauses)})" if clauses else ""
+        typer.echo(f"memory          {avail_gb:.1f} GB free of {total_gb:.1f} GB{detail}")
     else:
         typer.echo("memory          (unavailable on this platform)")
     per = measured or memory_mod.DEFAULT_PER_SOLVE_GB

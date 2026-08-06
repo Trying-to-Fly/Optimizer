@@ -227,3 +227,121 @@ def test_the_ceiling_is_optional_at_the_framework_level():
     assert "if ld_max is not None:" in src
     # and it is the drag-floor form, not the one negative drag satisfies
     assert "drag * ld_max / weight_n >= 1.0" in src
+
+
+# ------------------------------------- the static margin, asked the same way
+# Drag is compared at ONE operating point. The static margin is a SLOPE over an
+# alpha window, and a slope can be mesh-dependent while every individual point
+# looks fine. Cm at the trim point is deliberately not the quantity compared:
+# trim drives it to ~0 by construction, so a delta there is noise about nothing.
+#
+# Measured on the spec aircraft at the 2026-08-06 run's trim point:
+#
+#   4 panels/section   SM = +0.0541   local slopes  -0.0220 +0.0365 +0.1249 ...
+#   8 panels/section   SM = +0.0515   local slopes  -0.0255 +0.0332 +0.1230 ...
+#  16 panels/section   SM = +0.0491   local slopes  -0.0281 +0.0308 +0.1207 ...
+#
+# The sign change does not wash out under refinement — it deepens. That is the
+# difference between "the mesh is lying" and "the aeroplane is like this".
+
+
+@pytest.mark.slow  # ~3 s of real lifting-line sweeps
+def test_the_spec_aircraft_sign_flip_is_not_a_mesh_artefact(sample_aircraft):
+    """The finding, on the real aeroplane, through production code."""
+    dv = dict(sample_aircraft.DV_DEFAULTS)
+    r = aero.mesh_convergence_check(
+        sample_aircraft.geometry(dv), 10.5, 6.0784982825928315, 0.0,
+        0.4766442793775463, c_ref=0.19861110279967192,
+        bodies=sample_aircraft.parasite_bodies(dv),
+    )
+    sm = r["static_margin"]
+    assert sm["sign_flip_survives_refinement"] is True
+    assert sm["sign_flip_is_mesh_artefact"] is False
+    # both meshes see it, which is what makes refinement not the explanation
+    assert sm["in_loop"]["sign_consistent"] is False
+    assert sm["fine"]["sign_consistent"] is False
+    # and the margin is still MOVING at 16 panels, by more than the magnitude
+    # already known to flip this project's verdicts
+    assert abs(sm["delta"]) > aero.LL_SM_MESH_TOL
+    assert sm["converged"] is False
+
+
+def _stub_sm(monkeypatch, by_resolution):
+    """Drive `static_margin` per resolution without touching aerodynamics."""
+    def fake(airplane, V, x_cg, c_ref, alpha0=2.0, bodies=None,
+             spanwise_resolution=None):
+        sm, locals_ = by_resolution[spanwise_resolution]
+        return {
+            "static_margin": sm,
+            "x_np_m": x_cg + sm * c_ref,
+            "sm_local_slopes": [{"alpha": 5.0 + i, "sm_local": v}
+                                for i, v in enumerate(locals_)],
+            "sm_alpha_window_deg": [4.0, 6.0, 8.0],
+        }
+
+    monkeypatch.setattr(aero, "static_margin", fake)
+
+
+def _sm_check(monkeypatch, in_loop, fine):
+    _stub_ll(monkeypatch, {4: 0.7, aero.LL_CHECK_RESOLUTION: 0.7})
+    _stub_sm(monkeypatch, {4: in_loop, aero.LL_CHECK_RESOLUTION: fine})
+    return aero.mesh_convergence_check(
+        _Plane(), 9.5, 5.0, -2.0, 0.4, c_ref=0.2
+    )["static_margin"]
+
+
+def test_a_sign_flip_that_vanishes_under_refinement_is_named_an_artefact(monkeypatch):
+    """The other outcome, which must be reachable or the check is one-sided.
+
+    This is the FINDINGS §18 shape — a pathology that exists only at the coarse
+    mesh the NLP runs at — and it demands the opposite response: read the fine
+    mesh and stop believing the in-loop number.
+    """
+    sm = _sm_check(
+        monkeypatch,
+        in_loop=(0.054, [-0.022, 0.037, 0.125]),
+        fine=(0.055, [0.101, 0.118, 0.130]),
+    )
+    assert sm["sign_flip_is_mesh_artefact"] is True
+    assert sm["sign_flip_survives_refinement"] is False
+
+
+def test_a_margin_that_moves_more_than_the_tolerance_is_not_converged(monkeypatch):
+    sm = _sm_check(
+        monkeypatch,
+        in_loop=(0.054, [0.05, 0.06, 0.07]),
+        fine=(0.041, [0.04, 0.05, 0.06]),
+    )
+    assert sm["converged"] is False
+    assert sm["delta"] == pytest.approx(0.041 - 0.054)
+
+
+def test_a_stable_margin_converges(monkeypatch):
+    sm = _sm_check(
+        monkeypatch,
+        in_loop=(0.101, [0.09, 0.10, 0.11]),
+        fine=(0.1005, [0.09, 0.10, 0.11]),
+    )
+    assert sm["converged"] is True
+    assert sm["sign_flip_survives_refinement"] is False
+    assert sm["sign_flip_is_mesh_artefact"] is False
+
+
+def test_an_already_negative_margin_is_not_reported_as_a_hidden_sign_flip(monkeypatch):
+    """Same rule `solve.sm_sign_flip` uses: an unstable aeroplane is obvious,
+    not hidden, and calling it a 'sign flip' would bury the real headline."""
+    sm = _sm_check(
+        monkeypatch,
+        in_loop=(-0.02, [-0.05, -0.01, 0.02]),
+        fine=(-0.02, [-0.05, -0.01, 0.02]),
+    )
+    assert sm["in_loop"]["sign_consistent"] is True
+    assert sm["sign_flip_survives_refinement"] is False
+
+
+def test_the_margin_sweep_is_skipped_without_c_ref(monkeypatch):
+    """Backward compatibility is deliberate: the drag question is answerable
+    without a reference chord, and callers that only want it should not pay for
+    ten extra lifting-line runs."""
+    r = _check(monkeypatch, 0.700, 0.724)
+    assert "static_margin" not in r

@@ -263,8 +263,19 @@ part of the optimization state:
 
 ### 3.4 Stability quantities
 
-- **Neutral point / static margin:** from the same VLM (dCm/dCL), differentiable, so
-  the static-margin window is an ordinary smooth constraint against the mass model's CG.
+- **Neutral point / static margin:** dCm/dCL from the in-loop **LiftingLine**
+  model, differentiable, so the static-margin window is an ordinary smooth
+  constraint against the mass model's CG. (This used to read "from the same
+  VLM". The docs have long used "VLM" loosely for the lifting-surface model,
+  which was harmless until `VortexLatticeMethod` cross-checks actually existed —
+  the margin has never had VLM provenance, and since 2026-08-06 it has a VLM
+  *second opinion*, which is a different thing.)
+  **Cross-checked two ways** (§21–22 of FINDINGS): `aero.vlm_static_margin_check`
+  re-derives it by an independent method over the same window and estimator, and
+  `mesh_convergence_check` re-derives it at 4× the panel density. On the spec
+  aircraft the reported sign change inside the window survives refinement and is
+  absent from the inviscid sweep, which places it in the viscous Cm at
+  Re ≈ 46 k — a property of the aeroplane, not of the discretization.
 - **Stall / CL_max:** critical-section method — at the stall condition no spanwise
   station may exceed its local NeuralFoil cl_max. Implemented (2026-07-23) as:
   Schrenk spanwise loading + washout increment (a_2d ≈ 5.7/rad) over stations taken
@@ -274,17 +285,28 @@ part of the optimization state:
   tip-stall diagnostic (the report plots cl/cl_max spanwise at stall). Documented
   approximation: Schrenk loading, not the LL distribution.
 - **Gust margin:** CL_cruise ≤ ~0.7 × CL_max (from the concept doc's trim row).
-- **Lateral-directional:** not dynamically modeled. A declared vertical-tail-volume
-  floor stands in as the constraint (§8 — V-tail effective vertical area
-  S·sin²Γ with the V-angle free; conventional/T fin area directly); flow5 and
-  flight test own the rest.
+- **Lateral-directional:** the STATIC derivatives are measured. A declared
+  vertical-tail-volume floor is still the in-loop constraint (§8 — V-tail
+  effective vertical area S·sin²Γ with the V-angle free; conventional/T fin
+  area directly), but every champion now carries `Cn_beta`, `Cl_beta` and
+  `CY_beta` from a mesh-ensemble VLM sideslip sweep (`aero.vlm_directional_check`,
+  §8.4), so the verdict the floor stands for is checked rather than assumed.
+  **Dynamic** lateral-directional — dutch roll, spiral, roll rate — remains
+  unmodeled and is flight test's to own.
 
 ### 3.5 Known fidelity limits (restated from the concept doc)
 
 VLM + 2D strip corrections; the pusher prop's wake operation is priced only as a
 declared efficiency derate (§2.4), not modeled; fuselage lift/moment contributions
-are approximated by the buildup only. flow5 cross-checks champions; flight test
-closes the gap.
+are approximated by the buildup only. Champions are cross-checked in-app —
+`mesh_convergence_check` on drag, `vlm_induced_check` on nonplanar induced drag,
+`vlm_directional_check` on the lateral derivatives — and flight test closes the
+rest of the gap.
+
+Those cross-checks are a **second opinion, not an independent one**: they are
+AeroSandbox checking AeroSandbox, so a systematic error in the library is
+invisible to all of them. See FINDINGS §21 for what that costs and why it was
+accepted.
 
 ### 3.6 Winglets and the projected-span cap
 
@@ -842,13 +864,70 @@ fraction gains effectiveness per degree yet loses allowed degrees, so
 
 ### 8.4 Directional floor
 
-LL has no yaw axis: without a constraint, fins optimize to zero and V-tails
-shed angle. A declared vertical-tail-volume floor stands in (§3.4):
+Without a constraint, fins optimize to zero and V-tails shed angle. A declared
+vertical-tail-volume floor stands in (§3.4):
 `Vv = S_v_eff · l_v / (S_ref · b_proj) ≥ v_tail_volume_min`, with
 `S_v_eff = S_tail·sin²Γ` for the V-tail (angle free) and the fin's area for
 conventional/T; `l_v ≈ tail_arm` (CG sits near the wing AC at this
 fidelity). **[sample]** floor 0.030 — provenance: the spec's own tail works
 out to Vv = 0.034, and 0.02–0.04 is class practice.
+
+**Corrected 2026-08-06 — this section used to open "LL has no yaw axis", and
+that was the stated reason the floor is a proxy. It is false on asb 4.2.10.**
+LiftingLine answers sideslip with the right sign and a clean monotonic trend in
+V-angle. What it gets wrong is the MAGNITUDE: against a 3-mesh VLM ensemble on
+the 2026-08-05 champion it over-predicts `Cn_beta` by 2.15× at Γ = 20° easing to
+1.34× at 55°. So LL's yaw axis is a usable *shape* and an unusable *number*, and
+the floor stays a proxy for that reason instead — a different and much narrower
+claim than the one it replaces.
+
+What the VLM measures, and what it costs the floor's credibility
+(`aero.vlm_directional_check`, run on every champion):
+
+- The champion at Γ = 55° has `Cn_beta = +0.00125/deg = 0.0717/rad` —
+  **directionally stable, and squarely inside the conventional 0.04–0.10/rad
+  band.** That is the verdict the floor has always been a stand-in for, and no
+  run before 2026-08-06 ever actually checked it.
+- `Cn_beta = 0.000116 + 0.002245·sin²Γ` fits within 2.5% at every angle
+  measured. The tail's own `sin²Γ` scaling is therefore **right** — but the
+  constant term is not zero. Roughly 7% of the aeroplane's directional
+  stability comes from the winglet, wing and fuselage, and `Vv` credits it to
+  nobody.
+
+**The floor is well calibrated, and the measurement is what establishes that.**
+Read per degree it is tempting to conclude the floor is loose, because the
+aeroplane still returns a positive `Cn_beta` at Γ = 20°. Per radian that value
+is 0.0121 — positive, and about four times BELOW the bottom of the conventional
+band. Γ = 20° weathercocks only in the arithmetic sense. The declared 0.030,
+whose stated provenance was nothing better than "the spec's own tail works out
+to 0.034 and 0.02–0.04 is class practice", turns out to land `Cn_beta` where a
+directional-stiffness argument would independently have put it.
+
+| Γ | `Cn_beta`/deg | `Cn_beta`/rad | vs 0.04–0.10/rad band |
+| --- | --- | --- | --- |
+| 20° | +0.000211 | 0.0121 | ~4× below |
+| 30° | +0.000472 | 0.0270 | below |
+| 40° | +0.000785 | 0.0450 | at the lower edge |
+| 55° | +0.001251 | 0.0717 | inside |
+
+**Why the V-angle is not un-pinned, having looked.** Γ pins at its 55° bound
+every run (§9 of FINDINGS). The obvious suspicion — that a steep V hides an
+unmodeled handling cost — was tested through LL, which unlike the VLM honors
+control deflections, and it does not hold:
+
+| Γ | pitch authority | yaw authority | `\|Cl_δr/Cn_δr\|` |
+| --- | --- | --- | --- |
+| 20° | 1.55× | 0.43× | 0.346 |
+| 55° | 1.00× | 1.00× | 0.141 |
+
+Adverse roll per unit yaw command *improves* 2.46× with steepness, and yaw
+authority more than doubles. The only cost that rises is reduced pitch
+authority, and that is already modeled — the V-tail is built as real canted
+geometry (`aircraft.py`, tip at `y = s·cosΓ`, `z = s·sinΓ`) and the trim-throw
+constraint is active at the champion. **Adding a yaw-aware control-authority
+budget would pin Γ harder, not free it.** FINDINGS §9's original reading stands:
+how steep a V is acceptable is a build and handling decision, not a model
+output, and the 55° cap is a declared practice limit doing legitimate work.
 
 ---
 

@@ -185,7 +185,7 @@ def _render_flatness(flat: list[dict]) -> str:
             "champion": {"dv": {"span": 2.0}}, "flatness_span": flat,
         }},
     )
-    section = re.search(r"<h2>Flatness sweep.*?</table>", html.render(result), re.S)
+    section = re.search(r"<h2>Flatness sweep.*?</table>", html.render(result), re.DOTALL)
     assert section, "the report dropped the flatness sweep entirely"
     return section.group(0)
 

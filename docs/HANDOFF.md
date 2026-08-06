@@ -234,6 +234,20 @@ starts a fresh checkpoint subdirectory; the numbers do not.
 - **Whether the aft-bay width row binds.** If `pod_wh` runs to a bound to make
   room for the electronics, the parts list is now driving the fuselage section,
   which is new and worth knowing.
+- **The SPEC design does not trim across its speed range, and now says so.**
+  `vtail_rcv2` was evaluated for the first time on 2026-08-06 (M1, no
+  optimizer). Static margin **0.85** against a required 0.08–0.15: the RC v2
+  package puts the motor at station 34.7 mm and the battery at 115 mm, and the
+  aeroplane is nose-heavy enough to need more than its 6.53 deg of ruddervator
+  at **every speed below 16.5 m/s**. Twelve of thirteen trimmed points were
+  filtered out and the run reported its FASTEST speed as its best endurance
+  point. That is the fixed spec geometry, not the parametric family — the NLP
+  carries `ballast_kg` and the trim-throw limit as a constraint, so the battery
+  should place mass differently rather than inherit this. **Read
+  `diagnostics.airworthiness_price` on the re-evaluation** (FINDINGS §26, added
+  because nothing named the filter): if it is non-null on the champion, the
+  optimizer did not solve the balance problem either, and the ten placement
+  variables are the first place to look.
 
 ## FIXED in the fifteenth session (2026-08-05)
 
@@ -408,13 +422,18 @@ must not answer to the same name.
 
 ## WHAT IS STILL OPEN
 
-**Issue 2 — static-margin FIDELITY — and it cannot be closed in this app.** The
-two-estimator artefact is long gone; what remains is that `sm_local_slopes` goes
-negative at the cruise alpha, i.e. Cm(CL) is nonlinear enough over +-2 deg that
-"the" static margin depends on the window it is measured over. A regression slope
-is a defensible summary of that and still a summary. **flow5 (or equivalent)
-should own the stability verdict before anything is built** — an external tool,
-not a code change, and it gates BUILDING rather than running.
+**Issue 2 — static-margin FIDELITY, and as of 2026-08-06 nothing outside the app
+will settle it.** The two-estimator artefact is long gone; what remains is that
+`sm_local_slopes` goes negative at the cruise alpha, i.e. Cm(CL) is nonlinear
+enough over +-2 deg that "the" static margin depends on the window it is measured
+over. A regression slope is a defensible summary of that and still a summary.
+
+This used to read "flow5 (or equivalent) should own the stability verdict before
+anything is built". That external gate was **removed by user decision on
+2026-08-06** (FINDINGS §21). The margin is still a summary of a nonlinear curve,
+and the only remaining check on it is flight test. **Weigh, balance, and fly
+conservatively on the first flight** — do not treat the reported number as
+having been verified by anything.
 
 > Since 2026-08-05 the RUN says this about itself: `sm_sign_consistent` fails,
 > the log warns, and the report explains it beside the margin. That does not
@@ -836,10 +855,10 @@ about closure angle. Easy to oversell.
 
 **Tier 3 — a real pressure solution (weeks, and not in-loop).** A source-panel
 method gives a pressure distribution but is inviscid: it shows the adverse
-gradient, not the separation, without boundary-layer coupling. The better
-version is external and gates BUILDING rather than running — the same posture
-this project already took for stability, where flow5 owns the verdict (issue 2
-above).
+gradient, not the separation, without boundary-layer coupling. It would gate
+BUILDING rather than running. Note the precedent it used to lean on is gone: the
+external stability gate was removed on 2026-08-06 (issue 2 above, FINDINGS §21),
+so "defer it to an outside tool" is no longer a posture this project takes.
 
 ## THE 3 m RUN — DONE, and the span curve finally turns over
 
@@ -1054,6 +1073,39 @@ that were tested and refuted — read those before re-deriving them.
   render tests). Full suite **190 tests**, green.
 
 ## OPEN ISSUES, highest value first
+
+### NEW — the spar sizes the optimizer returns cannot be bought (user, 2026-08-06)
+
+**`spar_od_center` and `spar_wall_center` are continuous design variables, and
+carbon tube is not a continuous product.** The 2026-08-06 smoke run returned
+`spar_od_center = 10.826 mm`, `spar_wall_center = 1.011 mm`, `spar_od_outer =
+8.411 mm`, `spar_wall_outer = 0.992 mm`. None of those is a size anyone can
+order. The user's instruction is that spars must come out as buyable stock —
+whole millimetres at minimum.
+
+Three things make this more than a rounding note:
+
+- **OD and wall are not independent.** Tube is sold as an OD x ID pair — the
+  project already writes "12x10 CF" in `structure_extras`' own annotation for
+  the boom. A model free to pick 10.83 OD with 1.01 wall is choosing from a
+  catalogue that does not exist, and rounding each variable separately can land
+  on a pair nobody stocks.
+- **The rounding is not free, and it is not conservative.** `spar_wall_center`
+  and `spar_wall_outer` are the BINDING structural rows since the OD ceilings
+  were freed (FINDINGS §25.2). Rounding a binding wall DOWN violates the stress
+  or deflection constraint that sized it; rounding UP adds mass the objective
+  was trading against. Either way the built aeroplane is not the one the run
+  reported, and today nothing says so.
+- **The machinery already exists.** This is the same shape as the propeller
+  catalogue: a discrete set, chosen by paired re-optimization
+  (`discrete_options` / `screen_discrete`), with `priced_options` for the case
+  where the alternative gives up something the model has no term for. A declared
+  stock list per spar, screened the way 65 props are screened, is the obvious
+  form.
+
+Until then, **read every reported spar dimension as a size that must still be
+reconciled against a supplier's catalogue**, and treat the margins quoted
+against it as belonging to the continuous tube, not the bought one.
 
 > **Issues 0a-0d were found by AUDITING the 2026-07-31 chord275 run's artifacts,
 > not from its log — the log was 51 clean lines with no warning, no NaN and no
@@ -1350,8 +1402,9 @@ The two-estimator artefact is gone. What remains is real and unchanged:
 enough over ±2° that "the" static margin depends on the window you measure it
 over. A regression slope is a defensible summary of that, but it is a summary.
 
-flow5 (or equivalent) should still own the stability verdict before anything is
-built. Do not "fix" it by widening the mission window.
+The external stability gate this used to name was removed on 2026-08-06
+(FINDINGS §21), so flight test is the only remaining verdict. Do not "fix" the
+margin by widening the mission window.
 
 The build document now states the verdict outright — whether the CG target is
 inside the window it derives — instead of printing two millimetre numbers and
@@ -1850,7 +1903,8 @@ Windows .exe.** No modeling changed; this session made the app distributable.
   (+10.7 min), 112.5 min @ 2.0 m, AUW 1766 g.** V-tail/boom/no-winglet
   all re-confirmed under the puller; simple dihedral again (d_exp → 0).
   Flags: SM re-eval 0.0745 vs NLP 0.080 (estimator gap now crosses the
-  window floor — flow5 gate before building); `printed_mass_x1.10`
+  window floor — historical note: this called for a flow5 gate before
+  building, an external gate since removed); `printed_mass_x1.10`
   battery member failed to converge (first ever; re-run it).
 - **Puller adopted as the permanent default** (user decision, same day):
   `motor_mount = "puller"` in the aircraft file (v1.6); the spec pusher

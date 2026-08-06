@@ -271,8 +271,9 @@ def _build(result: types.RunResult, airplane, aircraft=None) -> tuple[str, dict]
                     if over <= 0
                     else f"- **WARNING — the CG target is {over * 1000:.1f} mm {edge} "
                     "limit** derived just above. The design does not meet the "
-                    "stability window it was optimized against; treat the margin as "
-                    "unverified until an external check (flow5 or equivalent) settles it."
+                    "stability window it was optimized against. Nothing outside "
+                    "this app checks that margin — weigh, balance and fly "
+                    "conservatively rather than treating the number as verified."
                 ]
         ballast = _components(result).get("nose_ballast")
         if ballast is not None:

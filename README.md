@@ -12,7 +12,12 @@ The docs are the spec, in reading order:
 
 ## Quick start
 
+Needs [uv](https://docs.astral.sh/uv/) and nothing else — it fetches the Python
+3.12 the project pins (`brew install uv` on macOS, `winget install astral-sh.uv`
+on Windows).
+
 ```sh
+uv sync --extra gui            # create the environment; drop --extra gui for CLI only
 uv run pytest                  # test suite
 uv run planeopt info           # install report: version, packaged data, capabilities
 uv run planeopt objectives     # list the objective library
@@ -41,6 +46,36 @@ any single solve faster. Runs record their measured peak, so the estimate
 improves as you use it; `planeopt info` reports RAM, the measured peak, and the
 most concurrency this machine can support. POSIX only — Windows cannot fork,
 and says so rather than ignoring the setting.
+
+### Platforms
+
+Linux, macOS and Windows all run the app; they differ only in concurrency and
+in how the memory numbers are obtained.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| solves, GUI, reports, timelapse | yes | yes | yes |
+| `--parallel > 1` / memory budget | yes | yes | no (no `fork`) |
+| per-solve peak, in-process | `clear_refs` | footprint sampler | batch watermark |
+
+**macOS.** Reading a Mac's memory is not the same problem as reading a Linux
+box's, and `memory.py` treats it as its own model rather than a variant: there
+is no `/proc`, so the figures come from Mach and `sysctl`; swap is created on
+demand rather than fixed, so the reported figure is a floor; and memory is
+compressed before it is swapped, so `planeopt info` reports what is held
+compressed — a Mac can show very little free memory and still take a 14.5 GB
+solve. Note that 14.5 GB is most of a 16 GB machine, so expect one solve at a
+time there and some swapping; the budget arithmetic says so up front.
+
+One macOS-specific requirement, handled automatically but worth knowing if you
+embed the library: **planeopt must be imported before NumPy**. NumPy's macOS
+wheels link Apple's Accelerate, which parallelises through Grand Central
+Dispatch, and GCD does not survive `fork` — with its thread pool up, every
+forked solve worker segfaults on its first matrix multiply and is reported as
+having been taken by the OOM killer. Importing planeopt first lets it pin
+Accelerate to one thread before that pool can start, which costs nothing here
+(the solver is single-core either way). `planeopt info` shows `parallel solves
+UNSAFE` and `check_parallel` refuses the run if it was too late.
 
 ## Packaged build
 

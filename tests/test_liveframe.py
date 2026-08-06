@@ -560,13 +560,23 @@ def test_a_real_run_writes_frames_and_relocates_them(
     Reduced to one multistart with no flatness sweep — what is under test is the
     plumbing (callback fires, iterates increase, one candidate per member,
     frames relocate), not the optimizer, which `test_m3_optimize_smoke` covers.
+
+    **`max_iter` is what makes that reduction real, and it was measured.** Until
+    2026-08-06 this test ran its members to convergence and took 1 h 39 min, of
+    which the solving was a minority: ~10 members at ~100 iterates each wrote
+    **1,062 frames**, and the replay below then rendered every one of them
+    through Qt. Neither number tests anything here. A frame stream is replayable
+    or it is not, and three iterates per member demonstrate the same callback,
+    the same ordering and the same relocation as a hundred do — which is exactly
+    the economy `--max-iter` was added for (FINDINGS §24.2). The aeroplane that
+    comes out is not optimized and this test never looks at it.
     """
     from planeopt import solve
 
     live_dir = tmp_path / "_live" / "endurance"
     _, run_dir = solve.optimize(
         sample_aircraft, sample_mission, runs_root=tmp_path,
-        multistart=1, flatness=False, live_dir=live_dir,
+        multistart=1, flatness=False, live_dir=live_dir, max_iter=3,
     )
 
     assert not live_dir.exists(), "frames should have moved into the run directory"

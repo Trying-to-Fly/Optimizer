@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import datetime
 import logging
+import numbers
 import time
 from pathlib import Path
 
 import numpy as np
+
+import planeopt
 
 from . import aero, fingerprint, geometry, massmodel, memory, propulsion
 from .mission import OBJECTIVES
@@ -40,6 +43,21 @@ M1_STATUS = "M1: fixed-design evaluation (Phase 1 gate pipeline) — no optimize
 SOLVE_TIMEOUT_MIN = 30.0
 #: Iteration ceiling for one member solve (IPOPT's own `max_iter`).
 SOLVE_MAX_ITER = 1000
+
+#: How far the NLP's objective and the numeric re-evaluation of the SAME design
+#: vector may sit apart before the run says so, as a fraction of the objective.
+#:
+#: Not a new judgement — this is the number `test_m3_optimize_smoke` has asserted
+#: since M3 (`abs(nlp_vs_reeval_gap) < 0.1 * objective`). It lived only in the
+#: test, so the property was ENFORCED on the sample aircraft and UNREPORTED on
+#: every other run: the 2026-08-06 smoke battery recorded a 64.16 min gap on a
+#: 120 min champion — 53%, two models describing different aeroplanes — in an
+#: artifact that mentioned it nowhere. Declared here so the test and the run
+#: cannot drift apart, which is the same discipline `airworthiness_rules` gets.
+#:
+#: A healthy converged run sits nowhere near this: the 2026-08-05 champion
+#: recorded -1.5e-5 min, and FINDINGS calls even a ~4% residual worth explaining.
+NLP_REEVAL_GAP_FRAC = 0.10
 #: How far outside the mission's static-margin window a reported SM may land and
 #: still count as satisfying it. An optimizer holds this constraint ACTIVE, so
 #: the comparison has to admit the solver's own convergence tolerance or it
@@ -564,6 +582,168 @@ def v_min_price(airworthy: list[dict], best: dict, v_min_ms: float, sign: int) -
     }
 
 
+def no_survivors_error(keys: list[str], results: list[dict]) -> RuntimeError:
+    """The error a multistart with no surviving member should raise.
+
+    `run` has answered this properly since M1 — *"no feasible operating point
+    anywhere in the sweep... Causes: ..."* — on the stated grounds that a bare
+    `max() iterable argument is empty` tells the reader nothing and is exactly
+    where a broken install surfaces. `optimize` had the identical hole and
+    nobody had fallen into it, because until `--max-iter` existed no battery
+    ever had EVERY member fail. The first `--max-iter 3` run ever attempted
+    crashed on precisely that `max()`, after paying for every solve, with no
+    artifact written (2026-08-06, FINDINGS §27).
+
+    Grouped by RETURN STATUS because a multistart is many attempts at one
+    problem, so the way they all failed is the diagnosis: every member
+    `Infeasible_Problem_Detected` is an over-constrained aircraft, every member
+    `Maximum_WallTime_Exceeded` is a cap to raise, and a mixture is a badly
+    scaled model. Three different fixes, and a flattened message picks none.
+
+    Returns the exception rather than raising it, so the caller's `raise` is
+    visible at the site that decided the run is over.
+    """
+    by_status: dict[str, list[str]] = {}
+    for key, r in zip(keys, results, strict=False):
+        by_status.setdefault(str(r.get("return_status", "unknown")), []).append(key)
+    detail = "; ".join(
+        f"{status} [{', '.join(keys_)}]" for status, keys_ in sorted(by_status.items())
+    )
+    worst = next(
+        (r["violations"][0]["what"] for r in results if r.get("violations")), None
+    )
+    return RuntimeError(
+        f"every one of the {len(results)} multistart members failed to solve, so "
+        f"there is no champion to build a run around. Causes: {detail}."
+        + (f" Closest miss on any member: {worst}." if worst else "")
+    )
+
+
+def airworthiness_price(
+    feasible: list[dict], best: dict, rules: dict, v_min_ms: float, sign: int
+) -> dict | None:
+    """What the AIRWORTHINESS filters cost the headline number, or None.
+
+    `v_min_price` is the same question asked of the one requirement whose
+    exclusions live BELOW the speed floor. Everything else that removes a speed
+    point — the gust margin, the propeller advance-ratio cap, the trim-throw
+    limit — removes it from `airworthy` before that function is ever called, so
+    a design held back by one of those reported a headline with nothing at all
+    saying what set it.
+
+    Not hypothetical. The first `vtail_rcv2` evaluation (2026-08-06) reported
+    53.8 min at 16.5 m/s — its FASTEST swept speed, for an endurance aeroplane —
+    because the spec design is nose-heavy enough to need more than its 6.53 deg
+    of trim throw at every slower speed. Twelve of thirteen trimmed points were
+    dropped, the peak among them was 71.2 min at 12.0 m/s, and the artifact's
+    own `trim_deflection_deg` read -6.29 deg: comfortably inside the cap,
+    because it is the deflection of the ONE point the cap admitted. Every number
+    in that run was right and the run as a whole was not readable.
+
+    `rules` maps a filter name to a predicate on a sweep point, and is the SAME
+    dict the filter itself is built from, so a rule cannot be priced here and
+    quietly not applied there. Returns None when the reported best already IS
+    the peak — a healthy run carries no diagnostic rather than an empty one.
+    """
+    at_or_above = [s for s in feasible if s["V_ms"] >= v_min_ms - 1e-9]
+    if not at_or_above:
+        return None
+    peak = max(at_or_above, key=lambda s: sign * s.get("objective_value", -np.inf))
+    a, b = peak.get("objective_value"), best.get("objective_value")
+    # `sign *` and not `abs`: a peak that is WORSE than the reported best is not
+    # a price, it is the filters having cost nothing.
+    if a is None or b is None or sign * (a - b) <= 1e-9:
+        return None
+    return {
+        "unfiltered_best_V_ms": peak["V_ms"],
+        "unfiltered_objective": a,
+        "reported_objective": b,
+        "cost_of_airworthiness": abs(a - b),
+        "peak_excluded_by": sorted(n for n, ok in rules.items() if not ok(peak)),
+        # Per rule, every speed it removed — the count is the difference between
+        # "one awkward point dropped out" and "this filter chose the answer".
+        "excluded_by_rule": {
+            n: [s["V_ms"] for s in at_or_above if not ok(s)]
+            for n, ok in rules.items()
+            if any(not ok(s) for s in at_or_above)
+        },
+    }
+
+
+def effective_design_vector(aircraft, dv: dict | None) -> dict:
+    """The COMPLETE design vector a run was evaluated at, defaults included —
+    or `{}` when the run had no design vector at all.
+
+    A partial `dv` is merged over the aircraft's `DV_DEFAULTS`, because the
+    artifact must carry the whole vector rather than a diff: a diff leaves a
+    reader to go and find defaults in a Python file that has since changed,
+    which is the same trap as recording a span and expecting them to recover
+    taper from it.
+
+    **`dv=None` returns `{}`, and that is not "unrecorded".** It is the
+    aircraft's own convention (`aircraft.geometry(dv=None)` -> "the fixed v1.2
+    spec design; else the parametric architecture"), and the two are materially
+    DIFFERENT aeroplanes: on the sample aircraft the spec geometry and the
+    parametric point at `DV_DEFAULTS` differ by 7% in wing area, 3.5% in
+    projected span and 7% in mean chord. Recording `DV_DEFAULTS` for a
+    spec-design run would therefore be worse than recording nothing — it would
+    be an authoritative-looking vector that rebuilds an aeroplane the run never
+    evaluated. `{}` round-trips correctly, because `geometry(recorded or None)`
+    is `geometry(None)`.
+
+    Floats because `json` refuses numpy scalars, and an aircraft is free to
+    declare its defaults with them. The test is `numbers.Real` and NOT
+    `isinstance(v, (int, float))`: `np.float64` happens to subclass `float` so
+    the naive check passes it, while **`np.int64` subclasses neither** and would
+    sail through uncoerced to fail at write time — after the solving was done.
+    `bool` is excluded explicitly because it IS a `numbers.Real`, and recording
+    a discrete flag as 1.0 would rebuild the aircraft with a float where it
+    declared a switch. (`np.bool_` needs no exclusion: it is not a Real.)
+    """
+    if dv is None:
+        return {}
+    merged = (getattr(aircraft, "DV_DEFAULTS", None) or {}) | dv
+    return {
+        k: (float(v) if isinstance(v, numbers.Real) and not isinstance(v, bool) else v)
+        for k, v in merged.items()
+    }
+
+
+def objective_is_mesh_trustworthy(aircraft, r: dict) -> tuple[bool, dict | None]:
+    """Is this solve's objective the aeroplane's, or the panel count's?
+
+    The cheap half of `aero.mesh_convergence_check` — drag at one operating
+    point, two lifting-line runs, well under a second — asked of an ARBITRARY
+    solve rather than only of the final champion.
+
+    It exists because this project's expensive failures are all selection-time
+    ones found late. On 2026-08-01 a solve reported an L/D of 889 because at
+    four panels per section a high-cant winglet contributed about -0.93 N
+    (FINDINGS §18); the winglet cross-check was separately measuring its own
+    mesh; and the in-loop model made thrust and a solve went looking for it.
+    In every case the model was untrustworthy WHILE the studies were choosing
+    the design, and nothing said so until the run was over.
+
+    Returns (ok, check). `check` is None when the solve carries too little to
+    ask the question — a failed member, say — and callers should treat an
+    unanswerable question as trustworthy rather than reject on ignorance.
+    """
+    needed = ("V_ms", "alpha_deg", "deflection_deg", "x_cg_m", "dv")
+    if any(r.get(k) is None for k in needed):
+        return True, None
+    try:
+        check = aero.mesh_convergence_check(
+            aircraft.geometry(r["dv"]), r["V_ms"], r["alpha_deg"],
+            r["deflection_deg"], r["x_cg_m"],
+            control_name=getattr(aircraft, "pitch_control_name", "ruddervator"),
+        )
+    except Exception as e:  # noqa: BLE001 — a guard must not cost the run
+        log.warning("mesh trustworthiness check failed, not blocking: %s: %s",
+                    type(e).__name__, e)
+        return True, None
+    return bool(check["converged"]), check
+
+
 def sm_sign_flip(sm: dict) -> dict | None:
     """The worst locally-UNSTABLE alpha inside a positive margin's own window.
 
@@ -692,12 +872,20 @@ def run(
     defl_cap = getattr(aircraft, "trim_deflection_limit_deg", None)
     if callable(defl_cap):
         defl_cap = float(defl_cap(dv))
+    # Named rather than inlined, so `airworthiness_price` prices exactly the
+    # predicates the filter applies. A rule that could be priced in one place
+    # and applied in another is how a filter comes to choose an answer without
+    # the artifact being able to say which one did.
+    airworthiness_rules = {
+        "gust_margin": lambda s: s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6,
+        "advance_ratio": lambda s: s["J"] <= j_cap + 1e-6,
+        "trim_throw": lambda s: (
+            defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3
+        ),
+    }
+
     def _legal_but_for_v_min(s: dict) -> bool:
-        return (
-            s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6
-            and s["J"] <= j_cap + 1e-6
-            and (defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3)
-        )
+        return all(ok(s) for ok in airworthiness_rules.values())
 
     airworthy = [s for s in feasible if _legal_but_for_v_min(s)]
     legal = [s for s in airworthy if s["V_ms"] >= mission.v_min_ms - 1e-9]
@@ -735,6 +923,11 @@ def run(
     # may do at or above 9.5 m/s" are different sentences, and only the second
     # was true. Priced here so the requirement can be argued with.
     vmin_price = v_min_price(airworthy, best, mission.v_min_ms, sign)
+    # ... and the same question asked of the filters that run BEFORE `airworthy`
+    # exists, which is where the first rcv2 evaluation lost its headline.
+    air_price = airworthiness_price(
+        feasible, best, airworthiness_rules, mission.v_min_ms, sign
+    )
 
     # --- sweep points that dropped out, and on whose authority ---------------
     dropped = [s for s in sweep if "infeasible" in s]
@@ -758,6 +951,7 @@ def run(
         objective=objective.name,
         status=M1_STATUS,
         created=datetime.datetime.now().isoformat(timespec="seconds"),
+        design_vector=effective_design_vector(aircraft, dv),
         geometry=geometry.summarize(airplane),
         masses={
             # Mass AND station. The station was always in the model — a PointMass
@@ -822,9 +1016,16 @@ def run(
             "sm_sign_consistent": sm_sign_consistent,
         },
         diagnostics={
+            # Which of the two aeroplanes an aircraft can build this was, stated
+            # rather than inferred from an empty design_vector (see
+            # RunResult.design_vector): `dv=None` is the fixed spec geometry and
+            # is NOT the parametric family evaluated at its defaults.
+            "design_source": "parametric" if dv is not None else "spec",
             "wind_mode": objective.wind_mode,
             # None when v_min is not what is holding the objective back.
             "v_min_price": vmin_price,
+            # ... and None when the airworthiness filters are not either.
+            "airworthiness_price": air_price,
             "stall_detail": stall,
             "neutral_point_m": sm["x_np_m"],
             "sm_local_slopes": sm.get("sm_local_slopes"),
@@ -856,6 +1057,25 @@ def run(
             + (f", worth {cost:.2f} {objective.units} more" if cost is not None else "")
             + f". Relaxing the {mission.v_min_ms:.2f} m/s minimum-speed "
             "requirement, not the aircraft, is what buys that back."
+        )
+    if air_price is not None:
+        by = ", ".join(air_price["peak_excluded_by"]) or "an airworthiness rule"
+        counts = ", ".join(
+            f"{name} dropped {len(vs)}" for name, vs in air_price["excluded_by_rule"].items()
+        )
+        result.notes.append(
+            f"THE HEADLINE NUMBER IS SET BY AN AIRWORTHINESS FILTER, NOT BY THE "
+            f"AEROPLANE'S BEST POINT: the sweep peaks at "
+            f"{air_price['unfiltered_objective']:.2f} {objective.units} at "
+            f"{air_price['unfiltered_best_V_ms']:.2f} m/s, and that point is "
+            f"excluded by {by}. What is reported is "
+            f"{air_price['reported_objective']:.2f} {objective.units} at "
+            f"{best['V_ms']:.2f} m/s — {air_price['cost_of_airworthiness']:.2f} "
+            f"{objective.units} less ({counts} of "
+            f"{len([s for s in feasible if s['V_ms'] >= mission.v_min_ms - 1e-9])} "
+            "trimmed points at or above v_min). Read the reported trim deflection, "
+            "advance ratio and CL as properties of the ONE point that survived the "
+            "filters, not as evidence the design is comfortably inside them."
         )
     if unproven:
         speeds = ", ".join(f"{s['V_ms']:.1f}" for s in unproven)
@@ -1054,6 +1274,7 @@ def _solve_nlp(
     printed_scale: float = 1.0,
     eta_scale: float = 1.0,
     timeout_min: float = SOLVE_TIMEOUT_MIN,
+    max_iter: int = SOLVE_MAX_ITER,
     warm_start: bool = False,
     frames=None,
 ) -> dict:
@@ -1240,6 +1461,45 @@ def _solve_nlp(
     # rejected point. It also drops 2 rows per design variable from the
     # Jacobian.
     labels.stop()
+
+    #: Was the iteration ceiling lowered on purpose? A run at the default 1000
+    #: that exhausts it has genuinely failed; one at 3 has done exactly what was
+    #: asked. The two want opposite treatment and only this tells them apart.
+    truncated = max_iter < SOLVE_MAX_ITER
+
+    def _pack(value) -> dict:
+        """The member result, read through `value` — the converged solution or,
+        for a truncated run, `opti.debug.value` on the last iterate.
+
+        One function so the two paths cannot drift into reporting different
+        fields, which would make a capped smoke run exercise a writer that the
+        real run never uses.
+        """
+        return {
+            "dv": {k: float(value(v)) for k, v in dv.items()},
+            # the variables this solution is PINNED against, and the box they
+            # were declared in — see _DeclaredBounds
+            "active_bounds": declared.active(dv, value),
+            "dv_bounds": declared.boxes(dv),
+            "V_ms": float(value(V)),
+            "alpha_deg": float(value(alpha)),
+            "deflection_deg": float(value(defl)),
+            "rpm": float(value(n)) * 60,
+            "objective_value": float(value(obj_expr)),
+            "auw_kg": float(value(auw)),
+            "x_cg_m": float(value(x_cg)),
+            "static_margin": float(value(sm)),
+            "P_elec_w": float(value(p_bus_eff)),
+            "motor_voltage": float(value(pr["voltage"])),
+            "motor_current_a": float(value(pr["current_a"])),
+            "throttle_frac": float(value(pr["voltage"])) / pt.battery.v_nominal,
+            "current_cap_a": current_cap,
+            "placard_speed_ms": float(placard) if placard is not None else None,
+            "drag_n": float(value(drag)),
+            "J": float(value(pr["J"])),
+            "clmax_ab_used": clmax_ab,
+        }
+
     options = {"ipopt.max_wall_time": 60.0 * timeout_min}
     if warm_start:
         options |= WARM_START_OPTIONS
@@ -1252,7 +1512,7 @@ def _solve_nlp(
     try:
         sol = opti.solve(
             verbose=False,
-            max_iter=SOLVE_MAX_ITER,
+            max_iter=max_iter,
             detect_simple_bounds=True,
             callback=callback,
             # WALL time, not CPU time. AeroSandbox's own `max_runtime` maps to
@@ -1264,31 +1524,42 @@ def _solve_nlp(
             options=options,
         )
     except RuntimeError as e:
-        raise SolveFailure(opti, e, labels.as_dict()) from None
-    return {
-        "dv": {k: float(sol(v)) for k, v in dv.items()},
-        # the variables this solution is PINNED against, and the box they were
-        # declared in — see _DeclaredBounds
-        "active_bounds": declared.active(dv, sol),
-        "dv_bounds": declared.boxes(dv),
-        "V_ms": float(sol(V)),
-        "alpha_deg": float(sol(alpha)),
-        "deflection_deg": float(sol(defl)),
-        "rpm": float(sol(n)) * 60,
-        "objective_value": float(sol(obj_expr)),
-        "auw_kg": float(sol(auw)),
-        "x_cg_m": float(sol(x_cg)),
-        "static_margin": float(sol(sm)),
-        "P_elec_w": float(sol(p_bus_eff)),
-        "motor_voltage": float(sol(pr["voltage"])),
-        "motor_current_a": float(sol(pr["current_a"])),
-        "throttle_frac": float(sol(pr["voltage"])) / pt.battery.v_nominal,
-        "current_cap_a": current_cap,
-        "placard_speed_ms": float(placard) if placard is not None else None,
-        "drag_n": float(sol(drag)),
-        "J": float(sol(pr["J"])),
-        "clmax_ab_used": clmax_ab,
-    }
+        failure = SolveFailure(opti, e, labels.as_dict())
+        # A DELIBERATELY truncated solve is not a failed one. `--max-iter 3`
+        # exists to run the whole pipeline cheaply (FINDINGS §24.2), and every
+        # member of such a run ends on `Maximum_Iterations_Exceeded` by
+        # construction — so treating that as a failure made the flag crash the
+        # very pipeline it was added to exercise: all members "failed", `ok` was
+        # empty, and `optimize` died on `max() iterable argument is empty` after
+        # 2.5 minutes with no artifact (2026-08-06, FINDINGS §27).
+        #
+        # The last iterate is a real point in the box — IPOPT keeps the design
+        # variables inside their bounds — and `opti.debug` reads it with the
+        # same accessor `sol` provides. It is NOT feasible, so it is marked, and
+        # the run already shouts "THIS RUN IS NOT AN OPTIMIZATION." at notes[0].
+        #
+        # Guarded three ways, because harvesting the wrong thing here would put
+        # a garbage champion into a run that looks complete: only when the cap
+        # was lowered on purpose, only for the iteration status (a restoration
+        # failure or an infeasible corner has nothing worth keeping), and only
+        # if every harvested number is finite.
+        if truncated and failure.return_status == "Maximum_Iterations_Exceeded":
+            try:
+                out = _pack(opti.debug.value)
+            except (RuntimeError, TypeError, ValueError):
+                raise failure from None
+            if all(np.isfinite(v) for v in out["dv"].values()) and np.isfinite(
+                out["objective_value"]
+            ):
+                out |= {
+                    "return_status": failure.return_status,
+                    "iter_count": failure.iter_count,
+                    "iteration_truncated": True,
+                    "converged": False,
+                }
+                return out
+        raise failure from None
+    return _pack(sol)
 
 
 def _solve_worker(conn, aircraft, mission, kw, live=None):  # pragma: no cover — child process
@@ -1334,12 +1605,31 @@ def parallel_available() -> bool:
 
 
 def check_parallel(parallel: int) -> None:
-    """Reject an impossible width up front, not after the first batch."""
+    """Reject an impossible width up front, not after the first batch.
+
+    Two ways a width can be impossible, and both are worth catching here rather
+    than hours in: no `fork` at all (Windows), or a macOS process whose
+    Accelerate BLAS was already multi-threaded when the fork happened. The
+    second is the nastier one — it does not refuse, it segfaults every worker,
+    and `_solve_many` can only see that the child died without reporting, which
+    it attributes to the OOM killer (`planeopt._make_fork_safe_on_macos`).
+    """
     if parallel > 1 and not parallel_available():
         raise RuntimeError(
             f"parallel={parallel} needs the 'fork' start method, which this platform "
             "(Windows) does not have — the aircraft definition cannot be pickled for "
             "a spawned worker. Run with parallel=1; solves then run one at a time."
+        )
+    if parallel > 1 and planeopt._FORK_SAFE_MACOS is False:
+        raise RuntimeError(
+            f"parallel={parallel} is unsafe in this process: NumPy was imported before "
+            "planeopt, so Apple's Accelerate BLAS had already started its dispatch "
+            "pool and VECLIB_MAXIMUM_THREADS=1 came too late to stop it. Forked "
+            "workers would segfault on their first matrix multiply, and would be "
+            "reported as 'worker died before reporting (OOM?)' — a memory problem "
+            "this is not. Either import planeopt before NumPy, or set "
+            "VECLIB_MAXIMUM_THREADS=1 in the environment before launching. Run with "
+            "parallel=1 to solve one at a time."
         )
 
 
@@ -1467,6 +1757,7 @@ RUN_PEAK = _PeakTracker()
 def _solve_many(
     aircraft, mission, jobs, parallel: int = 1, prep=None, restore=None,
     label: str = "solve", timeout_min: float = SOLVE_TIMEOUT_MIN,
+    max_iter: int = SOLVE_MAX_ITER,
     cache: "_SolveCache | None" = None, pause_file: Path | None = None,
     live=None,
 ) -> dict:
@@ -1492,7 +1783,8 @@ def _solve_many(
     """
     check_parallel(parallel)
     results = {}
-    jobs = [(key, {"timeout_min": timeout_min, **kw}) for key, kw in jobs]
+    jobs = [(key, {"timeout_min": timeout_min, "max_iter": max_iter, **kw})
+            for key, kw in jobs]
     total = len(jobs)
     log.info("%s: %d solve(s), %d-wide", label, total, max(1, parallel))
     if parallel <= 1:
@@ -1789,6 +2081,7 @@ def optimize(
     warm_start: dict | None = None,
     warm_start_from: str | None = None,
     solve_timeout_min: float = SOLVE_TIMEOUT_MIN,
+    max_iter: int = SOLVE_MAX_ITER,
     checkpoint_dir: Path | None = None,
     pause_file: Path | None = None,
     live_dir: Path | None = None,
@@ -1900,8 +2193,8 @@ def optimize(
         try:
             return _solve_many(
                 aircraft, mission, jobs, parallel, label=label,
-                timeout_min=solve_timeout_min, cache=cache, pause_file=pause_file,
-                live=live, **kw
+                timeout_min=solve_timeout_min, max_iter=max_iter, cache=cache,
+                pause_file=pause_file, live=live, **kw
             )
         finally:
             phase_minutes[label] = round(
@@ -1937,6 +2230,8 @@ def optimize(
         starts.append(key if "failed" not in r else f"{key} (failed)")
 
     ok = [r for r in results if "failed" not in r]
+    if not ok:
+        raise no_survivors_error(starts, results)
     sign = 1 if OBJECTIVES[mission.objective].direction == "maximize" else -1
     champion = max(ok, key=lambda r: sign * r["objective_value"])
     spread = max(abs(r["objective_value"] - champion["objective_value"]) for r in ok)
@@ -1962,6 +2257,10 @@ def optimize(
     # re-evaluation (originals restored in the re-eval finally).
     discrete_studies = {}
     discrete_originals = {}
+    #: Notes raised BEFORE the champion is re-evaluated, so before `result`
+    #: exists to carry them. Merged into `result.notes` once it does — a guard
+    #: that fires during selection must not be lost just because it fired early.
+    early_notes: list[str] = []
     for attr, candidates in (getattr(aircraft, "discrete_options", None) or {}).items():
         baseline = getattr(aircraft, attr)
         discrete_originals[attr] = baseline
@@ -2010,9 +2309,34 @@ def optimize(
                 "delta_objective": delta,
             }
             if sign * delta > 0:
-                champion = r_c
-                study["adopted"] = cand
+                # A candidate only wins by comparing its objective against the
+                # incumbent's, and that comparison is meaningless if its drag is
+                # the mesh's rather than the aeroplane's. Checked HERE, at the
+                # moment of adoption, because afterwards every downstream phase
+                # is characterizing whatever this chose (FINDINGS §18).
+                previous = getattr(aircraft, attr)
                 setattr(aircraft, attr, cand)
+                ok, check = objective_is_mesh_trustworthy(aircraft, r_c)
+                if ok:
+                    champion = r_c
+                    study["adopted"] = cand
+                else:
+                    setattr(aircraft, attr, previous)
+                    study["alternatives"][cand]["rejected_by_mesh_guard"] = check
+                    log.warning(
+                        "%s=%s won by %+.3f but its drag is MESH-DEPENDENT "
+                        "(%.5f N in-loop vs %.5f N fine) — not adopted",
+                        attr, cand, delta, check["in_loop"]["D_n"],
+                        check["fine"]["D_n"],
+                    )
+                    early_notes.append(
+                        f"DISCRETE CANDIDATE REJECTED BY THE MESH GUARD: "
+                        f"{attr}={cand} beat the incumbent by {delta:+.3f} but its "
+                        f"drag moves {100 * check['delta_frac']:+.1f}% between the "
+                        f"in-loop mesh and {aero.LL_CHECK_RESOLUTION} panels/section. "
+                        "It won on a number that is the discretization's, so it was "
+                        "not adopted — the incumbent stands."
+                    )
         discrete_studies[attr] = study
 
     # winglet study (MODEL_DETAILS 3.6): paired on/off re-optimization at the
@@ -2152,10 +2476,46 @@ def optimize(
     if winglet_rejected:
         aircraft.winglet = False
 
+    # --- the gate: is this design worth characterizing at all? ---------------
+    # Everything below re-optimizes the design several times over — the flatness
+    # sweep plus four sensitivity members — and it is the most expensive thing
+    # in the run after the multistart. All of it describes the objective this
+    # design reports, so if that objective is the discretization's rather than
+    # the aeroplane's, the entire phase is spent characterizing an artefact.
+    #
+    # Under a second to ask, hours to get wrong. It is deliberately the DRAG
+    # half of the mesh check and not the full one: this is a go/no-go on
+    # trustworthiness, while the reporting cross-checks (static margin, lateral
+    # derivatives) run later against the re-evaluated champion and are the
+    # numbers the artifact actually quotes.
+    design_trustworthy, gate_check = objective_is_mesh_trustworthy(aircraft, champion)
+    if gate_check is not None:
+        gate_diagnostics = {"objective_mesh_check": gate_check,
+                            "design_trustworthy": design_trustworthy}
+    else:
+        gate_diagnostics = {"design_trustworthy": True, "objective_mesh_check": None}
+    if not design_trustworthy:
+        log.warning(
+            "CHAMPION OBJECTIVE IS MESH-DEPENDENT (%.5f N in-loop vs %.5f N at %d "
+            "panels/section) — skipping the sensitivity phases, which would only "
+            "characterize the artefact",
+            gate_check["in_loop"]["D_n"], gate_check["fine"]["D_n"],
+            aero.LL_CHECK_RESOLUTION,
+        )
+        early_notes.append(
+            "SENSITIVITY PHASES SKIPPED. The champion's drag moves "
+            f"{100 * gate_check['delta_frac']:+.1f}% between the in-loop mesh and "
+            f"{aero.LL_CHECK_RESOLUTION} panels/section, so its objective is not "
+            "trustworthy (FINDINGS §18) and a sensitivity OF that objective would "
+            "not be a sensitivity of the aeroplane. The flatness sweep and the "
+            "perturbation battery did not run; the mass bump did, so a shadow "
+            "price is still quoted. Fix the model before reading any of this."
+        )
+
     # flatness: re-optimize everything else at fixed spans (up to the cap)
     flat = []
     span_cap = getattr(aircraft, "span_cap_m", 3.0)
-    if flatness:
+    if flatness and design_trustworthy:
         # The declared span floor is a hard limit on what the sweep may sample:
         # a `fixed` value outside a variable's own box is not an infeasible
         # aircraft, it is an invalid problem, and IPOPT says so
@@ -2172,6 +2532,11 @@ def optimize(
     # design's too, rather than the multistart champion's (it costs one solve,
     # and a shadow price quoted against a superseded prop is not this design's
     # trade rate).
+    #: `mass_bump` is NOT a sensitivity member — it is what the shadow price is
+    #: computed from, and the rest of the run quotes that price. So when the
+    #: gate skips characterization it drops the four perturbations and keeps
+    #: this one: a run that cannot say how sensitive the design is can still say
+    #: what a gram costs it, and `shadow_per_g` below has no other source.
     battery_jobs = [
         ("printed_mass_x1.10", {"printed_scale": 1.10}),
         ("printed_mass_x0.90", {"printed_scale": 0.90}),
@@ -2179,6 +2544,8 @@ def optimize(
         ("chain_eta_x1.10", {"eta_scale": 1.10}),
         ("mass_bump", {"extra_mass_kg": 0.020}),
     ]
+    if not design_trustworthy:
+        battery_jobs = [j for j in battery_jobs if j[0] == "mass_bump"]
     battery = {}
     battery_results = batch("re-solve battery", battery_jobs)
     for label, r in battery_results.items():
@@ -2253,6 +2620,11 @@ def optimize(
             status=M2_STATUS,
             created=datetime.datetime.now().isoformat(timespec="seconds"),
             performance={"objective_units": OBJECTIVES[mission.objective].units},
+            # Especially here. This is the path where the re-evaluation FAILED,
+            # so the design vector is the only handle anyone has on what the
+            # optimizer actually found — without it the run is hours of solving
+            # that cannot be reproduced or investigated.
+            design_vector=dict(champion.get("dv") or {}),
         )
         run_dir = assemble.write_run_dir(result, runs_root, input_files or [])
     finally:
@@ -2261,6 +2633,15 @@ def optimize(
         for attr, val in discrete_originals.items():
             setattr(aircraft, attr, val)
     result.status = M2_STATUS
+    # Guards that fired during SELECTION, before `result` existed to hold them.
+    # Merged first so they read above the re-evaluation's own findings, which is
+    # the order they happened in.
+    result.notes[:0] = early_notes
+    result.diagnostics |= gate_diagnostics
+    if not design_trustworthy:
+        result.diagnostics["characterization_skipped"] = [
+            "flatness sweep", "re-solve battery (mass_bump retained)",
+        ]
     if best is not None:
         # The two SM numbers side by side. They now come from the same estimator
         # (aero.SM_ALPHA_OFFSETS), so what is left is the difference between the
@@ -2314,8 +2695,40 @@ def optimize(
             champ_plane, best["V_ms"], best["alpha_deg"], best["deflection_deg"],
             result.masses["x_cg_m"],
             control_name=getattr(aircraft, "pitch_control_name", "ruddervator"),
+            c_ref=float(champ_plane.c_ref),
+            bodies=aircraft.parasite_bodies(champion["dv"]),
         )
         result.diagnostics["aero_mesh_check"] = mesh
+        smm = mesh.get("static_margin") or {}
+        if smm.get("sign_flip_is_mesh_artefact"):
+            result.notes.append(
+                "The static margin's sign change inside its own window DISAPPEARS "
+                f"at {aero.LL_CHECK_RESOLUTION} panels/section — it is a "
+                "discretization artefact of the in-loop mesh, not a property of "
+                "the aeroplane, and the margin should be read off the fine mesh "
+                f"({smm['fine']['static_margin']:.4f}) rather than the in-loop one "
+                f"({smm['in_loop']['static_margin']:.4f})."
+            )
+        elif smm.get("sign_flip_survives_refinement"):
+            result.notes.append(
+                "The static margin's sign change SURVIVES a "
+                f"{aero.LL_CHECK_RESOLUTION}-panel mesh "
+                f"({smm['in_loop']['static_margin']:.4f} → "
+                f"{smm['fine']['static_margin']:.4f}), so refinement does not "
+                "explain it. Combined with an inviscid VLM sweep that is monotone "
+                "over the same window, the nonlinearity is the VISCOUS Cm at this "
+                "Reynolds number — treat it as a property of the aeroplane."
+            )
+        if smm and not smm.get("converged"):
+            log.warning("champion static margin is MESH-DEPENDENT: %.4f vs %.4f",
+                        smm["in_loop"]["static_margin"], smm["fine"]["static_margin"])
+            result.notes.append(
+                f"CHAMPION STATIC MARGIN IS MESH-DEPENDENT: "
+                f"{smm['in_loop']['static_margin']:.4f} at the in-loop resolution "
+                f"against {smm['fine']['static_margin']:.4f} at "
+                f"{aero.LL_CHECK_RESOLUTION} panels/section. The stability window "
+                "is 0.07 wide and this moves the answer inside it."
+            )
         if not mesh["converged"]:
             log.warning(
                 "champion drag is MESH-DEPENDENT: %.5f N in the loop vs %.5f N at "
@@ -2330,6 +2743,90 @@ def optimize(
                 "discretization artefact rather than an aircraft — do not report "
                 "this objective until it is understood (FINDINGS §18)."
             )
+
+    # Does the aeroplane actually weathercock? The in-loop directional
+    # constraint is a DECLARED vertical-tail-volume floor standing in for a yaw
+    # axis (MODEL_DETAILS 8.4) — it constrains a proxy for Cn_beta and never
+    # Cn_beta itself, so nothing in the run has ever checked the thing the floor
+    # exists to guarantee. This is that check, and it is cheap: a sideslip sweep
+    # carries no polar, so the whole 3-mesh ensemble costs ~2 s against a
+    # battery measured in hours.
+    if best is not None:
+        try:
+            direc = aero.vlm_directional_check(
+                {"champion": champ_plane}, best["V_ms"], best["alpha_deg"],
+                result.masses["x_cg_m"],
+            )["champion"]
+            result.diagnostics["directional_check"] = direc
+            if not direc["reliable"]:
+                log.warning("directional check is UNRELIABLE: %s",
+                            direc["unreliable_reason"])
+                result.notes.append(
+                    "The directional cross-check could not agree with itself "
+                    f"({direc['unreliable_reason']}). Cn_beta is reported but "
+                    "must not be relied on."
+                )
+            elif not direc["directionally_stable"]:
+                log.warning(
+                    "champion is DIRECTIONALLY UNSTABLE: Cn_beta = %+.6f/deg",
+                    direc["cn_beta"],
+                )
+                result.notes.append(
+                    f"CHAMPION IS DIRECTIONALLY UNSTABLE: Cn_beta = "
+                    f"{direc['cn_beta']:+.6f}/deg. The declared vertical-tail-volume "
+                    "floor was met and the aeroplane still does not weathercock — "
+                    "the floor is the wrong constraint for this geometry, not "
+                    "merely a loose one."
+                )
+            if direc["reliable"] and not direc["roll_stable"]:
+                result.notes.append(
+                    f"Cl_beta = {direc['cl_beta']:+.6f}/deg is POSITIVE — the "
+                    "champion has no dihedral effect. The effective-dihedral floor "
+                    "is a roll-moment proxy and this is the direct measurement."
+                )
+        except Exception as e:  # noqa: BLE001 — a diagnostic must never cost the run
+            log.warning("directional check failed: %s: %s", type(e).__name__, e)
+
+    # Is the static margin the AIRFRAME's, or LiftingLine's? Until 2026-08-06
+    # nothing in this app looked at Cm twice, while drag had two cross-checks —
+    # backwards, because Cm is the quantity the project already knows is its
+    # weakest and the only one that decides whether the aeroplane is flyable.
+    # The VLM shares the library but not the solution scheme, and the SHAPE of
+    # Cm(alpha) is comparable across the two even though the levels are not
+    # (the VLM is inviscid; LL carries NeuralFoil's viscous Cm).
+    if best is not None:
+        try:
+            smc = aero.vlm_static_margin_check(
+                {"champion": champ_plane}, best["V_ms"], best["alpha_deg"],
+                result.masses["x_cg_m"], float(champ_plane.c_ref),
+                bodies=aircraft.parasite_bodies(champion["dv"]),
+            )["champion"]
+            result.diagnostics["sm_cross_check"] = smc
+            ll_sm = result.constraints.get("static_margin")
+            if ll_sm is not None:
+                smc["ll_static_margin"] = float(ll_sm)
+                smc["delta_vs_ll"] = float(smc["static_margin"] - ll_sm)
+            # The case worth shouting about: LL says the margin changes sign
+            # inside its own window and the independent method says it does not.
+            # That is evidence the nonlinearity is the DISCRETIZATION's, and it
+            # is the difference between an aeroplane that fails its stability
+            # requirement and one that does not.
+            # read from `constraints` rather than a local: the LL verdict is
+            # produced in `_champion_diagnostics`, not in this function
+            ll_sign_ok = result.constraints.get("sm_sign_consistent")
+            if smc["reliable"] and smc["sign_consistent"] and ll_sign_ok is False:
+                result.notes.append(
+                    f"STATIC-MARGIN SIGN FLIP IS NOT CONFIRMED BY AN INDEPENDENT "
+                    f"METHOD: LiftingLine reports a local dCm/dCL going negative "
+                    f"inside the window, but the VLM sweep over the same alphas is "
+                    f"monotone and returns SM = {smc['static_margin']:.4f} against "
+                    f"LL's {ll_sm:.4f}. The two methods differ by viscosity, so this "
+                    "does not settle which is right — it localizes the "
+                    "nonlinearity to LL's viscous Cm or its discretization, and "
+                    "the margin should not be treated as failing on LL's word alone."
+                )
+        except Exception as e:  # noqa: BLE001 — a diagnostic must never cost the run
+            log.warning("static-margin cross-check failed: %s: %s", type(e).__name__, e)
 
     # What the afterbody term actually charged, at the champion point and
     # computed NUMERICALLY rather than read off the NLP graph. Two of these
@@ -2395,6 +2892,43 @@ def optimize(
         "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar "
         "stress/deflection sizing, ballast cap, battery-position balance."
     )
+    # Do the two models agree about the aeroplane the run is shipping? The NLP
+    # objective and the numeric re-evaluation of the SAME design vector are
+    # independent arithmetic over the same physics, so a large disagreement
+    # means at least one of them is describing something else.
+    #
+    # The number has been recorded since M2 and adjudicated by NOTHING. Worse,
+    # the project already has a declared tolerance for it — `test_m3_optimize_smoke`
+    # asserts `abs(gap) < 0.1 * objective` — so the property was enforced in the
+    # test suite and unreported in the artifact, which is the exact split this
+    # session keeps finding (FINDINGS §20). The 2026-08-06 smoke run recorded a
+    # 64.16 min gap on a 120 min champion, 53%, in an artifact that said nothing.
+    gap = result.performance["optimization"]["nlp_vs_reeval_gap"]
+    if gap is not None and np.isfinite(gap):
+        champ_obj = champion["objective_value"]
+        if abs(gap) > NLP_REEVAL_GAP_FRAC * abs(champ_obj):
+            units = OBJECTIVES[mission.objective].units
+            result.diagnostics["nlp_reeval_disagreement"] = {
+                "nlp_objective": champ_obj,
+                "reeval_objective": result.performance["best"].get("objective_value"),
+                "gap": gap,
+                "gap_frac": abs(gap) / abs(champ_obj) if champ_obj else None,
+                "tolerance_frac": NLP_REEVAL_GAP_FRAC,
+            }
+            result.notes.append(
+                f"THE NLP AND THE RE-EVALUATION DISAGREE ABOUT THIS AEROPLANE BY "
+                f"{abs(gap):.2f} {units} "
+                f"({100 * abs(gap) / abs(champ_obj):.0f}% of the champion's "
+                f"{champ_obj:.2f} {units}, against a {100 * NLP_REEVAL_GAP_FRAC:.0f}% "
+                "tolerance). Both numbers describe the SAME design vector, so one "
+                "of them is not describing this aeroplane. Usual causes, in the "
+                "order worth checking: the NLP stopped short of a solution (see "
+                "`iteration_truncated`); the re-evaluation's speed sweep is "
+                "filter-limited (see `airworthiness_price`), in which case the two "
+                "are answering different questions rather than disagreeing; or the "
+                "in-loop and numeric models have genuinely diverged, which is the "
+                "one that matters and the one to rule out last."
+            )
     # Measured per-solve peak, so the NEXT run's memory budget divides by data
     # rather than by the hard-coded fallback. Children cover the forked (parallel)
     # path; RUN_PEAK covers the in-process one, where the mark is reset between
@@ -2405,6 +2939,26 @@ def optimize(
     )
     result.diagnostics["parallel_width"] = parallel
     result.diagnostics["solve_timeout_min"] = solve_timeout_min
+    result.diagnostics["max_iter"] = max_iter
+    # A truncated run must SAY it is truncated. `--max-iter 3` produces a full
+    # artifact — champion, studies, sensitivities, a build document — that looks
+    # exactly like a real one and describes an aeroplane no solver ever finished
+    # converging. This project's recurring defect is the claim a run is not
+    # entitled to make (FINDINGS §20), and this would be the easiest one yet to
+    # make by accident.
+    if max_iter < SOLVE_MAX_ITER:
+        result.diagnostics["iteration_truncated"] = True
+        log.warning(
+            "THIS RUN WAS ITERATION-CAPPED at %d (default %d) — its numbers are "
+            "not converged results", max_iter, SOLVE_MAX_ITER,
+        )
+        result.notes.insert(0, (
+            f"THIS RUN IS NOT AN OPTIMIZATION. Every member was capped at "
+            f"{max_iter} IPOPT iterations (default {SOLVE_MAX_ITER}), so the "
+            "champion, the studies and every sensitivity below describe wherever "
+            "each solve happened to be when it was stopped — not an optimum. "
+            "Use it to exercise the pipeline, never to choose a design."
+        ))
     # Which MODEL produced these numbers. Recorded unconditionally, not only when
     # checkpointing, because the question it answers — "is this run comparable
     # with that one?" — is asked of finished artifacts far more often than of

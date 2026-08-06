@@ -40,12 +40,13 @@ def superellipse_chords(etas, c_root, taper, fullness):
         c(eta) = c_root * [lam + (1 - lam) * (1 - eta^a)^(1/a)]
 
     `taper` (lam) is the tip/root chord ratio and `fullness` (a) sets how the
-    chord is distributed between them. The family is chosen because its named
-    members are exact rather than approximate:
+    chord is distributed between them. The family was chosen because its named
+    members are exact rather than approximate — which holds for the two that a
+    real design reaches, and NOT for the ellipse:
 
         lam = 1          constant chord — a plain rectangular wing
         a   = 1          straight taper — the classic trapezoid
-        a   = 2          a true ellipse
+        a   = 2          an ellipse ONLY at lam = 0 (see below)
         a   > 2          fuller mid-span, chord held out then dropped near the tip
 
     so "straight wing" remains reachable as a point of the continuous family
@@ -53,6 +54,25 @@ def superellipse_chords(etas, c_root, taper, fullness):
     independent panel chord ratios they supersede, and the equal-width panel
     breaks they implied disappear: stations become a discretization choice, not
     a design choice.
+
+    **The ellipse is not reachable, and that is a property of the family, not of
+    a bound that could be relaxed.** The `lam` term is a constant chord ADDED
+    under the whole span, so at a = 2 the planform is a rectangle-plus-ellipse
+    blend and only becomes a true ellipse as lam -> 0. Measured by classical
+    lifting line (FINDINGS section 23): lam = 0 gives e = 1.0000 exactly, lam =
+    0.35 — the declared floor — gives 0.9815, and the v1.7 champion's taper
+    gives 0.9569. Since a wing needs a tip chord it can be built and stalled
+    with, no aircraft in this framework will ever declare lam = 0.
+
+    The consequence for reading a result: e has an INTERIOR maximum in `a`, near
+    1.2-1.5 for tapers below ~0.6, and falls away on both sides of it — an
+    ellipse-ward push (`a` -> 2 and beyond) makes loading LESS elliptic once lam
+    is nonzero. Both observed behaviours follow from that one curve and neither
+    is a discretization artefact: `vtail_sample` at span 2.0 m settles at
+    `fullness` 1.305 against a computed e-optimum of ~1.2, while the span300
+    champion pins at the 1.0 bound (FINDINGS 19.4) where its taper puts the peak
+    at the box edge. Do not read either as the optimizer being unable to see an
+    ellipse.
 
     `etas` must be sorted with etas[0] == 0 (root) and etas[-1] == 1 (tip).
     Those two are returned analytically — c(0) = c_root and c(1) = lam*c_root

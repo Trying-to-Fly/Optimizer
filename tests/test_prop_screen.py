@@ -26,9 +26,24 @@ REPO = Path(__file__).parent.parent
 
 #: The 2026-07-31 champion's own multistart solve — the incumbent operating
 #: point a screen would have run against in that battery.
-INCUMBENT = json.loads(
-    (REPO / "runs/_checkpoints_chord275/multistart__nominal.json").read_text()
-)
+#:
+#: It lives under `runs/`, which is gitignored, so a fresh clone does not have
+#: it and cannot regenerate it in less than a multi-hour battery. Skipping is
+#: therefore the honest outcome — but it has to be a SKIP. Read at import time
+#: with no guard, the missing file raised during collection, which pytest treats
+#: as a collection error and which aborts the entire suite: 411 unrelated tests
+#: went unrun on a clean checkout, on every platform, and the summary blamed a
+#: propeller test. A checkout that cannot run its own tests reads as a broken
+#: checkout.
+_INCUMBENT_PATH = REPO / "runs/_checkpoints_chord275/multistart__nominal.json"
+try:
+    INCUMBENT = json.loads(_INCUMBENT_PATH.read_text())
+except (OSError, ValueError) as _e:
+    INCUMBENT = None
+    pytestmark = pytest.mark.skip(
+        reason=f"needs the 2026-07-31 battery's checkpoint at {_INCUMBENT_PATH}, "
+               f"which is not in version control ({_e.__class__.__name__})"
+    )
 #: That run's measured shadow price, minutes per gram of structure.
 SHADOW_PER_G = -0.0776
 
