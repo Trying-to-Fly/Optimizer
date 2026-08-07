@@ -103,6 +103,45 @@ def main(run_dir):
         if not isinstance(v0, dict) or "station_mm" not in v0:
             print("  !! components carry mass without station")
 
+    # --- whose trade rate the shadow price is (2026-08-07) ------------------
+    #
+    # The +20 g bump is re-solved on the shipped design so the quoted rate is
+    # ITS rate; when that solve fails the value silently falls back to the
+    # multistart screen's, measured before the studies chose the design.
+    opt = get(j, "performance", "optimization", default={})
+    shadow = opt.get("shadow_price_source") if isinstance(opt, dict) else None
+    per_g = opt.get("shadow_price_obj_per_gram") if isinstance(opt, dict) else None
+    if isinstance(shadow, dict):
+        print(f"shadow_price      {per_g}  from {shadow.get('source')}")
+        if shadow.get("source") != "final_design":
+            print(f"  !! NOT THIS DESIGN'S RATE — measured on "
+                  f"{shadow.get('measured_on_objective')}, quoted beside "
+                  f"{shadow.get('reported_beside_champion')}")
+            print(f"     final bump: {shadow.get('final_bump_failed')}")
+    elif per_g is not None:
+        print(f"shadow_price      {per_g}  <-- no provenance recorded "
+              f"(artifact predates shadow_price_source)")
+
+    # --- the two declared pod limits, and whether they BIND (2026-08-07) ----
+    #
+    # Neither can appear in `active_bounds`: that reports design-variable BOX
+    # bounds and both of these are constraint rows.
+    ab = diag.get("afterbody")
+    if isinstance(ab, dict):
+        f, fmax = ab.get("fineness"), ab.get("fineness_max")
+        bt, btmin = ab.get("boat_tail_d_eq"), ab.get("boat_tail_min_d_eq")
+        print(f"afterbody         f={f} (max {fmax})  "
+              f"boat_tail={bt} d_eq (min {btmin})  "
+              f"theta_max={ab.get('theta_max_deg')}")
+        if ab.get("fineness_ceiling_active"):
+            print("  !! FINENESS CEILING BINDING — a model-validity bound is "
+                  "setting the pod, not the aeroplane")
+        if ab.get("boat_tail_floor_active"):
+            print("  !! BOAT-TAIL FLOOR STILL ACTIVE — the afterbody term is not "
+                  "holding the tail open; do NOT delete the floor")
+        if "fineness_ceiling_active" not in ab:
+            print("  (no limit-activity flags — artifact predates them)")
+
     # --- the new cross-checks ----------------------------------------------
     mesh = diag.get("aero_mesh_check")
     if isinstance(mesh, dict):
