@@ -1,8 +1,8 @@
 # Pricing the caps behind the rcv2 corners
 
-> **STATUS: stopped 2026-08-07 09:40 local, not running.** Stages A, B and C are
-> measured; stage F got one of six spans. Raw data:
-> `docs/studies/rcv2_cap_pricing/cells.jsonl`, one JSON line per cell.
+> **STATUS: running 2026-08-07, lid open on AC.** Stages A, B and C are complete
+> and every lever is priced; stage F (the flatness spans) is in progress. Raw
+> data: `docs/studies/rcv2_cap_pricing/cells.jsonl`, one JSON line per cell.
 >
 > **This machine sleeps, and that invalidated four cells before it was caught
 > (§4). Anything measured here with the lid shut is not evidence.**
@@ -13,9 +13,10 @@
    members, including the three studies that returned no verdict and the exact
    member `degeneracy.py` was run on. Stage A cost ~19 minutes of solving for
    what cost that battery 287.7 minutes of nothing.
-2. **Of the four caps HANDOFF named, only the span cap is worth anything**, and
-   raising the chord cap ALONE is not a remedy at all — it walks into a harder
-   row (§5).
+2. **Two levers matter and neither is a modelling decision**: dropping the
+   optional payload is worth +7.907 min and 200 mm of span is worth +5.170 min.
+   Everything else is under a minute, and raising the chord cap ALONE is not a
+   remedy at all — it walks into a harder row (§5).
 3. **Four cells "failed" because the laptop was asleep**, not because of a
    constraint. IPOPT's guard is a WALL clock and a suspended process is charged
    for its suspension (§4). Re-measured awake, three of the four converge; the
@@ -84,7 +85,7 @@ sleep window is killed for time it never got to use.
 | six baselines + `sm_floor_0.05` | 00:17-00:41 | **all converged** | awake |
 | `c_root_0.300` | 01:12-01:18 | wall-time | slept 01:02-01:18 |
 | `span_cap_2.2` | 02:06-02:08 | wall-time | slept 01:52-02:08 |
-| `kit_core` | 02:51-02:54 | wall-time | slept 02:26-… |
+| kit dropped | 02:51-02:54 | wall-time | slept 02:26-… |
 
 Perfect separation, and the 31-, 48- and 43-minute gaps BETWEEN those cells are
 the machine asleep between them. Re-measured awake, **`span_cap_2.2` converges in
@@ -97,8 +98,9 @@ a cap that was never the problem.
 
 **`caffeinate -i` is necessary and not sufficient.** It blocks idle sleep. It
 does NOT block **clamshell sleep** — closing the lid at 09:07 put the machine to
-sleep on battery anyway, and `kit_core` (09:26-09:33, against `Maintenance Sleep`
-from 09:17:56 to a DarkWake at 09:33:19) is a second victim, still unmeasured.
+sleep on battery anyway, and the kit cell (09:26-09:33, against `Maintenance
+Sleep` from 09:17:56 to a DarkWake at 09:33:19) was a second victim. Re-measured
+with the lid open it converges in 9.41 min, so it too was purely the artifact.
 
 ### The signature, and how to check any run for it
 
@@ -140,11 +142,10 @@ predicts +13.6 min for 192 g; the measurement is +7.9. That is the re-optimizati
 the local derivative cannot see, and it is the reason `screen_discrete` is a
 shortlister rather than a verdict.
 
-**Span is the binding cap and the only one worth real minutes.** At 2.2 m the
-design comes off BOTH caps — neither `span` nor `c_root` is pinned any more,
-only `ballast_kg` and `cs_frac`. So the chord cap was binding *because* span was
-capped, and 200 mm of span buys 5.17 minutes, six times what the whole
-static-margin window is worth.
+**The chord cap is binding only BECAUSE span is capped.** At 2.2 m the design
+comes off both — neither `span` nor `c_root` is pinned any more, only
+`ballast_kg` and `cs_frac`. Dropping the payload does the same thing. So `c_root`
+is never the lever: it is a symptom of whichever of the other two is holding.
 
 **The static-margin floor binds but is nearly worthless to relax**: giving up
 0.03 — over a third of the required 0.08 — buys 51 seconds.
