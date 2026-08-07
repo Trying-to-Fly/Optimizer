@@ -3348,13 +3348,20 @@ def optimize(
             )
     if memory_budget_gb is not None:
         result.diagnostics["memory_budget_gb"] = memory_budget_gb
-    figures.flatness_plot(flat, champion, run_dir / "figures")
-    # run.json is the machine-readable truth and is written first: rendering the
-    # HTML must never be what loses a completed optimization.
+    # run.json is the machine-readable truth and is written FIRST: nothing that
+    # draws a picture of this run may be what loses it. The flatness figure used
+    # to be drawn on the line above this one — outside the guard, and before the
+    # write it is guarding — so a matplotlib failure at the end of a four-hour
+    # battery took the whole run with it and left a directory holding figures
+    # and no result.
     (run_dir / "run.json").write_text(
         __import__("json").dumps(__import__("dataclasses").asdict(result), indent=2, default=str),
         encoding="utf-8",
     )
+    try:
+        figures.flatness_plot(flat, champion, run_dir / "figures")
+    except Exception as e:  # noqa: BLE001
+        log.warning("the flatness figure could not be drawn (run.json is intact): %s", e)
     try:
         (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
     except Exception as e:  # noqa: BLE001
