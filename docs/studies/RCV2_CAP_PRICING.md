@@ -1,18 +1,22 @@
 # Pricing the caps behind the rcv2 corners
 
-> **STATUS: running 2026-08-07, lid open on AC.** Stages A, B and C are complete
-> and every lever is priced; stage F (the flatness spans) is in progress. Raw
-> data: `docs/studies/rcv2_cap_pricing/cells.jsonl`, one JSON line per cell.
+> **STATUS: complete 2026-08-07.** Every stage measured, every lever priced, and
+> both open caveats closed by measurement (§5c the greedy state, §5d the
+> reverted rescale). Raw data: `docs/studies/rcv2_cap_pricing/cells.jsonl`, one
+> JSON line per cell; the rescale comparison is a separate record so it can
+> never be mistaken for a baseline.
 >
 > **This machine sleeps, and that invalidated four cells before it was caught
 > (§4). Anything measured here with the lid shut is not evidence.**
 
 ## 0. The three results
 
-1. **Every corner the battery lost converges here in 2-5 minutes** — all six
-   members, including the three studies that returned no verdict and the exact
-   member `degeneracy.py` was run on. Stage A cost ~19 minutes of solving for
-   what cost that battery 287.7 minutes of nothing.
+1. **Four of the six members the battery lost converge in 2-5 minutes; two are
+   genuine corners.** All six converge in the configuration they DECLARE, which
+   is what this study first measured and reported — but a battery runs its
+   studies greedily, and in that state `dihedral_polyhedral2` and
+   `printed_mass_x1.10` both burn a full budget and hundreds of iterations
+   (§5c). Read §5c before quoting §2.
 2. **Two levers matter and neither is a modelling decision**: dropping the
    optional payload is worth +7.907 min and 200 mm of span is worth +5.170 min.
    Everything else is under a minute, and raising the chord cap ALONE is not a
@@ -20,7 +24,7 @@
 3. **Four cells "failed" because the laptop was asleep**, not because of a
    constraint. IPOPT's guard is a WALL clock and a suspended process is charged
    for its suspension (§4). Re-measured awake, three of the four converge; the
-   fourth (`c_root_0.300`) is the study's one genuine corner.
+   fourth (`c_root_0.300`) is a genuine corner.
 
 ## 1. Why
 
@@ -35,7 +39,12 @@ FINDINGS §14.5.7 measured that more clock does not convert one. HANDOFF names
 the remedy — raise chord, raise span, widen the SM window, or carry less kit —
 and says it is the user's decision. **None of the four had a price.**
 
-## 2. Stage A — the corners do not reproduce
+## 2. Stage A — the corners do not reproduce AT THE DECLARED BASELINE
+
+> **Superseded in part by §5c.** Every row below is measured in the
+> configuration the member declares. That is NOT the configuration a battery
+> runs it in, and for two of the six it is the difference between a 2.7-minute
+> solve and no design at all.
 
 Current tree, 15-minute budget, one solve per process, each member in the
 configuration it declares.
@@ -282,6 +291,84 @@ equilibrium to **`usable_nose / motor["length"] >= 1.0`, by 1.21e-01**. That is
 the third independent appearance of that row — the chord-cap corner (§5), the
 2026-08-07 battery's five-of-six failures, and now the deepest flatness corner.
 
+## 5c. The greedy state, and what it does to §2's headline
+
+§2 measured every member in the configuration it DECLARES. A battery does not
+run them there: the studies run in declared order, each carrying the previous
+studies' adopted values, so by the time `tail_type` is judged the aeroplane is
+already carrying the prop the prop study adopted. Same label, different
+aeroplane. That caveat was recorded in §6.2 as small; **it is not small, and
+closing it changed the answer.**
+
+`screen` ranks `ancf_12x10` first of 65 candidates at the champion's own
+operating point and its own shadow price — and it is what the 2.0 m sample
+battery adopted. Re-running every member there:
+
+| member | declared baseline | greedy (12x10) |
+|---|---|---|
+| `nominal` | 105.818 | **122.081** |
+| `tail_conventional` | 100.867 | **115.277**, 3.29 min |
+| `tail_ttail` | 98.118 | **110.656**, 3.88 min |
+| `fuselage_integrated` | 102.001 | **116.715**, 2.44 min |
+| `dihedral_polyhedral2` | 103.362, 2.68 min | **NO DESIGN** — 376 iters, full budget |
+| `printed_mass_x1.10` | 96.504, 2.74 min | **NO DESIGN** — 359 iters, full budget |
+
+**Six of six converge at the declared baseline; four of six in the state that
+matters.** §2's "the corners do not reproduce" was true of the aeroplane it
+measured and misleading about the aeroplane the battery ran.
+
+The two that fail are genuine, on the same evidence used throughout: full
+budget, hundreds of iterations, and a STUCK reading rather than a cut-off one.
+And `printed_mass_x1.10` reproduces HANDOFF's diagnosis of that exact member
+precisely — dominated by lift equilibrium (1.316) then the static-margin floor
+(8.4e-02), which is the order HANDOFF records (0.268, then 0.047). The original
+reading of it was right.
+
+`dihedral_polyhedral2`'s closest miss is `usable_nose / motor["length"] >= 1.0`
+by 3.93e-02, with the electronics-stack row (`equipment.py:383`) behind it — the
+**fourth** independent appearance of the nose-and-motor row. The 12x10 is heavier
+and further forward than the incumbent, which tightens exactly that packing.
+
+### A free validation of the screen
+
+`screen_discrete` asserts that a screened attribute changes nothing the airframe
+solve fixed. For `prop_choice` that has been declared since M5.3 and never
+checked against its own re-solve. The screen predicted **122.042** for the
+adopted prop; the full re-optimization returns **122.081** — 0.03%.
+
+## 5d. The rescale, measured instead of argued
+
+§6.1 blamed part of the battery's losses on the ordering-row rescale that was
+reverted five hours after it started. Measured directly: the current tree
+against the same tree with `1363ea8` reverted (the rescale re-applied), in an
+isolated worktree so nothing else differs.
+
+| member | raw row (current) | rescaled row | ratio |
+|---|---|---|---|
+| `nominal` | 105.818385 / 2.80 min | 105.818383 / 2.87 min | 1.03x |
+| `tail_conventional` | 100.867014 / 4.73 min | 100.867012 / 6.43 min | **1.36x** |
+
+**Solution-preserving, confirmed independently**: the objectives agree to
+1.97e-08 and 1.83e-08 relative, inside the 2.4e-08 to 1.3e-07 the revert commit
+claimed.
+
+**The time cost is real but member-dependent** — invisible on the easy member,
++36% on the harder one, bracketing the ~45% that commit measured. Which bounds
+what it can explain: it turns a 12-minute member into a 17-minute one, so it can
+push a member that was ALREADY near its budget over the edge (which is what it
+did to `winglet_study__continuous_cant`), and it cannot turn a 3-minute member
+into a member that produces nothing.
+
+### So the 69% is a mixture, and all three parts are now measured
+
+| cause | evidence |
+|---|---|
+| genuine corners | 2 of 6 members in the greedy state, full budget, STUCK |
+| the reverted rescale | +36% on a harder member, enough to push a near-budget member over |
+| idle sleep | §4 — but only if that machine slept; checkable in its own artifact |
+
+No single one of them accounts for it, and **none of them is a cap**.
+
 ## 6. What the converged rows do NOT license
 
 **Not "the caps are fine."** They license "these six members are not cap-blocked
@@ -292,13 +379,12 @@ on the current tree." Two differences from the battery remain unresolved:
    rescale was solution-preserving and cost ~45% of solve time — on its own
    enough to push a converging member past a 30-minute budget, which is what it
    did to `winglet_study__continuous_cant`.
-2. **The battery's studies run greedily**, so its `tail_conventional` carried the
-   adopted prop and topology; these cells carry the declared baseline
-   (`ancf_11x6`). Same label, different aeroplane. `solve.screen_discrete` ranks
-   the prop catalogue with no NLP at all, so closing this is cheap — not done.
+2. ~~The battery's studies run greedily~~ — **CLOSED, see §5c.** It was the
+   caveat that mattered: two members that converge at the declared baseline have
+   no design at all in the greedy state.
 
-With §4 that makes **three** candidate explanations for the 69%, and none of them
-is a cap.
+Both are now measured (§5c, §5d), and the 69% is a mixture of three causes, none
+of which is a cap.
 
 ## 7. Reproducing
 
