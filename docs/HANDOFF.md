@@ -127,6 +127,49 @@ moved, so no objective moves and this run stays comparable.
 > Underneath is a real model-design tension worth naming: `fineness_max = 8`
 > says *no needles* and the afterbody term says *longer tail*. On an aeroplane
 > whose bay length is set by a BOM, both cannot be satisfied.
+>
+> ### BOTH LEVERS ARE NOW PRICED (2026-08-07, `docs/studies/RCV2_CAP_PRICING.md` §5)
+>
+> Measured on `nominal` at `913d2bc`, one process per cell, against a reference
+> that reproduced 105.81838501037146 — identical to eleven significant figures
+> to the cell measured at `1ff0917`, which incidentally proves stage 5's exact
+> Hessian is solution-preserving and that the `boat_tail_min_d_eq` refactor is a
+> genuine no-op.
+>
+> | lever | Δ objective | what binds afterwards |
+> | --- | --- | --- |
+> | `span_cap` 2.0 → 2.2 m | **+5.172** | a BUILD decision, already settled |
+> | **`fineness_max` 8 → 9** | **+1.076** | `f = 9.000000` — still the ceiling |
+> | SM floor 0.08 → 0.05 | +0.851 | the new floor |
+> | **boat-tail 1.8 → 1.5 d_eq** | **+0.452** | `pod_tail` BOX at 100 mm — saturated |
+> | `c_root` 0.275 → 0.300 | **fails** | the motor row, short by 5.1e−2 |
+>
+> **The most valuable lever that is not a build decision is a model-validity
+> bound.** `fineness_max` outprices giving up over a third of the required
+> static margin, and it protects nothing about the aeroplane — only the range
+> where the Hoerner form factor is trusted. So it is not a cap the user can
+> choose to raise; **it is a request for a better fuselage drag model**, and it
+> makes Tier 2/3 of `FUSELAGE_DRAG_PLAN.md` worth more than its own §6 estimated.
+>
+> Raising it makes the pod **thinner, not longer** — d_eq 67.64 → 61.99 mm
+> against length 541 → 558 mm, and −14 g.
+>
+> Three invariants held across all three cells, and they are the finding:
+> **the bay is 345.30 mm to the micron** (the parts list sets it), **the motor
+> row stays exactly binding** (slack ≤ 0.2 µm — every millimetre freed goes to
+> slenderness, not to nose margin), and **`boat_tail_1.5` never reached 1.5**
+> (`pod_tail` hit its own 100 mm box bound, leaving the relaxed row inactive
+> with 1.53 mm of slack, so +0.452 is that lever *saturated*).
+>
+> **Because the motor row stays binding under both, neither should be expected
+> to unstick the failing members.** That is stage D and it is UNMEASURED — the
+> obvious next run, and the one thing these cells do not answer.
+>
+> Independently confirmed from the other device the same morning: `c_root 0.300`
+> is a genuine corner whose dominant violation is `usable_nose / motor_length`,
+> short by 5.14e−2 — nearly 8× the next row. **Raising the chord cap is not a
+> remedy because it hits the motor row too**, which is the same row five of this
+> battery's six losses died on, found from the opposite direction.
 
 ### Static margin: unchanged in shape from the seventeenth session, and still disclosed rather than fixed
 

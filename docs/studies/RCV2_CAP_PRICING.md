@@ -144,14 +144,51 @@ the problem.
 
 | relaxation | objective | vs 105.818 | note |
 |---|---|---|---|
+| relaxation | objective | vs 105.818 | note |
+|---|---|---|---|
+| `span_cap` 2.0 → 2.2 m | **110.990** | **+5.172 min** | a BUILD decision, already settled at 2.0 |
+| **`fineness_max` 8 → 9** | **106.895** | **+1.076 min** | lands exactly on the new ceiling |
 | SM floor 0.08 → 0.05 | **106.669** | **+0.851 min** | lands exactly on the new floor |
-| `c_root` 0.275 → 0.300 | *re-measuring* | | slept through |
-| `span_cap` 2.0 → 2.2 | *re-measuring* | | slept through |
+| **boat-tail 1.8 → 1.5 d_eq** | **106.270** | **+0.452 min** | saturated — see below |
+| `c_root` 0.275 → 0.300 | **fails** | | genuine corner, on the motor row |
 | kit `full` → `core` | *re-measuring* | | slept through |
 
-The one clean number so far says the static-margin floor **binds but is nearly
-worthless to relax**: giving up 0.03 of static margin — over a third of the
-required 0.08 — buys 51 seconds of endurance.
+**The static-margin floor binds but is nearly worthless to relax**: giving up
+0.03 of margin — over a third of the required 0.08 — buys 51 seconds.
+
+> ### The most valuable lever here is a MODEL-VALIDITY BOUND, not a requirement
+>
+> `fineness_max = 8` is worth **more than giving up a third of the static
+> margin**, and unlike the SM floor, the span cap or the chord cap it protects
+> nothing about the aeroplane. It exists because the Hoerner form factor keeps
+> falling to f ≈ 16 while the real minimum-drag band for a body of revolution is
+> f ≈ 6–7, so past 8 the drag model is not trusted. The optimizer is buying
+> 1.08 minutes by going somewhere the model cannot vouch for — which is what
+> that row's own comment means by *"landing on it is a defect report, not an
+> optimum"*. **Raising it is not a design decision available to the user; it is
+> a request for a better fuselage drag model.**
+>
+> **It also does not mean a longer pod.** Given the extra allowance the
+> optimizer made the pod *thinner*: d_eq 67.64 → 61.99 mm (−8.4%) against a
+> length of 541 → 558 mm (+3.1%), for −14 g of AUW. Less wetted area, not more.
+
+### Three things every one of these cells agrees on
+
+Measured on the WSL box at `913d2bc`, one process per cell.
+
+1. **The bay is 345.30 mm in all three, to the micron.** It is set by the parts
+   list and nothing else moves it.
+2. **The motor row stays EXACTLY binding in all three** (`usable_nose` slack
+   ≤ 0.2 µm). No length these levers buy reaches the nose — the optimizer spends
+   every millimetre of it on slenderness until the motor row stops it again. So
+   **neither lever should be expected to unstick the failing members**, and
+   whether they do is stage D, which is unmeasured.
+3. **`boat_tail_1.5` never reached 1.5.** `pod_tail` landed on its own BOX lower
+   bound of 100 mm, leaving the relaxed row 1.53 mm of slack and inactive. So
+   +0.452 min is the *saturated* value of that lever — the whole of what
+   relaxing the row can buy given the box — and any floor at or below
+   1.523·d_eq returns the same number. Reported this way because "the price of
+   1.8 → 1.5" would be a claim about a row that was not active at the answer.
 
 ## 6. What the converged rows do NOT license
 
