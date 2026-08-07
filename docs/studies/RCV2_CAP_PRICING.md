@@ -402,8 +402,21 @@ committed with this study are under `docs/`, so reading THEM takes the override:
 
 ## 8. Still open
 
+**The study priced the caps and never priced the corners.** Stage D exists to
+run every lever against every member that FAILS, and it skipped itself reporting
+`stuck corners: none` — correctly, because at the time it ran the only
+configuration measured was the declared baseline, where all six converge. The
+two genuine corners (§5c) surfaced hours later, in the greedy state, long after
+that stage was over.
+
+So the question this study was built to answer is the one it has not answered:
+
 | | |
 |---|---|
-| stage F | 5 of 6 flatness spans unmeasured |
-| the greedy chain | §6.2 — cheap, not done |
-| `usable_nose` | §5 — the row that actually blocks this aeroplane |
+| **price the two real corners** | `dihedral_polyhedral2` and `printed_mass_x1.10`, both in the greedy state, against all six levers — 12 cells |
+| `usable_nose` | the closest miss in FOUR independent corners (§5, §5c, the 1.82 m span, the 2026-08-07 battery) and touched by none of HANDOFF's four caps. The one to bet on |
+| the span floor | known to lie between 1.82 and 1.88 m; not bisected |
+| flatness relaxations | never run against the stuck spans — deliberately deprioritised, since the design sits on the 2.0 m cap regardless |
+
+Everything else is measured: all six stage-F spans, the greedy chain (§5c), and
+the rescale (§5d).
