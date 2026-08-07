@@ -58,6 +58,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -655,6 +656,71 @@ def screen(args) -> None:
     })
 
 
+#: A constraint label is `file.py:LINE opti.subject_to(...)`, and the LINE moves
+#: whenever anything above it in the file moves — the ordering-row revert alone
+#: shifted `equipment.py`'s packing row from 362 to 344. Tallying by label would
+#: therefore split one row across commits and report two half-strength findings
+#: where there is one strong one. The constraint TEXT is what is stable, so that
+#: is the key; the file name rides along because two files could in principle
+#: write the same expression.
+_LABEL = re.compile(r"^(?P<file>[\w./-]+):(?P<line>\d+)\s+(?P<text>.*)$", re.S)
+
+
+def miss_key(what: str) -> tuple[str, str]:
+    m = _LABEL.match(what.strip())
+    if not m:
+        return ("?", what.strip()[:70])
+    return (m["file"], " ".join(m["text"].split())[:70])
+
+
+def misses(args) -> None:
+    """Which CONSTRAINT blocks each failing cell, and which one blocks most.
+
+    A converged/failed table is a scoreboard; this is the explanation. The
+    study's standing prediction (§8) is that `usable_nose / motor["length"] >= 1`
+    is the row that actually blocks this aeroplane — it was the closest miss in
+    four independent corners while none of the four caps HANDOFF names as the
+    remedy touches it. A tally either carries that or kills it.
+    """
+    cells = load_cells()
+    failed = [r for r in cells.values()
+              if r.get("status") == "failed" and r.get("violations")]
+    if not failed:
+        raise SystemExit("no failed cells with recorded violations yet")
+
+    rows = []
+    for r in sorted(failed, key=lambda r: (r["member"], r["relax"])):
+        v = r["violations"][0]
+        f, text = miss_key(v["what"])
+        rows.append((r["member"], r["relax"], r.get("iter_count"), v["by"],
+                     f, text, stuck_or_cutoff(r)))
+
+    w_m = max(len(x[0]) for x in rows) + 2
+    w_r = max(len(x[1]) for x in rows) + 2
+    print("closest miss per failing cell\n")
+    print("member".ljust(w_m) + "lever".ljust(w_r) + "iters   by         row")
+    for m, rx, it, by, f, text, verdict in rows:
+        mark = "" if verdict == "stuck" else f"   [{verdict.upper()} — not evidence]"
+        print(f"{m.ljust(w_m)}{rx.ljust(w_r)}{str(it or '-'):>5}  "
+              f"{by:.2e}  {f}: {text}{mark}")
+
+    # ONLY stuck cells are counted. A cut-off cell's "closest miss" is a
+    # snapshot of an iterate still descending — it says where the solve had got
+    # to, not what stopped it — and this study has already been bitten once by
+    # exactly that: the cells the machine slept through reported misses of
+    # 2.6e-01 on a row that, measured awake, does not block them at all.
+    counted = [r for r in rows if r[6] == "stuck"]
+    skipped = len(rows) - len(counted)
+    tally: dict[tuple[str, str], list[float]] = {}
+    for _, _, _, by, f, text, _ in counted:
+        tally.setdefault((f, text), []).append(by)
+    print(f"\nrows ranked by how many cells they block "
+          f"({len(counted)} stuck cells counted"
+          f"{f'; {skipped} cut-off cell(s) excluded' if skipped else ''})")
+    for (f, text), bys in sorted(tally.items(), key=lambda kv: -len(kv[1])):
+        print(f"  {len(bys):2d} cell(s)  worst {max(bys):.2e}   {f}: {text}")
+
+
 def report(args) -> None:
     cells = load_cells()
     if not cells:
@@ -744,6 +810,12 @@ def main() -> None:
     r = sub.add_parser("report", help="print the matrix measured so far")
     common(r)
 
+    ms = sub.add_parser(
+        "misses",
+        help="which constraint blocks each failing cell, and which blocks most",
+    )
+    common(ms)
+
     sc = sub.add_parser(
         "screen",
         help="which prop the battery's greedy chain would adopt (no NLP)",
@@ -758,6 +830,8 @@ def main() -> None:
         drive(args)
     elif args.cmd == "screen":
         screen(args)
+    elif args.cmd == "misses":
+        misses(args)
     else:
         report(args)
 
