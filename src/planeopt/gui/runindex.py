@@ -72,15 +72,22 @@ class RunSummary:
         return (self.path / "interactive_3d.html").is_file()
 
 
-def _mapping(value: Any) -> dict:
+def mapping(value: Any) -> dict:
     """`value` if it is a dict, else an empty one.
 
     `data.get("masses") or {}` covers a MISSING or null block and nothing else:
     a block that is present but is a list, a string or a number sails through
     and raises on the next `.get`. That is the difference between a row that
     reads "unreadable" and a `scan` that returns nothing at all.
+
+    Public because `views` reads the same blocks out of the same file and had
+    the same hole — one guard, so the two cannot drift.
     """
     return value if isinstance(value, dict) else {}
+
+
+#: Kept for readability inside this module.
+_mapping = mapping
 
 
 def _constraint_flags(constraints: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -179,5 +186,10 @@ def scan(runs_root: Path) -> list[RunSummary]:
 
 
 def load_full(run_dir: Path) -> dict:
-    """The whole run.json, for the detail and compare views."""
-    return json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    """The whole run.json, for the detail and compare views.
+
+    Always a dict: both callers immediately `.get` on it, and valid JSON that is
+    a list or a bare number would otherwise raise an AttributeError inside a Qt
+    selection slot rather than the OSError/ValueError they guard against.
+    """
+    return mapping(json.loads((run_dir / "run.json").read_text(encoding="utf-8")))

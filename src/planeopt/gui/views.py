@@ -171,9 +171,15 @@ class DetailView(QScrollArea):
             data = runindex.load_full(summary.path)
         except (OSError, ValueError):
             pass
-        best = (data.get("performance") or {}).get("best") or {}
-        masses = data.get("masses") or {}
-        geometry = data.get("geometry") or {}
+        # Every block goes through `runindex.mapping`, not `... or {}`. The
+        # latter covers a block that is MISSING or null and nothing else, so one
+        # that is present but is a list, a string or a number reached the next
+        # `.get` and raised — inside a selection slot, on a run the user had just
+        # clicked. Same guard `runindex.summarize` uses on the same file.
+        performance = runindex.mapping(data.get("performance"))
+        best = runindex.mapping(performance.get("best"))
+        masses = runindex.mapping(data.get("masses"))
+        geometry = runindex.mapping(data.get("geometry"))
 
         self._layout.addWidget(_section("flight point"))
         grid = MetricGrid()
@@ -203,25 +209,26 @@ class DetailView(QScrollArea):
         # does to the balance. "142 minutes" means two different things
         # depending on whether the parts were the example ones or the heaviest
         # legal substitutes.
-        eq = masses.get("equipment") or {}
+        eq = runindex.mapping(masses.get("equipment"))
         if eq and not eq.get("failed"):
             self._layout.addWidget(_section("equipment"))
             grid = MetricGrid()
-            est = (eq.get("totals_est") or {}).get("total_kg")
-            mx = (eq.get("totals_max") or {}).get("total_kg")
-            grid.add("airborne parts", str((eq.get("totals_est") or {}).get("n_items", "—")))
+            totals_est = runindex.mapping(eq.get("totals_est"))
+            est = totals_est.get("total_kg")
+            mx = runindex.mapping(eq.get("totals_max")).get("total_kg")
+            grid.add("airborne parts", str(totals_est.get("n_items", "—")))
             grid.add("fit / mass basis",
                      f"{eq.get('fit', '—')} / {eq.get('basis_solved', '—')}", column=1)
             grid.add("est / max mass",
                      "—" if est is None or mx is None
                      else f"{est * 1000:.0f} / {mx * 1000:.0f} g")
-            closure = eq.get("closure") or {}
-            shift = (closure.get("delta") or {}).get("x_cg_m")
+            closure = runindex.mapping(eq.get("closure"))
+            shift = runindex.mapping(closure.get("delta")).get("x_cg_m")
             grid.add("CG shift, est → max",
                      "—" if shift is None else f"{shift * 1000:+.1f} mm", column=1)
             self._layout.addWidget(grid)
 
-            tail = eq.get("tail_group") or {}
+            tail = runindex.mapping(eq.get("tail_group"))
             chips = QWidget()
             row = QHBoxLayout(chips)
             row.setContentsMargins(0, 6, 0, 0)
@@ -254,7 +261,7 @@ class DetailView(QScrollArea):
             row.addStretch(1)
             self._layout.addWidget(_fixed_height(chips))
 
-        optimization = (data.get("performance") or {}).get("optimization") or {}
+        optimization = runindex.mapping(performance.get("optimization"))
         if optimization:
             self._layout.addWidget(_section("optimization"))
             grid = MetricGrid()
@@ -264,21 +271,24 @@ class DetailView(QScrollArea):
             grid.add("shadow price", _fmt(shadow, ".4f", " /g"))
             self._layout.addWidget(grid)
 
-            studies = optimization.get("discrete_studies") or {}
-            priced = optimization.get("priced_options") or {}
+            studies = runindex.mapping(optimization.get("discrete_studies"))
+            priced = runindex.mapping(optimization.get("priced_options"))
             if studies or priced:
                 chips = QWidget()
                 row = QHBoxLayout(chips)
                 row.setContentsMargins(0, 6, 0, 0)
                 row.setSpacing(6)
                 for attr, study in studies.items():
-                    row.addWidget(Chip(f"{attr}: {study.get('adopted')}", "neutral"))
+                    row.addWidget(
+                        Chip(f"{attr}: {runindex.mapping(study).get('adopted')}", "neutral")
+                    )
                 # A PRICED option was measured and deliberately not adopted, so
                 # its chip carries the price rather than a winner — otherwise it
                 # would look like a study that chose the baseline.
                 for attr, study in priced.items():
-                    for cand, entry in (study.get("alternatives") or {}).items():
-                        delta = entry.get("delta_objective")
+                    alternatives = runindex.mapping(runindex.mapping(study).get("alternatives"))
+                    for cand, entry in alternatives.items():
+                        delta = runindex.mapping(entry).get("delta_objective")
                         row.addWidget(Chip(
                             f"{attr}={cand} priced"
                             + ("" if delta is None else f" {delta:+.2f}"),
@@ -304,7 +314,11 @@ class DetailView(QScrollArea):
         row.addStretch(1)
         self._layout.addWidget(_fixed_height(buttons))
 
-        notes = data.get("notes") or []
+        # A LIST, or nothing. A bare string is iterable, so `notes: "one note"`
+        # rendered thirty-three bullets, one per character — the run.json schema
+        # says list, but this pane also reads artifacts written by other versions.
+        notes = data.get("notes")
+        notes = notes if isinstance(notes, list) else ([notes] if notes else [])
         if notes:
             self._layout.addWidget(_section("notes"))
             for note in notes:

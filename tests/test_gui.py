@@ -193,6 +193,48 @@ def test_a_non_numeric_objective_reads_as_a_dash_not_a_crash(tmp_path):
     assert runindex.scan(tmp_path)[0].objective_text == "—"
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"performance": "fast"},
+        {"masses": [1, 2]},
+        {"geometry": 3},
+        {"masses": {"auw_kg": 1.0, "equipment": "none"}},
+        {"performance": {"optimization": [1]}},
+        {"performance": {"optimization": {"discrete_studies": [1]}}},
+        {"performance": {"optimization": {"priced_options": {"tail": "no"}}}},
+    ],
+    ids=lambda o: "+".join(sorted(o)),
+)
+def test_the_detail_pane_survives_a_wrong_typed_block(tmp_path, overrides):
+    """`show_run` reads the same blocks `summarize` does and had the same hole,
+    but it runs inside a SELECTION SLOT — on a run the user has just clicked."""
+    views = _gui("views")
+    _gui("window")  # a QApplication has to exist before any widget
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+
+    run = _write_run(tmp_path, "20260725T120000", **overrides)
+    views.DetailView().show_run(runindex.summarize(run))
+
+
+def test_a_string_note_is_one_bullet_not_one_per_character(tmp_path):
+    """A bare string is iterable, so `notes: "one note"` drew a bullet per
+    character — thirty-three labels for one sentence."""
+    views = _gui("views")
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    QApplication.instance() or QApplication([])
+
+    run = _write_run(tmp_path, "20260725T120000", notes="a single note as a string")
+    pane = views.DetailView()
+    pane.show_run(runindex.summarize(run))
+
+    bullets = [w.text() for w in pane.findChildren(QLabel) if w.text().startswith("\u2022 ")]
+    assert bullets == ["\u2022 a single note as a string"]
+
+
 def test_scan_of_a_missing_root_is_empty(tmp_path):
     assert runindex.scan(tmp_path / "nope") == []
 
