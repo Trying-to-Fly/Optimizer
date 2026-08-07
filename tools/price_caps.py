@@ -540,6 +540,70 @@ def reevaluate(nominal: dict, args) -> None:
 
 # --- reporting -------------------------------------------------------------
 
+def screen(args) -> None:
+    """Reproduce the battery's greedy first step: which prop it would adopt.
+
+    A study member in a battery does NOT carry the configuration it declares —
+    the studies run greedily, each with the previous studies' adopted values. So
+    a `tail_conventional` cell measured here against the incumbent prop and a
+    `tail_conventional` member in a battery are the same label on two different
+    aeroplanes, and that gap is the one caveat this study could not close by
+    argument.
+
+    Closing it is cheap because `solve.screen_discrete` holds the airframe fixed
+    and re-solves only the powertrain — seconds per candidate, no NLP at all.
+    What it needs is the run's OWN shadow price in objective units per gram,
+    which is why `mass_bump` is a member: without it the screen is biased toward
+    big propellers, the defect that held the diameter cap at 11 in until
+    2026-07-30.
+
+    This is a SHORTLISTER and never a verdict — the same caveat `screen_discrete`
+    carries, and this study measured its size directly: the 20 g shadow price
+    predicts +13.6 min for the 192 g payload step and the truth is +7.9.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    from planeopt import solve as S
+    from planeopt.cli import load_aircraft, load_mission
+
+    cells = load_cells()
+    champ = cells.get("nominal|none")
+    bump = cells.get("mass_bump|none")
+    if champ is None or champ.get("status") != "converged":
+        raise SystemExit("no converged `nominal|none` cell to screen at — run it first")
+    shadow = None
+    if bump is not None and bump.get("status") == "converged":
+        shadow = (bump["objective_value"] - champ["objective_value"]) / 20.0
+    else:
+        print("WARNING: no converged `mass_bump|none` cell, so the screen runs "
+              "with NO shadow price and is biased toward big propellers "
+              "(solve.screen_discrete). Run that member for a real ranking.")
+
+    aircraft, _ = load_aircraft(REPO / "aircraft" / args.aircraft)
+    mission, _ = load_mission(REPO / "missions" / args.mission)
+    cands = [c for c in aircraft.discrete_options["prop_choice"]
+             if c != aircraft.prop_choice]
+    top_n = (getattr(aircraft, "discrete_screen", None) or {}).get("prop_choice", 4)
+    result = S.screen_discrete(
+        aircraft, mission, "prop_choice", cands, champ, top_n, shadow,
+    )
+    print(f"\nincumbent {aircraft.prop_choice}, {len(cands)} candidates, "
+          f"shadow price {shadow if shadow is None else round(shadow, 5)} per gram")
+    print(f"shortlist: {', '.join(result['shortlist'])}\n")
+    for r in result["ranking"][:10]:
+        print(f"  {r['candidate']:24s} {r['screened_objective']:8.3f}")
+    if result["unreachable"]:
+        print(f"\n{len(result['unreachable'])} candidate(s) unreachable at this "
+              f"operating point")
+    append_cell({
+        "member": "nominal", "relax": "none:prop_screen", "status": "screened",
+        "shortlist": result["shortlist"],
+        "ranking": result["ranking"][:10],
+        "shadow_price_obj_per_gram": shadow,
+        "incumbent": aircraft.prop_choice,
+        "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+
+
 def report(args) -> None:
     cells = load_cells()
     if not cells:
@@ -629,12 +693,20 @@ def main() -> None:
     r = sub.add_parser("report", help="print the matrix measured so far")
     common(r)
 
+    sc = sub.add_parser(
+        "screen",
+        help="which prop the battery's greedy chain would adopt (no NLP)",
+    )
+    common(sc)
+
     args = ap.parse_args()
     os.chdir(REPO)
     if args.cmd == "cell":
         run_cell(args)
     elif args.cmd == "drive":
         drive(args)
+    elif args.cmd == "screen":
+        screen(args)
     else:
         report(args)
 
