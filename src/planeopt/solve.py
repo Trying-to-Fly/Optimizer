@@ -1856,7 +1856,16 @@ def _solve_nlp(
                 }
                 return out
         raise failure from None
-    return _pack(sol)
+    # A CONVERGED member can span a sleep too, and then its solve_minutes is
+    # inflated by time it did not spend solving. That is milder than the failure
+    # case — the answer is still right — but every "converged in 2.9 minutes" in
+    # a study is a comparison, and one member that quietly slept through 12 of
+    # its 14 minutes makes the wrong lever look slow.
+    out = _pack(sol)
+    out["suspended_minutes"] = suspended_minutes(
+        time.time() - t_wall, time.monotonic() - t_awake
+    )
+    return out
 
 
 def _solve_worker(conn, aircraft, mission, kw, live=None):  # pragma: no cover — child process

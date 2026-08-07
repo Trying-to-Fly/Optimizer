@@ -319,6 +319,10 @@ def run_cell(args) -> dict:
             # against — and the omission only shows up as a KeyError hours
             # later, once the solving is done and the cell is unrepeatable
             # without paying for it again. Which is exactly what happened.
+            # Also on the converged path: `solve_minutes` is what every lever
+            # in this study is compared on, and a member that slept through
+            # half of its own timing makes the wrong lever look slow.
+            "suspended_minutes": r.get("suspended_minutes", 0.0),
             "drag_n": r["drag_n"],
             "J": r.get("J"),
             "rpm": r.get("rpm"),
