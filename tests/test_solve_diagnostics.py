@@ -430,3 +430,73 @@ def test_a_normal_run_is_unchanged_by_any_of_this():
     assert read_at["candidates_source"] == "legal"
     assert "best AIRWORTHY point" in read_at["why"]
     assert "ALL-CLEAR" not in note
+
+
+# --- a wall clock charges a member for time the process was ASLEEP ----------
+#
+# `ipopt.max_wall_time` is the right guard (it is protecting the run's wall
+# clock against a solve that starts swapping), but it cannot tell "this solve
+# ran for 30 minutes" from "this laptop was shut for 25 of them". On 2026-08-07
+# four cells of docs/studies/RCV2_CAP_PRICING.md died that way and three of them
+# converge in 2-9 minutes when re-measured awake; the fourth is a real corner.
+# Same `Maximum_WallTime_Exceeded`, opposite meaning, and nothing in the
+# artifact separated them.
+
+
+def test_suspended_minutes_is_the_gap_between_the_two_clocks():
+    """`time.time()` runs through sleep; `time.monotonic()` does not.
+
+    So the difference IS the suspension, on both macOS (mach_absolute_time)
+    and Linux (CLOCK_MONOTONIC), with no platform branch and no pmset.
+    """
+    assert solve.suspended_minutes(600.0, 600.0) == 0.0
+    assert solve.suspended_minutes(1800.0, 300.0) == pytest.approx(25.0)
+    # never negative: the two clocks drift, and a member that reports having
+    # been asleep for -0.3 minutes destroys trust in the number that matters
+    assert solve.suspended_minutes(100.0, 100.5) == 0.0
+
+
+def test_a_wall_time_failure_that_slept_says_so():
+    """The message is the log line and the first thing a reader sees."""
+    opti, labels = _infeasible()
+    with pytest.raises(RuntimeError) as caught:
+        opti.solve(verbose=False, max_iter=50, detect_simple_bounds=True)
+
+    slept = solve.SolveFailure(
+        opti, caught.value, labels.as_dict(), suspended_min=14.2
+    )
+    assert slept.suspended_minutes == 14.2
+    assert "SUSPENDED" in str(slept)
+    assert "14.2" in str(slept)
+
+    # below the floor it is recorded but not narrated — an NTP step of a few
+    # seconds must not print as "the machine slept"
+    brief = solve.SolveFailure(
+        opti, caught.value, labels.as_dict(), suspended_min=0.05
+    )
+    assert brief.suspended_minutes == 0.05
+    assert "SUSPENDED" not in str(brief)
+
+
+def test_the_three_positional_form_still_builds():
+    """Four call sites in this file pass three positional args; a signature
+    change that broke them would be a fix that costs the diagnostics it joins."""
+    opti, labels = _infeasible()
+    with pytest.raises(RuntimeError) as caught:
+        opti.solve(verbose=False, max_iter=50, detect_simple_bounds=True)
+    failure = solve.SolveFailure(opti, caught.value, labels.as_dict())
+    assert failure.suspended_minutes == 0.0
+
+
+def test_suspension_survives_the_summariser():
+    """A field the battery entry drops is worth nothing — which is the exact
+    defect `_FAILURE_FIELDS` was created to fix."""
+    opti, labels = _infeasible()
+    with pytest.raises(RuntimeError) as caught:
+        opti.solve(verbose=False, max_iter=50, detect_simple_bounds=True)
+    failure = solve.SolveFailure(
+        opti, caught.value, labels.as_dict(), suspended_min=9.5
+    )
+    record = solve._failure_record(failure)
+    assert record["suspended_minutes"] == 9.5
+    assert solve._failed_entry(record)["suspended_minutes"] == 9.5
