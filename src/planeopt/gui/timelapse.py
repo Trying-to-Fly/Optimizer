@@ -13,6 +13,7 @@ someone actually asks for a video.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import replace
@@ -32,6 +33,11 @@ DEFAULT_HOLD_CANDIDATE = 15
 _FFMPEG_ARGS = (
     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-preset", "medium",
 )
+
+#: Exactly what `render` writes, so clearing a re-render cannot reach anything
+#: else in a directory the user may have pointed `--out` at.
+_IMAGE_RE = re.compile(r"^frame_\d{6}\.png$")
+VIDEO_NAME = "timelapse.mp4"
 
 
 def parse_size(text: str) -> tuple[int, int]:
@@ -160,6 +166,7 @@ def render(
 
     out_dir = Path(out_dir) if out_dir else default_out
     out_dir.mkdir(parents=True, exist_ok=True)
+    _clear_previous_render(out_dir, progress)
     ensure_application()
 
     width, height = size
@@ -242,6 +249,42 @@ def render(
     }
     result["video"] = _encode(out_dir, fps, progress)
     return result
+
+
+def _clear_previous_render(out_dir: Path, progress=None) -> int:
+    """Remove the images an earlier render left in `out_dir`.
+
+    Images are numbered from zero every time, and the default output directory
+    is the same one for every render of a run, so a render that produces FEWER
+    images than the last used to leave the previous one's tail behind. That is
+    not merely untidy: `_encode` feeds ffmpeg `-i frame_%06d.png`, which reads
+    from 000000 upward and stops at the first MISSING index — so it encoded the
+    new images followed by the old ones, and the reported count was the only
+    place the truth appeared. Re-rendering a battery with `--kind candidate`
+    produced 15 images and a 23-frame video that ended in the previous render's
+    grey iterates.
+
+    Only this function's own filenames are touched (`_IMAGE_RE`), because
+    `--out` can name any directory the user likes.
+
+    The video is left alone. `_encode` passes ffmpeg `-y`, so a real render
+    overwrites it; deleting it when ffmpeg is ABSENT would destroy the one
+    artifact this run cannot replace. It is stale either way, so say so.
+    """
+    stale = [p for p in out_dir.iterdir() if p.is_file() and _IMAGE_RE.match(p.name)]
+    for path in stale:
+        try:
+            path.unlink()
+        except OSError:  # a locked file is not worth failing a render over
+            continue
+    if progress is not None and stale:
+        progress(f"cleared {len(stale)} image(s) from a previous render")
+    if progress is not None and (out_dir / VIDEO_NAME).is_file() and shutil.which("ffmpeg") is None:
+        progress(
+            f"{VIDEO_NAME} is from an earlier render and ffmpeg is not on PATH "
+            "to replace it — the command below rebuilds it from these images"
+        )
+    return len(stale)
 
 
 def _ffmpeg_command(out_dir: Path, fps: int) -> str:
