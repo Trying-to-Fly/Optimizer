@@ -56,11 +56,20 @@ def _main(
 
 
 def _load_attr(py_file: Path, attr: str):
+    # `spec_from_file_location` returns None rather than raising for a file that
+    # is not there or is not importable, so the mistyped path that every user
+    # produces on their first go — `-a aircraft/vtail_smaple` — came out as
+    # `AttributeError: 'NoneType' object has no attribute 'loader'` and a
+    # traceback through importlib. Checked here, where the name is still known.
+    if not py_file.is_file():
+        raise typer.BadParameter(f"{py_file} does not exist")
+    spec = importlib.util.spec_from_file_location(py_file.stem, py_file)
+    if spec is None or spec.loader is None:
+        raise typer.BadParameter(f"{py_file} is not an importable Python module")
     # Config packages may import sibling modules (e.g. their construction profile).
     parent = str(py_file.resolve().parent)
     sys.path.insert(0, parent)
     try:
-        spec = importlib.util.spec_from_file_location(py_file.stem, py_file)
         module = importlib.util.module_from_spec(spec)
         sys.modules[py_file.stem] = module
         spec.loader.exec_module(module)
@@ -68,8 +77,28 @@ def _load_attr(py_file: Path, attr: str):
         sys.path.remove(parent)
     try:
         return getattr(module, attr)
-    except AttributeError:
-        raise typer.BadParameter(f"{py_file} does not define `{attr}`")
+    except AttributeError as e:
+        raise typer.BadParameter(f"{py_file} does not define `{attr}`") from e
+
+
+def _load_run(run_dir: Path):
+    """A run artifact, or a message naming what was looked for.
+
+    `assemble.load` opens `run.json` directly, so `planeopt report runs/typo`
+    ended in a bare FileNotFoundError traceback — on the commands whose whole
+    argument is a directory the user typed.
+    """
+    if not run_dir.is_dir():
+        raise typer.BadParameter(f"{run_dir} is not a directory")
+    if not (run_dir / "run.json").is_file():
+        raise typer.BadParameter(
+            f"{run_dir} has no run.json, so it is not a run directory "
+            "(a run still going has not written one yet)"
+        )
+    try:
+        return assemble.load(run_dir)
+    except ValueError as e:  # a truncated or corrupt run.json
+        raise typer.BadParameter(f"{run_dir}/run.json could not be read: {e}") from e
 
 
 def load_aircraft(path: Path) -> tuple[AircraftDefinition, Path]:
@@ -165,7 +194,7 @@ def optimize(
     _setup_logging(quiet)
     warm = warm_from = None
     if warm_start is not None:
-        prior = assemble.load(warm_start)
+        prior = _load_run(warm_start)
         champ = (prior.performance.get("optimization") or {}).get("champion") or {}
         if not champ.get("dv"):
             raise typer.BadParameter(
@@ -252,7 +281,7 @@ def brief(
     from .report import brief as brief_mod
 
     ac, _ = load_aircraft(aircraft)
-    result = assemble.load(run_dir)
+    result = _load_run(run_dir)
     out = run_dir / "design_brief.md"
     out.write_text(brief_mod.render(result, ac), encoding="utf-8")
     typer.echo(out)
@@ -267,7 +296,7 @@ def build(
     from .report import manufacturing
 
     ac, _ = load_aircraft(aircraft)
-    result = assemble.load(run_dir)
+    result = _load_run(run_dir)
     champ = (result.performance.get("optimization") or {}).get("champion") or {}
     # the champion's DISCRETE choices are not in dv — without them this rebuilds
     # the aircraft file's defaults and can document parts the champion rejected
@@ -393,7 +422,7 @@ def timelapse(
 @app.command()
 def report(run_dir: Path = typer.Argument(..., help="A runs/<...> directory")):
     """Re-render report.html from an existing run.json."""
-    result = assemble.load(run_dir)
+    result = _load_run(run_dir)
     (run_dir / "report.html").write_text(html.render(result, run_dir), encoding="utf-8")
     typer.echo(run_dir / "report.html")
 
