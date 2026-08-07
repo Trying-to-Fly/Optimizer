@@ -290,6 +290,13 @@ def run_cell(args) -> dict:
             "failed": r.get("failed"),
             "violations": r.get("violations"),
             "convergence": r.get("convergence"),
+            # `solve` measures this and `_FAILURE_FIELDS` carries it; a
+            # hand-picked key list here dropped it, so the detector built for
+            # exactly this study reported nothing on this study's own cells.
+            # Defaulted rather than conditional: absent and zero must not be
+            # the same thing, because absent means "measured before the
+            # detector existed" and zero means "measured, and it stayed awake".
+            "suspended_minutes": r.get("suspended_minutes", 0.0),
         })
     else:
         # A `--max-iter 3` smoke solve RETURNS a point rather than raising
