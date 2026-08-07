@@ -33,7 +33,7 @@ Three defects, none of which any run would ever have reported:
 | Question | Decision | Consequence |
 | --- | --- | --- |
 | Placement freedom | **A free station per item** | ~10 new NLP variables |
-| Optional kit (Pi, airspeed, SiK) | **Fitted, and priced by a study** | one extra full re-solve |
+| Payload (Pi, airspeed, SiK) | **Fitted. A study prices what it costs** | one extra full re-solve |
 | Mass basis | **Solve at max weights** | designs the 950 g electronics build |
 | Where it lands | **New `aircraft/vtail_rcv2/`** | `vtail_sample` untouched |
 
@@ -135,8 +135,11 @@ LE at 2/3 semi-span, 40 mm proud), and the two halves of the wiring run.
   set, and a **closure check**: AUW and CG recomputed with every part at its
   heaviest legal substitute, at fixed placement. Not a re-optimization, and the
   artifact says so — a re-solve would move the wing and the ballast to absorb it.
-- `performance.optimization.priced_options` — what dropping the optional kit is
-  worth, **priced and never adopted**.
+- `performance.optimization.priced_options` — **what the payload costs this
+  airframe in endurance**, priced and never adopted. Not a kit that may be
+  dropped (user decision, 2026-08-07): `airframe_only` is a measuring variant,
+  the way `span_cap_m` measures the print bed. Measured 2026-08-07: **10.448
+  min** (132.571 against 122.123) and 122 g.
 - `manufacturing/equipment_placement_*.csv` — the bench sheet, one row per BOM
   line, with the unchecked requirements in their own column.
 

@@ -128,7 +128,10 @@ RELAXATIONS: dict[str, dict] = {
     "sm_floor_0.05": {"sm_floor": 0.05},
     "c_root_0.300": {"set": {"c_root_max_m": 0.300}},
     "span_cap_2.2": {"set": {"span_cap_m": 2.2}},
-    "kit_core": {"set": {"equipment_fit": "core"}},
+    # DIAGNOSTIC, not a proposal. The payload is not optional (see
+    # `AIRFRAME_ONLY_OMITS`); this cell answers "is this corner caused by the
+    # payload?", and a yes points at pod size rather than at the parts list.
+    "airframe_only": {"set": {"equipment_fit": "airframe_only"}},
     **POD_LENGTH_RELAXATIONS,
 }
 
