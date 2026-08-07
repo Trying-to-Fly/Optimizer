@@ -135,10 +135,29 @@ called those two sleep artifacts. And the iteration counts are 205-317, against
 the 68/25/15 of the cells that really were asleep, which is the second half of
 §4's own signature.
 
-WSL under WSLg does not idle-suspend the way the Mac did here, so this is the
-expected result — but it had to be checked rather than assumed, because the
-consequence of being wrong is the same either way: chasing a cap that was never
-the problem.
+It had to be checked rather than assumed, because the consequence of being wrong
+is the same either way: chasing a cap that was never the problem.
+
+> **AND THE ASSUMPTION WOULD HAVE BEEN WRONG. THE WSL BOX SUSPENDS TOO.**
+>
+> This section first read "WSL under WSLg does not idle-suspend the way the Mac
+> did here". That is false, measured 2026-08-08 by closing the lid: two `uptime`
+> readings imply boot times **26½ minutes apart**, which is impossible unless the
+> VM's clock stopped. Wall clock advanced 3 h 31 m; uptime advanced 3 h 05 m.
+>
+>     boot implied at 21:23:58 (up 12:27) : 08:56:58
+>     boot implied at 00:55:27 (up 15:32) : 09:23:27   <- 26m29s uncounted
+>
+> Nothing was running at the time, so nothing was lost. But **`caffeinate -i` has
+> no equivalent here and the hazard is identical**: a battery left overnight with
+> the lid shut will have its members charged for the suspension and will report
+> `Maximum_WallTime_Exceeded` in exactly the words §4 is about. The
+> `20260807T061330` battery escaped it only because it ran with the machine
+> awake — which is luck, not a property of the platform.
+>
+> **Leave the lid open for any unattended run on this box**, or change the
+> Windows power setting; there is no in-repo guard, and the artifact cannot tell
+> a suspended member from a starved one on its own.
 
 ## 5. Stage B — what the caps are worth
 

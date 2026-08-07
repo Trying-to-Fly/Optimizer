@@ -1,5 +1,23 @@
 # HANDOFF — Plane Optimizer (updated 2026-08-07, eighteenth session)
 
+> ## LEAVE THE LID OPEN FOR ANY UNATTENDED RUN ON THE WSL BOX (measured 2026-08-08)
+>
+> IPOPT's `max_wall_time` is a WALL clock, so a suspended process is charged for
+> its suspension and dies reporting `Maximum_WallTime_Exceeded` — a member that
+> was asleep is indistinguishable in the artifact from a starved corner. The
+> other device lost nine cells to exactly this on macOS, where `caffeinate -i`
+> is the fix.
+>
+> **This box does it too, and there is no `caffeinate` here.** Measured by
+> closing the lid: two `uptime` readings imply boot times 26½ minutes apart,
+> which is only possible if the VM's clock stopped (wall 3 h 31 m against uptime
+> 3 h 05 m). An earlier version of `RCV2_CAP_PRICING.md` §4 claimed WSL does not
+> suspend; it was wrong and is corrected there.
+>
+> The `20260807T061330` battery escaped it — all six of its losses burned their
+> full budgets at 205-317 iterations — but that is because the machine happened
+> to stay awake, not because the platform prevents it.
+
 ## NEW this session (eighteenth, 2026-08-07): the rcv2 battery converged, and the fuselage is pinned between two declared limits
 
 **The battery: `runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2`,
