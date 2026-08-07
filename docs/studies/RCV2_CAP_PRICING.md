@@ -159,6 +159,48 @@ iterations, −2×10⁻⁶), dominated by
 nearly 8× the next row (lift equilibrium). At a 300 mm root chord the nose can
 no longer be made long enough to hold the motor.
 
+### What that row actually is, at the champion
+
+`usable_nose` is not "how long the nose is". From `nose_split`:
+
+    r_req       = can_width / d_min
+    behind      = sqrt(1 - r_req^2)
+    usable_nose = pod_nose * behind
+
+so the length available for the motor **collapses to zero as the pod section
+approaches the can's diameter**, however long the nose is. Evaluated on the
+champion's own design vector (no solve — this is arithmetic):
+
+| | |
+|---|---|
+| pod section | `pod_xs` **0.874**, d_eq 67.64 mm — SMALLER than the 77.4 mm spec |
+| section shape | `pod_wh` **1.0017** — square to four decimal places |
+| narrow dimension | height, 67.58 mm; can needs 49.00 mm, `r_req` 0.7252 |
+| nose | `pod_nose` 74.07 mm, of which the cone eats 23.07 |
+| **usable nose** | **51.00 mm against a 51.00 mm can — slack −0.00 mm** |
+
+**The square section is not a coincidence, it is the optimum.** `pod_xs` sizes
+the section and `pod_wh` shapes it, orthogonally: `w*h = d_eq^2` whatever the
+ratio. At constant area a square MAXIMISES the narrow dimension, which is the
+one the motor can has to pass through — so the optimizer has already found the
+best shape this row can be given, and the design sits exactly on the row anyway.
+
+Sensitivities at that point, per +5%:
+
+| | usable nose |
+|---|---|
+| `pod_xs` (section size) | **+2.57 mm** |
+| `pod_nose` (nose length) | +2.55 mm |
+| `pod_wh` (section shape) | **−1.42 mm** |
+
+`pod_wh` going the WRONG way is the trap: past 1.0 the height becomes the narrow
+dimension and shrinks. Anyone reaching for "widen the pod" should widen `pod_xs`,
+not `pod_wh`.
+
+So the pod is squeezed DOWN by drag and held UP by the motor can, with its shape
+already optimal — which is why the two length levers (§5) buy about a minute
+each and no more.
+
 **That row is the one to work on, and it is not in HANDOFF's list of four.** The
 2026-08-07 battery reached the same conclusion independently: **five of its six
 failures name `aircraft.py:1138` as their closest miss**, by 1.4 to 3.3 mm of
