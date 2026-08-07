@@ -665,3 +665,182 @@ def test_a_sweep_with_no_legal_point_says_so_at_note_zero(
     assert "NO AIRWORTHY OPERATING POINT EXISTS" in result.notes[0]
     # and the numbers are IN the sentence, not left to the aircraft file
     assert "against a" in result.notes[0]
+
+
+# --- the two declared pod limits, and whether they are BINDING --------------
+#
+# The 2026-08-07 rcv2 champion landed EXACTLY on both — fineness 8.000000080
+# against a ceiling of 8.0, and pod_tail on 1.800000 x d_eq against a floor of
+# 1.8 — in an artifact that recorded the raw numbers and said nothing. Reading
+# either off `active_bounds` was never possible: both are constraint ROWS, and
+# that field reports design-variable box bounds only.
+#
+# The two readings are opposite in what they license, so they are separate
+# flags: a binding fineness ceiling is a defect report against the drag model,
+# while a binding boat-tail floor is what forbids deleting the floor as a
+# measured no-op.
+
+
+class _POD:
+    """The smallest aircraft `_pod_limit_activity` can describe."""
+
+    DV_DEFAULTS: ClassVar[dict] = {}
+    fuselage_topology = "pod_boom"
+    fineness_max = 8.0
+    boat_tail_min_d_eq = 1.8
+
+    def __init__(self, tail_len=0.1218, d_eq=0.06764):
+        self._tail_len, self._d_eq = tail_len, d_eq
+
+    def pod_dims(self, _d):
+        return {"d_eq": self._d_eq, "tail_len": self._tail_len}
+
+
+class _Result:
+    def __init__(self):
+        self.notes: list[str] = []
+
+
+def _activity(aircraft, fineness, theta_max=18.9):
+    ab = {"fineness": fineness, "theta_max_deg": theta_max, "theta_sep_deg": 12.0}
+    result = _Result()
+    return solve._pod_limit_activity(aircraft, {}, ab, result), result.notes
+
+
+def test_a_champion_on_the_fineness_ceiling_is_a_defect_report():
+    """The constraint's own comment says so; nothing acted on it."""
+    out, notes = _activity(_POD(), fineness=8.000000079955466)
+
+    assert out["fineness_ceiling_active"] is True
+    assert out["fineness_max"] == 8.0
+    assert any("FINENESS CEILING IS BINDING" in n for n in notes)
+    assert any("defect report" in n for n in notes)
+
+
+def test_a_pod_clear_of_the_ceiling_is_accused_of_nothing():
+    """A scary note on every run is the same failure as no note at all."""
+    out, notes = _activity(_POD(), fineness=6.20)
+
+    assert out["fineness_ceiling_active"] is False
+    assert not any("FINENESS" in n for n in notes)
+
+
+def test_a_boat_tail_still_on_its_floor_forbids_deleting_the_floor():
+    """FUSELAGE_DRAG_PLAN 7 is measure-then-move, and this is the measurement:
+    the floor was kept ONE battery to find out whether the new base-drag term
+    had made it inactive. Still pinned means the term is too weak, so the
+    constants are what to revisit — deleting the floor would restore the exact
+    exploit the term was added to close."""
+    out, notes = _activity(_POD(tail_len=1.8 * 0.06764, d_eq=0.06764), fineness=7.0)
+
+    assert out["boat_tail_floor_active"] is True
+    assert out["boat_tail_d_eq"] == pytest.approx(1.8)
+    assert any("BOAT-TAIL FLOOR IS STILL ACTIVE" in n for n in notes)
+    assert any("must NOT be deleted" in n for n in notes)
+
+
+def test_a_boat_tail_that_came_off_its_floor_licenses_deleting_it():
+    """The other half of the same decision, and the outcome the plan predicted
+    (theta_max relaxing toward the 12 deg threshold). It must report cleanly, or
+    a real no-op would never be recognised as one."""
+    out, notes = _activity(
+        _POD(tail_len=2.4 * 0.06764, d_eq=0.06764), fineness=7.0, theta_max=13.0
+    )
+
+    assert out["boat_tail_floor_active"] is False
+    assert out["boat_tail_d_eq"] == pytest.approx(2.4)
+    assert notes == []
+
+
+def test_a_topology_the_rows_do_not_apply_to_claims_nothing():
+    """Both rows are pod-boom only — the integrated body sits at f ~ 14.7 by
+    construction, so reporting its fineness against an 8.0 ceiling it was never
+    held to would manufacture a defect."""
+    integrated = _POD()
+    integrated.fuselage_topology = "integrated"
+
+    out, notes = _activity(integrated, fineness=14.7)
+
+    assert out == {}
+    assert notes == []
+
+
+def test_an_aircraft_declaring_neither_limit_is_not_described_wrongly():
+    """Fail-open, the FINDINGS 28.3 posture: a diagnostic is the last thing that
+    should be able to destroy hours of solving, or to invent a bound."""
+    bare = _POD()
+    bare.fineness_max = None
+    bare.boat_tail_min_d_eq = None
+
+    out, notes = _activity(bare, fineness=8.0)
+
+    assert out == {}
+    assert notes == []
+
+
+# --- whose trade rate the shadow price is ----------------------------------
+#
+# The re-solve battery re-runs the +20 g bump on the SHIPPED design for one
+# reason: a price quoted against a superseded prop is not this design's. When
+# that bump fails the code falls back to the multistart screen's value — the
+# number the phase exists to replace — and the artifact said nothing.
+#
+# Live on 2026-08-07: the rcv2 battery lost its final bump to the wall clock and
+# reported -0.07094 per gram, measured on the 105.818 min pre-study aeroplane on
+# the incumbent prop, beside a 122.123 min champion flying `ancf_12x10`. Neither
+# bump member is recorded in the artifact, so the provenance was not
+# reconstructable from it either.
+
+CHAMP = 122.122794
+SCREEN_ON = 105.818385
+
+
+def test_a_price_measured_on_the_shipped_design_says_so():
+    per_g, source = solve._shadow_price_provenance(
+        {"objective_value": 120.70}, -0.0709, SCREEN_ON, CHAMP
+    )
+
+    assert source["source"] == "final_design"
+    assert source["measured_on_objective"] == CHAMP
+    assert per_g == pytest.approx((120.70 - CHAMP) / 20.0)
+
+
+def test_a_fallback_price_names_the_aeroplane_it_was_measured_on():
+    """The number is still the best available; what must not happen is quoting
+    it as though it belonged to the champion beside it."""
+    per_g, source = solve._shadow_price_provenance(
+        {"failed": "Maximum_WallTime_Exceeded"}, -0.07094085, SCREEN_ON, CHAMP
+    )
+
+    assert source["source"] == "multistart_screen"
+    assert per_g == pytest.approx(-0.07094085)
+    # the two different aeroplanes, both named, so the gap is visible
+    assert source["measured_on_objective"] == pytest.approx(SCREEN_ON)
+    assert source["reported_beside_champion"] == pytest.approx(CHAMP)
+    assert source["final_bump_failed"] == "Maximum_WallTime_Exceeded"
+
+
+def test_no_price_at_all_is_distinct_from_a_price_from_the_wrong_aeroplane():
+    """"Measured on the wrong design" and "not measured" are different claims
+    and only one of them has a number behind it. Collapsing them would let a
+    run with NO shadow price read as one with a slightly stale one."""
+    per_g, source = solve._shadow_price_provenance(
+        {"failed": "Maximum_WallTime_Exceeded"}, None, None, CHAMP
+    )
+
+    assert per_g is None
+    assert source["source"] == "none"
+    assert source["measured_on_objective"] is None
+
+
+def test_the_provenance_is_recorded_even_when_nothing_went_wrong():
+    """A field that appears only on failure is one a reader learns to ignore,
+    and its absence would be indistinguishable from an older artifact."""
+    _, source = solve._shadow_price_provenance(
+        {"objective_value": 120.70}, -0.0709, SCREEN_ON, CHAMP
+    )
+
+    assert set(source) == {
+        "source", "measured_on_objective", "reported_beside_champion",
+        "final_bump_failed",
+    }

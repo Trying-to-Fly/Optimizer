@@ -27,7 +27,12 @@ cannot test that — an active set is a property of a converged one — so the
 control this comparison already required is the answer to it. Reported below as
 `spar bounds`.
 
-Usage:  uv run python stage5_hessian.py [out.json]
+RUN 2026-08-07, and the answer was no: L-BFGS saved 3.34 GB and did not converge
+inside the 30 min cap, against a baseline that converged in 17.38 min. Do not
+adopt `limited-memory`. Result in `docs/studies/hessian_stage5.json`, read in
+FINDINGS §29; re-run only to answer the questions §29.1 leaves open.
+
+Usage:  uv run python tools/bughunt/hessian_experiment.py [out.json]
 """
 import json
 import sys
@@ -44,6 +49,23 @@ ms, _ = cli.load_mission(Path("missions/endurance_sample.py"))
 
 _real_solve = asb.Opti.solve
 
+#: Iteration count of every `Opti.solve` completed in the current arm.
+#:
+#: Captured HERE because the success path cannot report it afterwards:
+#: `_solve_nlp` returns `_pack(sol)`, which carries no solver statistics, and
+#: only the FAILURE path attaches `iter_count` (through `SolveFailure`). The
+#: 2026-08-06 run proved the consequence — the arm that CONVERGED reported
+#: `"iter_count": null` while the arm that timed out reported 871, so the
+#: experiment recorded iterations only when it did not get an answer. That is
+#: exactly backwards for a trade whose entire claim is that L-BFGS drops the
+#: second-derivative graph and PAYS IN ITERATION COUNT.
+#:
+#: A list rather than one value, because the patch below applies to every
+#: `Opti.solve` in the process. `_solve_nlp` builds a single NLP today, so this
+#: should hold exactly one entry — `opti_solve_calls` reports how many there
+#: actually were rather than assuming.
+_ITER_COUNTS: list[int | None] = []
+
 
 def _with_options(extra: dict):
     """Merge extra IPOPT options into every `opti.solve` in this process.
@@ -56,13 +78,19 @@ def _with_options(extra: dict):
     """
     def patched(self, *a, **kw):
         kw["options"] = {**(kw.get("options") or {}), **extra}
-        return _real_solve(self, *a, **kw)
+        sol = _real_solve(self, *a, **kw)
+        try:
+            _ITER_COUNTS.append((self.debug.stats() or {}).get("iter_count"))
+        except Exception:  # noqa: BLE001 — a measurement may not fail the arm
+            _ITER_COUNTS.append(None)
+        return sol
 
     asb.Opti.solve = patched
 
 
 def arm(label: str, extra: dict) -> dict:
     _with_options(extra)
+    _ITER_COUNTS.clear()
     memory.reset_peak_rss()
     t0 = time.monotonic()
     failed = None
@@ -71,9 +99,12 @@ def arm(label: str, extra: dict) -> dict:
     except Exception as e:  # noqa: BLE001 — a failed arm is a result, not a crash
         r, failed = {}, f"{type(e).__name__}: {e}"
         status = getattr(e, "return_status", None)
+        # The failure carries its own count and it is the authority here: the
+        # solve raised, so it never returned through the patch above.
         iters = getattr(e, "iter_count", None)
     else:
-        status, iters = "Solve_Succeeded", None
+        status = "Solve_Succeeded"
+        iters = max((n for n in _ITER_COUNTS if n is not None), default=None)
     out = {
         "arm": label,
         "options": extra,
@@ -81,6 +112,7 @@ def arm(label: str, extra: dict) -> dict:
         "peak_gb": round(memory.peak_rss_gb(), 2),
         "status": status,
         "iter_count": iters,
+        "opti_solve_calls": len(_ITER_COUNTS),
         "failed": failed,
         "objective_value": r.get("objective_value"),
         "auw_kg": r.get("auw_kg"),

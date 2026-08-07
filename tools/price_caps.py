@@ -17,13 +17,18 @@ validated on `vtail_sample`, where relaxing the SM floor 0.08 -> 0.05 turned two
 chronic timeouts into converged solves in ~5 minutes each and identified the
 third corner as genuinely empty.
 
-    # the whole overnight plan, resumable, one solve per process
-    .runqueue/runlock uv run python tools/price_caps.py drive
+    # the whole overnight plan, resumable, one solve per process.
+    # NOTHING ELSE MAY BE SOLVING: a cell peaks near 15 GB and so does a
+    # battery, and two of them on one machine is the swap path solve.py warns
+    # about. There is no lock that enforces this — check with `ps` first.
+    uv run python tools/price_caps.py drive
 
     # one cell, if you want to check something by hand
     uv run python tools/price_caps.py cell --member tail_ttail --relax sm_floor_0.05
 
-    # what has been measured so far
+    # what has been measured so far. Cells land in `runs/_capprice/` (untracked);
+    # the ones committed with this tool are read with
+    #   PRICE_CAPS_OUT=docs/studies/rcv2_cap_pricing uv run python tools/price_caps.py report
     uv run python tools/price_caps.py report
 
 WHY ONE PROCESS PER CELL
@@ -93,12 +98,41 @@ MEMBERS: dict[str, dict] = {
 #: `span_cap_2.2` is included because HANDOFF lists it, and reported with the
 #: caveat that this model prices none of what the 2.0 m cap is actually for
 #: (transport, storage, hand-launch, print bed — see `VTailSample.span_cap_m`).
+#: The two POD-LENGTH levers, added 2026-08-07 because the row that actually
+#: blocks this aeroplane was not in the list above. On the
+#: `20260807T061330` battery **five of six failures name
+#: `aircraft.py:1138`, `usable_nose / motor["length"] >= 1.0`, as their closest
+#: miss** — and they miss it by 1.4 to 3.3 mm of usable nose. None of the four
+#: caps above touches it.
+#:
+#: The row is unrelievable on its own terms because the pod is a fully
+#: determined system: the fineness ceiling pins total length at exactly
+#: 8.0000 d_eq, the boat-tail floor pins the tail at exactly 1.8000 d_eq, the
+#: motor pins the nose at exactly 74.07 mm, and the bay takes what is left and
+#: must still hold the stack. So the levers are the two rows that BUY LENGTH.
+#:
+#: `boat_tail_1.5` is only expressible because `boat_tail_min_d_eq` became a
+#: named attribute this session; it was a literal inside `geometry_constraints`
+#: before, and `--set` cannot reach a literal.
+#:
+#: Not included, deliberately: a smaller motor can. It would unstick the row
+#: too, but `COMPONENT_ENVELOPES` is a nested dict rather than a scalar
+#: attribute, and swapping the motor is a hardware decision rather than a cap.
+POD_LENGTH_RELAXATIONS: dict[str, dict] = {
+    "fineness_9.0": {"set": {"fineness_max": 9.0}},
+    "boat_tail_1.5": {"set": {"boat_tail_min_d_eq": 1.5}},
+}
+
 RELAXATIONS: dict[str, dict] = {
     "none": {},
     "sm_floor_0.05": {"sm_floor": 0.05},
     "c_root_0.300": {"set": {"c_root_max_m": 0.300}},
     "span_cap_2.2": {"set": {"span_cap_m": 2.2}},
-    "kit_core": {"set": {"equipment_fit": "core"}},
+    # DIAGNOSTIC, not a proposal. The payload is not optional (see
+    # `AIRFRAME_ONLY_OMITS`); this cell answers "is this corner caused by the
+    # payload?", and a yes points at pod size rather than at the parts list.
+    "airframe_only": {"set": {"equipment_fit": "airframe_only"}},
+    **POD_LENGTH_RELAXATIONS,
 }
 
 
@@ -502,7 +536,18 @@ def reevaluate(nominal: dict, args) -> None:
 def report(args) -> None:
     cells = load_cells()
     if not cells:
-        raise SystemExit(f"nothing measured yet — {CELLS} is empty or absent")
+        # The committed cells live under docs/, not in the untracked run
+        # directory this writes to, so the bare command reads as "nothing has
+        # ever been measured" on a fresh clone that ships four measured cells.
+        committed = REPO / "docs" / "studies" / "rcv2_cap_pricing"
+        hint = (
+            f"\n  {committed / 'cells.jsonl'} DOES exist — read it with:"
+            f"\n      PRICE_CAPS_OUT={committed.relative_to(REPO)} "
+            f"uv run python tools/price_caps.py report"
+            if (committed / "cells.jsonl").exists()
+            else ""
+        )
+        raise SystemExit(f"nothing measured yet — {CELLS} is empty or absent{hint}")
     members = sorted({r["member"] for r in cells.values()})
     relaxes = sorted({r["relax"] for r in cells.values()})
     width = max(len(m) for m in members) + 2

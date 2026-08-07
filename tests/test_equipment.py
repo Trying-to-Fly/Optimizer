@@ -127,7 +127,7 @@ def test_placed_items_all_have_inits(rcv2):
         assert f"x_{item.name}" in rcv2.DV_DEFAULTS, item.name
 
 
-@pytest.mark.parametrize("fit", ["full", "core"])
+@pytest.mark.parametrize("fit", ["full", "airframe_only"])
 def test_declared_inits_are_feasible(rcv2, fit):
     """The starting point satisfies every packing row it is subject to.
 
@@ -193,15 +193,33 @@ def test_aft_bay_section_stack_is_the_binding_kind_of_tight(rcv2):
     assert 0.0 < float(stack.available) - need < 0.002
 
 
-def test_dropping_the_optional_kit_drops_its_variables_too(rcv2):
-    """`core` is a smaller NLP, not the same one with dead variables in it."""
-    rcv2.equipment_fit = "core"
-    core = {i.name for i in equipment.placed(rcv2.manifest())}
+def test_the_measuring_variant_drops_its_variables_too(rcv2):
+    """`airframe_only` is a smaller NLP, not the same one with dead variables.
+
+    It is a MEASURING variant, not a kit that may be dropped (user decision,
+    2026-08-07): omitting the payload prices what the payload costs, the way
+    `span_cap_m` prices the print bed. The aeroplane is always the full build.
+    """
+    rcv2.equipment_fit = "airframe_only"
+    stripped = {i.name for i in equipment.placed(rcv2.manifest())}
     rcv2.equipment_fit = "full"
     full = {i.name for i in equipment.placed(rcv2.manifest())}
-    assert full - core == {"companion_pi", "bec_pi", "airspeed_board", "telemetry_sik"}
-    # and the study is priced, never adopted
-    assert rcv2.priced_options == {"equipment_fit": ["core"]}
+    assert full - stripped == {
+        "companion_pi", "bec_pi", "airspeed_board", "telemetry_sik",
+    }
+    # priced, never adopted — the default is the aeroplane
+    assert rcv2.equipment_fit == "full"
+    assert rcv2.priced_options == {"equipment_fit": ["airframe_only"]}
+
+
+def test_the_payload_is_never_described_as_optional(rcv2):
+    """The BOM column read "Optional or Recommended" and transcribing it as
+    `OPTIONAL_ITEMS` claimed the companion computer is negotiable. It is the
+    mission payload — `companion_pi` exists to run the flight software this
+    aeroplane is built to fly. Pinned because the name is the whole fix, and a
+    later tidy-up that restored the old one would restore the claim with it."""
+    assert not hasattr(rcv2, "OPTIONAL_ITEMS")
+    assert "companion_pi" in rcv2.AIRFRAME_ONLY_OMITS
 
 
 # --------------------------------------------------------------------------

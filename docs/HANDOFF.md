@@ -1,4 +1,226 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-06, seventeenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-07, eighteenth session)
+
+## NEW this session (eighteenth, 2026-08-07): the rcv2 battery converged, and the fuselage is pinned between two declared limits
+
+**The battery: `runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2`,
+342.3 min, champion 122.619 min at 9.5 m/s, AUW 2.105 kg, prop `ancf_12x10`,
+pod-boom, V-tail, curve dihedral, winglet rejected (it costs 0.042 min).**
+Fingerprint `7bf6a2342bcb`, width 1, peak 14.79 GB, no resume (fresh checkpoint
+directory, so every phase was solved rather than replayed).
+
+> ## THE OPEN QUESTION FROM FINDINGS §28.4 IS ANSWERED, AND THE ANSWER IS YES
+>
+> §28.4 asked whether a CONVERGED rcv2 battery solves its own balance, and made
+> `candidates_source` the first thing to read. It reads **`"legal"`**:
+> `reported_point_violations` empty, `airworthiness_price` null, trim deflection
+> **−3.33° against a 6.53° cap**, stall 7.82 against an 8.0 m/s ceiling.
+>
+> **So the §28 failure was the 3-iteration truncation, not the aeroplane.** The
+> RC v2 manifest does not make an untrimmable aircraft once the NLP is allowed
+> to place its ten items and its ballast. Every airworthiness rule the sweep
+> filters on passes at the reported point.
+
+**It is also a far better-behaved run than its predecessor**, and the cause is
+already on main rather than anything done here — the stage-5 exact Hessian
+(`1e662e1`).
+
+| | 2026-08-06 battery | this one |
+| --- | --- | --- |
+| members failed | 10 of 22 | **6 of 26** |
+| clock on members that produced nothing | 287.7 of 417.5 min (**69%**) | 175.8 of 342.0 min (**51%**) |
+| flatness spans reported | 2 of 6 | **4 of 6** |
+| studies left with an unpriced alternative | 3 | **1** |
+
+Every one of the five discrete studies adopted a value this time. The one
+qualification is `wing_dihedral_form`: its single alternative (`polyhedral2`)
+timed out, so `curve` stands as the incumbent by default rather than by
+comparison — a verdict, but an unpriced one.
+
+All six failures are `Maximum_WallTime_Exceeded`, and **five of the six name one
+row as their closest miss**: `aircraft.py:1138`,
+`usable_nose / motor["length"] >= 1.0` — the motor-fit row. Of the five whose
+convergence trace the artifact records, flatness span 1.7 is the only *dual
+blow-up: stuck*; the other four read *plateau short of feasible*. (The sixth,
+`mass_bump`, has no trace recorded anywhere — see the counting warning.) The
+corners are still over-constrained, but the row they are starved on is now
+identified and it is the same one in nearly all of them.
+
+> **Counting warning, because two instruments disagree and one is wrong.**
+> `run.json` shows only FIVE failures and 24 members: the sixth,
+> `re-solve battery mass_bump`, is dropped from `resolve_battery` on purpose
+> (`solve.py` skips it — it is the shadow-price source, not a sensitivity), and
+> the multistart bump is skipped the same way. So **a member that burned 32.3
+> minutes and failed appears nowhere in the artifact**, and the count above comes
+> from the run log. That omission is what hid the shadow-price defect below.
+
+### The finding: the pod is pinned against BOTH of its declared limits, and nothing said so
+
+Computed from the champion's own design vector:
+
+| limit | value | declared | slack |
+| --- | --- | --- | --- |
+| fineness `f = L/d_eq` | 8.000000080 | `fineness_max = 8.0` | **+1e−08 — ON it** |
+| boat-tail `pod_tail/d_eq` | 1.799999852 | floor `1.8` | **−1e−07 — ON it** |
+| nose `pod_nose/d_eq` | 1.0951 | floor `1.0` | +6.4 mm (inactive) |
+
+**Neither was reported.** `active_bounds` cannot show them — it reports
+design-variable BOX bounds, and both of these are constraint ROWS — and
+`diagnostics.afterbody` recorded the raw numbers while leaving the reader to do
+the subtraction. This is the §27.4 shape again: a known limit that nothing
+announces is indistinguishable from a clean result.
+
+The two readings license opposite things, which is why they are now two flags:
+
+- **`fineness_ceiling_active`** — the ceiling's own constraint comment already
+  says *"Landing on it is a defect report, not an optimum."* The optimizer is
+  buying minutes by slenderising the pod past where the Hoerner form factor is
+  trustworthy, and a declared number is what stops it. **This is a defect report
+  against the fuselage drag model**, not a design.
+- **`boat_tail_floor_active`** — FUSELAGE_DRAG_PLAN §7 kept the `1.8·d_eq` floor
+  for exactly one battery to find out whether the new base-drag term had made it
+  inactive. **It has not.** θ_max is **18.9°** against a 12° separation
+  threshold — the plan predicted 12–14° — and the term charges 25.9% of body
+  drag without lifting the tail off its floor. Per the plan's own decision rule:
+  **do NOT delete the floor; the correlation constants are what to revisit.**
+
+Both now emit a diagnostic and a loud note. Reporting only — no constraint
+moved, so no objective moves and this run stays comparable.
+
+> ### THE POD IS A FULLY DETERMINED SYSTEM, AND THAT CONFOUNDS §7's EXPERIMENT
+>
+> The two limits above are not independent findings. **Three pod rows are
+> exactly active at once**, and a third one nobody was watching is the link:
+>
+> | row | value | slack |
+> | --- | --- | --- |
+> | fineness ceiling | `L = 8.0000 d_eq` (541.13 mm) | **0.000 mm** |
+> | boat-tail floor | `pod_tail = 1.8000 d_eq` (121.75 mm) | −1e−8 m |
+> | **motor fit** | `pod_nose = 74.07 mm` | **−0.00 mm** |
+>
+> The bay takes what is left (345.30 mm) and must still hold the stack — and
+> `equipment.py:383 stack.available/needed >= 1.0` appears as a violation in one
+> of the failures, so it is tight too. **The nose is sized by the MOTOR, not by
+> its 1.0·d_eq proportion floor**, which is why that floor reads 6.4 mm slack
+> while the nose cannot actually move.
+>
+> **None of these is a box bound.** `pod_xs` is 0.874 inside [0.75, 1.3] and
+> `pod_wh` is 1.0017 inside [0.65, 1.55], so `active_bounds` — the run's own
+> "what to relax next" list — reports eleven entries and **not one pod
+> variable**. The entire fuselage is set by rows that list structurally cannot
+> show. That is why both limits went unreported for a run and a half.
+>
+> **What this does to the §7 measurement.** To stop separating the boat-tail
+> needs **2.902 d_eq = 196.3 mm**; it has 121.8. The missing **74.5 mm** has to
+> come from somewhere and there is **0.000 mm** under the fineness ceiling.
+> Fattening the section does not rescue it either: **+25% on d_eq still leaves
+> the bay 9.4 mm short** of what it currently uses.
+>
+> So the verdict above stands — an active floor means the optimizer wants a
+> SHORTER tail than 1.8, so the term is not holding it open on its own — but
+> **§7 wanted to know whether the constants are too weak IN GENERAL, and this
+> battery cannot answer that.** Here the term competes against a length budget
+> exhausted by the fineness ceiling and a parts list. That contest is far
+> fiercer on `vtail_rcv2` than on `vtail_sample`, which is lighter with a
+> smaller bay. **Do not carry the "constants are too weak" verdict over to
+> `vtail_sample` without re-measuring it there.**
+>
+> Underneath is a real model-design tension worth naming: `fineness_max = 8`
+> says *no needles* and the afterbody term says *longer tail*. On an aeroplane
+> whose bay length is set by a BOM, both cannot be satisfied.
+
+### Static margin: unchanged in shape from the seventeenth session, and still disclosed rather than fixed
+
+`static_margin_nlp = 0.0800` at the speed the NLP solved for (**9.742 m/s**);
+the re-evaluation's best point is **9.5 m/s**, where SM reads **0.0572**.
+`sm_in_range: false`, gap −0.0228, `sm_read_at` names both speeds and why. This
+is the same two-speed split the seventeenth session diagnosed and called
+reporting-only, and nothing here changes that verdict — but note the two speeds
+are now genuinely different (last time the NLP optimum sat ON `v_min`, which hid
+it). **The margin the aeroplane actually flies with at its best-endurance speed
+is 0.057, not 0.080**, and which point is "best" remains a decision.
+
+Also: `sm_sign_consistent: false`, and the sign flip **survives** a 16-panel mesh
+(0.0572 → 0.0534), so refinement does not explain it. Issue 2 is untouched.
+
+`v_min_price: null` is CORRECT here and worth stating because it looks wrong
+beside `v_min_active: true`: the sweep's own peak IS at 9.5 (9.0 gives 122.15
+against 122.62), so the requirement excludes nothing.
+
+### The equipment decision reproduces on a second battery
+
+`placement_activity`: **10 placed, 10 on their forward stop, 7 determined on
+both sides.** Identical shape to 2026-08-06. The free-station freedom continues
+to buy nothing, and the delete-or-keep call in `EQUIPMENT_PLAN.md` is still
+yours — now with two independent measurements behind it.
+
+### Merged: `origin/rcv2-cap-pricing` (3 commits, not the 2 recorded)
+
+A third commit (`1e1ffc2`) was pushed 00:32. Merged at `1ff0917` base — purely
+additive (3 files, 685 insertions, **zero deletions**), touching none of the
+four files stage 5 changed, so the alarming `diff --stat` against main is just
+the branch predating `1e662e1` and no stage-5 work is reverted. Checked
+semantically rather than textually: `_solve_many`/`run` signatures match its call
+sites, `FLATNESS_SPAN_FRACTION` matches, every relaxation attribute exists with
+the right type, and its three `_convergence_trace` phrases match `solve.py`
+verbatim. Its `6c4cab7` fix is right — `rule_violations` is the function,
+`reported_point_violations` is the diagnostic key. **526 tests before and after,
+identical.**
+
+### Fixed this session
+
+- **`audit_run.py` misread three things**, which matters because it is the
+  instrument this file points at. `performance.objective` has never existed, so
+  the headline read `objective <ABSENT> min` on every artifact ever written; the
+  station check looked for `x_m` when `solve.py` writes `station_mm`, so it
+  reported the fc58751 defect as live on artifacts that had fixed it; and it did
+  not read `candidates_source` **at all** — the one field §28 calls the first
+  thing to read. `tests/test_audit_run.py`, 4 of 7 fail against the old tool.
+- **The two pinned pod limits are reported and noted** (above).
+  `boat_tail_min_d_eq = 1.8` is now a named attribute rather than a literal in
+  `geometry_constraints`, so the row the solver enforces and the slack the
+  artifact reports cannot drift. 6 new tests in `test_run_honesty.py`, all 6 fail
+  against the old code.
+- **The reported shadow price belongs to a different aeroplane, and this run is
+  a live instance.** The re-solve battery re-runs the +20 g bump on the shipped
+  design for one stated reason — "a shadow price quoted against a superseded
+  prop is not this design's trade rate". **That bump failed here** (32.3 min,
+  `Maximum_WallTime_Exceeded`), so `shadow_per_g` fell back to the multistart
+  screen's value. The artifact therefore reports **−0.07094 min/g measured on
+  the 105.818 min pre-study aeroplane on the INCUMBENT prop, beside a 122.123
+  min champion flying `ancf_12x10`** — and said nothing. Neither bump member is
+  recorded in the artifact (both are skipped as non-sensitivities), so the
+  provenance was not reconstructable from it either. Same shape as FINDINGS §28:
+  a fallback correct as POLICY that silently changes what its number MEANS.
+  `optimization.shadow_price_source` now names the source, both objectives, and
+  the failure, with a loud note; "measured on the wrong aeroplane" and "not
+  measured at all" are kept as distinct verdicts. 4 new tests, all 4 fail
+  against the old code.
+- **`price_caps.py` documented a command that cannot run** — `.runqueue/runlock`
+  exists nowhere in the repo or the branch — and its `report` reads
+  `runs/_capprice/` while the four committed cells live under `docs/`, so the
+  documented command printed "nothing measured yet" against a study that ships
+  data. The error message now names the override; the study's STATUS block said
+  its battery was still running and it has not been since ~00:30.
+
+### What to watch next
+
+- **The motor-fit row is the binding blocker.** Four of five failures miss on
+  it. It is also the row the fuselage limits above squeeze against: the pod is
+  as slender as the model allows and its tail cone as short as allowed, while
+  the nose must still swallow a 51 mm can. Pricing THAT is the natural successor
+  to `tools/price_caps.py`, whose `RELAXATIONS` do not include it.
+- **`missions/rcv2_endurance.py` is physically identical to
+  `endurance_sample.py`** — only `name` and `notes` differ. It exists solely
+  because `checkpoint_dir` derives from the mission NAME, so the only way to get
+  a separate checkpoint namespace is to clone a mission file. That is the real
+  defect under the "checkpoint fingerprint hazard"; the fingerprint already
+  guards physics, so the namespace ought to come from the aircraft too.
+- The timelapse renders PNGs only — there is no ffmpeg here and the project
+  declines to add one. An MP4 (1:28, 1920×1080) is at
+  `<run>/timelapse/timelapse.mp4`, encoded through the ffmpeg 7.1 that ships
+  inside SOLIDWORKS Flow Simulation. That build has **no libx264 and no PNG
+  decoder**, so the command `planeopt timelapse` prints cannot work as written;
+  frames go in as raw RGB from PIL and out as `mpeg4`.
 
 > ## THE SPAN CAP IS BACK AT 2.0 m (user decision, 2026-08-04)
 >

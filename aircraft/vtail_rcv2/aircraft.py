@@ -103,23 +103,44 @@ class VTailRCv2(_base.VTailSample):
     #: what the example-part build would weigh and balance at instead.
     equipment_mass_basis = "max"
 
-    #: "full" is the autopilot-development build the BOM describes. "core" drops
-    #: the parts the sheet marks Optional or Recommended — companion Pi, its
-    #: dedicated BEC and card, the airspeed sensor, the SiK telemetry radio —
-    #: which is 51 g est / 77 g max, most of it forward.
+    #: "full" is the aeroplane. It is the only build this project designs, and
+    #: the default is never changed by a study.
     equipment_fit = "full"
-    OPTIONAL_ITEMS = frozenset({
+
+    #: THESE PARTS ARE NOT OPTIONAL, AND THE SET IS NOT A KIT THAT MAY BE
+    #: DROPPED (user decision, 2026-08-07). It is a MEASURING VARIANT, and the
+    #: distinction is the whole reason it is named this way.
+    #:
+    #: The `ELECTRONICS_SPEC.xlsx` column these six came from reads "Optional or
+    #: Recommended", and transcribing that as `OPTIONAL_ITEMS` made a claim the
+    #: sheet does not support and this project does not accept: `companion_pi`'s
+    #: own recorded purpose is "runs custom flight software commanding ArduPilot
+    #: over MAVLink", i.e. it is the mission payload — the thing the aeroplane
+    #: exists to carry. A reader who met `OPTIONAL_ITEMS` would reasonably
+    #: conclude the companion computer is negotiable. It is not.
+    #:
+    #: What omitting them measures is therefore NOT "a lighter build worth
+    #: considering" but **what the payload COSTS this airframe in endurance** —
+    #: the same question `span_cap_m` asks about the print bed and
+    #: `v_min_price` asks about the wind floor. On the 2026-08-07 battery:
+    #: 132.571 min against 122.123, so the payload costs **10.448 min**, at
+    #: 1.983 kg against 2.105.
+    #:
+    #: 51 g est / 77 g max of parts, most of it forward — and it also removes
+    #: three separation rows, which is why the variant moves bay LENGTH and not
+    #: only mass.
+    AIRFRAME_ONLY_OMITS = frozenset({
         "companion_pi", "bec_pi", "sd_card_pi",
         "airspeed_board", "pitot_probe", "telemetry_sik",
     })
 
-    #: PRICED, NEVER ADOPTED (solve.optimize). Dropping the optional kit is
-    #: strictly lighter, so a study that adopted its winner would delete the
-    #: companion computer this aeroplane exists to carry and call it an
-    #: improvement. The model can see the grams and cannot see the capability,
-    #: which is exactly the posture `span_cap_m` takes toward the print bed: the
-    #: run measures the price and the user makes the call.
-    priced_options = {"equipment_fit": ["core"]}
+    #: PRICED, NEVER ADOPTED (solve.optimize). `discrete_options` adopts whatever
+    #: wins; flying without the payload is strictly lighter, so a study that
+    #: adopted its winner would delete the companion computer and report the
+    #: deletion as an improvement. The model can see the grams and cannot see the
+    #: capability, so the run measures the price and the user makes the call —
+    #: and the call has been made: the payload is fitted.
+    priced_options = {"equipment_fit": ["airframe_only"]}
 
     #: Build allowances, declared. `LANE_PLAY` is the lateral clearance between
     #: the three things that share the aft-bay section (two walls and the
@@ -162,7 +183,7 @@ class VTailRCv2(_base.VTailSample):
         it, and the packing arithmetic is about the installed part.
         """
         fit = self.equipment_fit
-        on = lambda name: fit != "core" or name not in self.OPTIONAL_ITEMS  # noqa: E731
+        on = lambda name: fit != "airframe_only" or name not in self.AIRFRAME_ONLY_OMITS  # noqa: E731
         # Pi + BEC want the nose bay; under a puller the motor is already there,
         # so they take the fallback the BOM names. A branch on a plain string
         # attribute, not on a design-variable value (symbolic-safety rule).
@@ -479,7 +500,7 @@ class VTailRCv2(_base.VTailSample):
                 why="compass desense: >=80 mm from the ESC and the battery leads",
             ),
         ]
-        if self.equipment_fit != "core":
+        if self.equipment_fit != "airframe_only":
             seps += [
                 # The SiK goes FORWARD of the GPS, not aft: aft of it there is
                 # only the boat-tail, and 100 mm aft of a top-deck GPS lands

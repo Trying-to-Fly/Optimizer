@@ -2681,3 +2681,109 @@ balanced still. Whether a CONVERGED rcv2 battery solves its own balance — it
 has `ballast_kg`, ten placement variables and the throw limit as a hard NLP
 constraint, so it should — is the open question, and `candidates_source` is now
 the first thing to read in its artifact.
+
+## 29. What the exact Hessian costs, and what it buys (2026-08-07)
+
+Stage 5 of the bug hunt, queued 2026-08-06 and never run because a 16 GB Mac
+could not run it honestly. Run on the 25 GB Linux box:
+`docs/studies/hessian_stage5.json`, driver `tools/bughunt/hessian_experiment.py`.
+
+The question was specific. A 39-variable NLP takes 5.2 s per IPOPT iteration and
+peaks above 10 GB, of which the CasADi graph is 0.81 GB (§23.4). A dense 39x39
+Hessian is 12 KB, so the gigabytes are not linear algebra on the KKT system —
+they are the second derivative of a full LiftingLine solve embedded
+symbolically, four times over. `opti.solve()` sets no `hessian_approximation`,
+so IPOPT computes that exactly, and nobody had ever asked the price.
+
+### 29.1 The paired result: L-BFGS lost, and lost clearly
+
+One solve per arm, `vtail_sample` / `endurance_sample`, same inits, back to
+back, baseline first so a machine degrading across the pair penalises the
+challenger rather than flattering it.
+
+| | exact Hessian | limited-memory |
+|---|---|---|
+| wall clock | **17.38 min** | 31.12 min |
+| peak RAM | 12.02 GB | **8.68 GB** |
+| status | **Solve_Succeeded** | `Maximum_WallTime_Exceeded` |
+| iterations | not recorded (§29.3) | **871** |
+| objective | **119.7810 min** | never reached one |
+
+L-BFGS did exactly what the theory promises on the memory side — dropping the
+second-derivative graph saved 3.34 GB, 28% — and then could not convert it into
+an answer. It spent 871 iterations and hit the 30 min `SOLVE_TIMEOUT_MIN` cap
+with its closest miss on the nose-length row, against a baseline that had a
+converged optimum in 17.38 min.
+
+**So the exact Hessian is not an oversight to be tuned away. It is buying
+convergence, and at this size it is the cheaper of the two.** The instruction
+attached to this experiment — "if L-BFGS wins, do not leave it as a patch, make
+it a declared default with the measurement behind it" — does not trigger. The
+monkeypatch stays a monkeypatch and `solve.py` gains no new knob.
+
+**What this does NOT establish.** 30 min is a cap, not a divergence proof, and
+§25.2 records a freed-spar arm that needed 45 min. L-BFGS may converge given
+more clock; what is settled is that it is decisively worse at the timeout this
+project actually runs with. Reopening it means raising the cap for BOTH arms —
+raising it only for the challenger would be the same flattery the pairing order
+exists to prevent.
+
+### 29.2 §25.2's spar prediction, closed — and reproduced across platforms
+
+The baseline arm is a real converged solve at stock settings, which is precisely
+the freed-spar-bound check §25.2 predicted but could not test on a truncated
+solve: an active set is a property of a converged one.
+
+    spar_od_center     15.131 mm   interior
+    spar_od_outer       6.530 mm   interior
+    spar_wall_center    0.600 mm   ACTIVE
+    spar_wall_outer     0.500 mm   ACTIVE
+
+**Predicted: both ODs interior, both walls binding. Observed: exactly that.**
+Freeing the ceilings (14 -> 20 mm, 12 -> 20 mm) moved the binding structural
+rows off the diameters and onto the wall thicknesses, and `spar_od_center`
+settled at 15.13 mm — genuinely above the old 14 mm ceiling, so that bound had
+been holding a variable still rather than describing anything physical.
+
+The reproduction is worth as much as the prediction. §25.2's freed arm was
+measured on macOS; this one ran on Linux, in a different session, on different
+hardware, and returned 119.7810 min, 1.8411 kg, 0.0151 m and 0.0065 m — the same
+numbers to every digit §25.2 published. A cross-platform bit-level match on a
+39-variable NLP says the solve is deterministic and platform-independent, which
+nothing in this project had previously demonstrated.
+
+Both walls landed on their LOWER bounds (0.0006 and 0.0005 m). The optimizer
+wants the thinnest wall it is permitted, which sharpens the open purchasability
+question rather than answering it: the binding quantity is now a wall thickness
+pinned at the manufacturing floor, so rounding to a catalogue OD x ID pair moves
+the exact constraint that sized the structure.
+
+### 29.3 The experiment recorded iterations only when it failed
+
+`arm()` set `iters = None` on the success path and read `e.iter_count` only from
+the exception, so the converged arm reported `"iter_count": null` while the arm
+that timed out reported 871. The one number the trade is ABOUT — L-BFGS "pays in
+iteration count" — was captured only when there was no answer to pay for.
+
+It is not recoverable after the fact: `_solve_nlp` returns `_pack(sol)`, which
+carries no solver statistics, and `solve.py:1614` passes `verbose=False`, so
+IPOPT's iteration table is not in the log either. Fixed in the driver rather
+than in `solve.py` — the patched `Opti.solve` now records
+`opti.debug.stats()["iter_count"]` for every solve in the arm, and reports
+`opti_solve_calls` beside it rather than assuming there was one.
+
+The baseline's iteration count is therefore still unknown, and stays unknown
+unless the pair is re-run. It is not needed for the verdict, which rests on wall
+clock and convergence.
+
+### 29.4 The transferable part
+
+Same shape as §26-28: **a quantity the run computes, stores, and never
+adjudicates.** IPOPT has computed an exact Hessian on every solve this project
+has ever run, at a cost nobody had measured, because the default was never a
+decision — it was an absence of one. `grep -ri "hessian\|BFGS\|limited-memory"`
+over `docs/` and `src/` returned nothing before this entry.
+
+The answer happens to endorse the default. That is the outcome to be most
+careful with: an unexamined default that turns out to be right is
+indistinguishable, from the inside, from one that was never examined.

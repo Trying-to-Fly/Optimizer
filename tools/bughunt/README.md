@@ -5,18 +5,56 @@ running them would break. It found five defects, all fixed (FINDINGS §26-28).
 These are the drivers it used, kept because two of them are unfinished work and
 the third is worth reaching for on any future artifact.
 
-**They were run on a 16 GB Mac, which is the binding constraint on everything
-below.** A solve there peaks at 10.2 GB (`vtail_sample`) or 12.0 GB
+**They were first run on a 16 GB Mac, which was the binding constraint on
+everything below.** A solve there peaks at 10.2 GB (`vtail_sample`) or 12.0 GB
 (`vtail_rcv2`), `plan_parallel` returns width 1 at every station count, and only
-~60% of wall clock reaches the CPU — the rest goes to memory compression. On a
-machine with real headroom these are much cheaper, and `--parallel > 1` becomes
-available for the first time.
+~60% of wall clock reaches the CPU — the rest goes to memory compression.
+
+**Stage 1 has since been run on a 25 GB Linux box, and the headroom is not
+cosmetic.** 99% CPU sustained and swap never touched across a 12.02 GB peak, so
+the timings below are true solver cost rather than solver cost plus compression.
+`plan_parallel` reaches width 2 there and `--parallel > 1` is available for the
+first time. Two cautions when comparing across the two machines:
+
+- **Peak RAM is not the same quantity on both.** macOS reads `phys_footprint`
+  through the sampler; Linux reads the `ru_maxrss` high-water mark. They measure
+  different things and 12.02 GB here is not 10.2 GB there plus 1.8.
+- **A paired experiment must not be spread across cores.** Stage 1's arms run
+  back to back, baseline first, on purpose; running them concurrently on a
+  roomier machine would let them contend and destroy the comparison. Headroom
+  buys each arm a clean run, not two arms at once.
 
 ## What is still to do, in priority order
 
-### 1. The Hessian experiment — `hessian_experiment.py` (NOT YET RUN)
+### 1. The Hessian experiment — `hessian_experiment.py` (RUN 2026-08-07 — L-BFGS LOST)
 
-    uv run python tools/bughunt/hessian_experiment.py stage5.json
+    uv run python tools/bughunt/hessian_experiment.py docs/studies/hessian_stage5.json
+
+**Answered. Do not adopt `limited-memory`; the exact Hessian is cheaper here.**
+Result in `docs/studies/hessian_stage5.json`, read in FINDINGS §29. Run on the
+25 GB Linux box, not the Mac — 99% CPU throughout and swap never touched, so
+neither arm paid the memory-compression tax that distorts the Mac's timings.
+
+| | exact Hessian | limited-memory |
+|---|---|---|
+| wall clock | **17.38 min** | 31.12 min (hit the 30 min cap) |
+| peak RAM | 12.02 GB | **8.68 GB** |
+| status | **Solve_Succeeded** | `Maximum_WallTime_Exceeded`, 871 iterations |
+| objective | **119.7810 min** | never reached one |
+
+L-BFGS did drop the second-derivative graph exactly as theory says — 3.34 GB,
+28% less memory — and then failed to convert it into an answer. The README's
+standing instruction ("if L-BFGS wins, make it a declared default") therefore
+does NOT trigger, and the monkeypatch stays a monkeypatch.
+
+Honest limit: 30 min is `SOLVE_TIMEOUT_MIN`, a cap and not a divergence proof,
+and §25.2 records a freed-spar arm that needed 45 min. What is established is
+that L-BFGS is decisively worse at the timeout this project actually runs with.
+Anyone reopening it should raise the cap for both arms, not just the challenger.
+
+The baseline arm also settled the freed-spar question it was doubling as, and
+reproduced §25.2's Mac numbers exactly on Linux — 119.7810 min, 1.8411 kg,
+`spar_od_center` 15.131 mm, `spar_od_outer` 6.530 mm. See FINDINGS §29.1.
 
 A 39-variable NLP takes **5.2 s per IPOPT iteration** and peaks at **10.18 GB**,
 of which the CasADi graph is only 0.81 GB (§23.4). A dense 39x39 Hessian is
@@ -61,19 +99,26 @@ truncated solve. The third,
 `test_a_sweep_with_no_legal_point_says_so_at_note_zero`, is new and is the §28
 regression: a full 18-point sweep on the heavier aeroplane, ~20 min.
 
-### 3. Merge `main` (NOT YET DONE — user's instruction: stages first)
+### 3. Merge `main` (DONE 2026-08-06, commit `1ff0917`)
 
-At the time of writing `origin/main` had **6 commits not on this branch** and
-had changed `src/planeopt/solve.py` by +157 lines — the same file carrying all
-five fixes. Read these two before merging rather than after:
+`main` and `macos-support` are the same commit; there is nothing left to merge.
+The warning below was right, and worth keeping for the shape of what it caught:
 
-- `de97e63` "A champion that meets its stability window was reported as missing
-  it" — static-margin reporting, which the `mesh_convergence_check` work touches.
-- `5356e7b` "A decision rode on a measurement `active_bounds` could never make" —
-  `active_bounds` is what the Hessian experiment's spar verdict reads.
+> Two sessions independently fixed adjacent honesty bugs; expect real conflicts,
+> not textual ones.
 
-Two sessions independently fixed adjacent honesty bugs; expect real conflicts,
-not textual ones.
+`git merge` reported no conflicts and 524 tests passed. The defect was a
+SENTENCE. `sm_read_at` (`de97e63`) explains a headline whose static margin is
+read at a different speed from the NLP's, and states its premise as "the sweep
+picks the best AIRWORTHY point" — which §28, written the same day on the other
+branch, had just shown can FAIL. Merged, that reassurance landed one line from a
+champion trimming at 4.2x its control limit. Both sentences true; together an
+all-clear on an aeroplane with no legal operating point. `candidates_source` is
+now threaded into `sm_read_at`, which says "THIS IS NOT AN ALL-CLEAR" in the
+fallback case.
+
+Nothing in a clean `git merge` could have found that. It is the argument for
+reading a merge for meaning, not just for conflicts.
 
 ### 4. Spar sizes must be purchasable (OPEN — see HANDOFF)
 
