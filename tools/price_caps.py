@@ -85,6 +85,16 @@ MEMBERS: dict[str, dict] = {
     "fuselage_integrated": {"set": {"fuselage_topology": "integrated"}},
     "dihedral_polyhedral2": {"set": {"wing_dihedral_form": "polyhedral2"}},
     "printed_mass_x1.10": {"kw": {"printed_scale": 1.10}},
+    # --- added 2026-08-07: the 20260807T061330 battery lost SIX members and
+    # this list could express only three of them, so half the evidence could not
+    # be re-run at all. The two below are plain attribute flips and a kwarg;
+    # they were missing because the study was scoped from the 2026-08-06
+    # battery's losses, and that one lost a different set.
+    "winglet_off": {"set": {"winglet": False}},
+    "winglet_continuous_cant": {
+        # exactly what `solve.optimize`'s `_wl_prep` does for this member
+        "set": {"winglet": False, "tip_dihedral_max_deg": 88.0},
+    },
     #: Not a lost member — the +20 g bump the battery rides in its own multistart
     #: batch. It is here because `solve.screen_discrete` needs the run's OWN
     #: shadow price in minutes per gram, and without it the prop screen is
@@ -94,6 +104,7 @@ MEMBERS: dict[str, dict] = {
     "mass_bump": {"kw": {"extra_mass_kg": 0.020}},
     # `flatness_<span>` is accepted dynamically — the sweep's spans depend on the
     # champion's span, which is not known until the nominal member converges.
+    # `multistart_perturbed_<n>` likewise, via `solve.multistart_inits`.
 }
 
 #: The four levers HANDOFF puts in front of the user, one cell each.
@@ -157,11 +168,21 @@ RELAXATIONS: dict[str, dict] = {
 }
 
 
-def member_spec(name: str) -> dict:
+def member_spec(name: str, aircraft=None) -> dict:
     if name in MEMBERS:
         return MEMBERS[name]
     if name.startswith("flatness_"):
         return {"kw": {"fixed": {"span": float(name.removeprefix("flatness_"))}}}
+    if name.startswith("multistart_perturbed_"):
+        # Asked of `solve` rather than reimplemented here. The draws are seeded,
+        # so replaying them locally would work today and desynchronize silently
+        # the first time that block is edited — and the draw COUNT per start
+        # depends on `aircraft.winglet`, so even the sequence is not a constant.
+        from planeopt import solve as S
+
+        index = int(name.removeprefix("multistart_perturbed_"))
+        starts = S.multistart_inits(aircraft, index + 1)
+        return {"kw": {"inits": starts[index]}}
     raise SystemExit(f"unknown member {name!r}")
 
 
@@ -204,6 +225,13 @@ def relax_spec(name: str) -> dict:
 
 # --- the record ------------------------------------------------------------
 
+def _head_commit() -> str:
+    return subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+
+
 def load_cells() -> dict[str, dict]:
     """Every cell measured so far, keyed `member|relax`. Last write wins."""
     if not CELLS.exists():
@@ -238,7 +266,7 @@ def run_cell(args) -> dict:
     aircraft, _ = load_aircraft(REPO / "aircraft" / args.aircraft)
     mission, _ = load_mission(REPO / "missions" / args.mission)
 
-    mem, rel = member_spec(args.member), relax_spec(args.relax)
+    mem, rel = member_spec(args.member, aircraft), relax_spec(args.relax)
 
     # Relaxation first, member second: a member and a relaxation may name the
     # same attribute (they do not today), and the MEMBER is the thing being
@@ -274,10 +302,7 @@ def run_cell(args) -> dict:
         "max_iter": args.max_iter,
         "sm_range": list(mission.static_margin_range),
         "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "commit": subprocess.run(
-            ["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True,
-        ).stdout.strip(),
+        "commit": _head_commit(),
         "solve_minutes": r.get("solve_minutes"),
         "peak_rss_gb": r.get("peak_rss_gb"),
         "wall_minutes": round((time.monotonic() - t0) / 60.0, 2),
@@ -579,6 +604,10 @@ def reevaluate(nominal: dict, args) -> None:
     d = result.diagnostics
     rec = {
         "member": "nominal", "relax": "none:reeval", "status": "reevaluated",
+        # Recorded here too. Every other cell carries it and this one did not,
+        # so the single row that says whether the design is AIRWORTHY was the
+        # one row whose tree could not be identified.
+        "commit": _head_commit(),
         "run_dir": str(run_dir),
         "candidates_source": d.get("candidates_source"),
         # The broken rules with BOTH numbers, under the name `solve.run` gives
@@ -785,6 +814,42 @@ def report(args) -> None:
     print("member".ljust(width) + "".join(r.ljust(col) for r in relaxes))
     for m in members:
         print(m.ljust(width) + "".join(grid[(m, rx)].ljust(col) for rx in relaxes))
+
+    _print_provenance(cells)
+
+
+def _print_provenance(cells: dict[str, dict]) -> None:
+    """Which TREE each number came from, and a warning when they differ.
+
+    The matrix invites exactly one comparison — read a row, subtract, call the
+    difference the price of a cap — and that subtraction is only valid within one
+    tree. This project's standing warning is that a model change moves every
+    objective with it (the vortex core moved the 2.0 m nominal 120.12168 ->
+    119.93422; the afterbody term and the motor-fit rows moved everything again),
+    so two cells measured either side of one are not comparable at all.
+
+    On 2026-08-07 this file held cells from SIX commits and the report said
+    nothing, printing them as one table. Cheap to state, and impossible to
+    recover afterwards if a cell is read and acted on.
+    """
+    by_commit: dict[str, list[str]] = {}
+    for key, rec in sorted(cells.items()):
+        by_commit.setdefault(rec.get("commit") or "UNRECORDED", []).append(key)
+    print()
+    if len(by_commit) == 1:
+        only = next(iter(by_commit))
+        print(f"all cells measured at {only}")
+        return
+    print(f"!! {len(by_commit)} TREES IN THIS TABLE. A difference across two of "
+          f"them is not a price")
+    print("   until the trees are shown to be solution-preserving — a model change "
+          "moves EVERY")
+    print("   objective with it. Same tree: subtract freely. Different trees: check "
+          "first, and")
+    print("   the cheap check is whether a shared cell reproduces across them "
+          "(`nominal|none`).")
+    for commit, keys in sorted(by_commit.items(), key=lambda kv: -len(kv[1])):
+        print(f"   {commit:12} {len(keys):>2} cell(s): {', '.join(keys)[:96]}")
 
 
 def main() -> None:

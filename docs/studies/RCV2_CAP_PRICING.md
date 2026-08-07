@@ -369,6 +369,52 @@ solve fixed. For `prop_choice` that has been declared since M5.3 and never
 checked against its own re-solve. The screen predicted **122.042** for the
 adopted prop; the full re-optimization returns **122.081** — 0.03%.
 
+| relaxation | objective | vs 105.818 | note |
+|---|---|---|---|
+| `span_cap` 2.0 → 2.2 m | **110.990** | **+5.172 min** | a BUILD decision, already settled at 2.0 |
+| **`fineness_max` 8 → 9** | **106.895** | **+1.076 min** | lands exactly on the new ceiling |
+| SM floor 0.08 → 0.05 | **106.669** | **+0.851 min** | lands exactly on the new floor |
+| **boat-tail 1.8 → 1.5 d_eq** | **106.270** | **+0.452 min** | saturated — see below |
+| `c_root` 0.275 → 0.300 | **fails** | | genuine corner, on the motor row |
+| **payload dropped** (`airframe_only`, −192 g) | **113.725** | **+7.907 min** | the biggest lever, and not one the model may pull |
+
+**The static-margin floor binds but is nearly worthless to relax**: giving up
+0.03 of margin — over a third of the required 0.08 — buys 51 seconds.
+
+> ### The most valuable lever here is a MODEL-VALIDITY BOUND, not a requirement
+>
+> `fineness_max = 8` is worth **more than giving up a third of the static
+> margin**, and unlike the SM floor, the span cap or the chord cap it protects
+> nothing about the aeroplane. It exists because the Hoerner form factor keeps
+> falling to f ≈ 16 while the real minimum-drag band for a body of revolution is
+> f ≈ 6–7, so past 8 the drag model is not trusted. The optimizer is buying
+> 1.08 minutes by going somewhere the model cannot vouch for — which is what
+> that row's own comment means by *"landing on it is a defect report, not an
+> optimum"*. **Raising it is not a design decision available to the user; it is
+> a request for a better fuselage drag model.**
+>
+> **It also does not mean a longer pod.** Given the extra allowance the
+> optimizer made the pod *thinner*: d_eq 67.64 → 61.99 mm (−8.4%) against a
+> length of 541 → 558 mm (+3.1%), for −14 g of AUW. Less wetted area, not more.
+
+### Three things every one of these cells agrees on
+
+Measured on the WSL box at `913d2bc`, one process per cell.
+
+1. **The bay is 345.30 mm in all three, to the micron.** It is set by the parts
+   list and nothing else moves it.
+2. **The motor row stays EXACTLY binding in all three** (`usable_nose` slack
+   ≤ 0.2 µm). No length these levers buy reaches the nose — the optimizer spends
+   every millimetre of it on slenderness until the motor row stops it again. So
+   **neither lever should be expected to unstick the failing members**, and
+   whether they do is stage D, which is unmeasured.
+3. **`boat_tail_1.5` never reached 1.5.** `pod_tail` landed on its own BOX lower
+   bound of 100 mm, leaving the relaxed row 1.53 mm of slack and inactive. So
+   +0.452 min is the *saturated* value of that lever — the whole of what
+   relaxing the row can buy given the box — and any floor at or below
+   1.523·d_eq returns the same number. Reported this way because "the price of
+   1.8 → 1.5" would be a claim about a row that was not active at the answer.
+
 ## 5d. The rescale, measured instead of argued
 
 §6.1 blamed part of the battery's losses on the ordering-row rescale that was
@@ -401,6 +447,72 @@ into a member that produces nothing.
 | idle sleep | §4 — but only if that machine slept; checkable in its own artifact |
 
 No single one of them accounts for it, and **none of them is a cap**.
+
+## 5e. Stage D — the corners priced, which is what this study was for
+
+Every earlier section prices a lever on a design that already **solves**. The
+question the study exists to answer is the other one: what unsticks a member
+that does not. Both genuine corners (§5c), in the greedy state, against all six
+levers — 12 cells, one process each, `caffeinate` and the lid open.
+
+| lever | `dihedral_polyhedral2` | `printed_mass_x1.10` |
+|---|---|---|
+| payload dropped | **129.911** (10.4 min) | **126.310** (5.5 min) |
+| `span_cap` → 2.2 m | 126.453 (3.0) | 123.199 (7.3) |
+| `fineness_max` → 9.0 | 120.256 (2.7) | 104.886 (2.8) |
+| `c_root` → 0.300 m | 119.829 (3.0) | 116.258 (14.6) |
+| SM floor → 0.05 | 119.762 (27.0), margin given up | **no design** — 396 it |
+| `boat_tail` → 1.5 | 119.409 (2.8) | **no design** — 420 it |
+| *(none)* | no design — 376 it | no design — 359 it |
+
+### Four findings, two of which correct earlier sections of this study
+
+**1. Payload then span, on all three data sets.** `nominal` (§5), and now both
+corners, rank the levers the same way. That is the most replicated result here —
+and both leaders are decisions the model explicitly cannot make.
+
+**2. The static-margin window is the WORST lever available.** It is the one
+HANDOFF frames as the stability remedy. On one corner it is last of five that
+work AND gives up over a third of the required margin AND takes nine times
+longer to solve; on the other it does not work at all. Nothing in this study
+supports moving it.
+
+**3. The corners are not the same problem, so there is no single answer.**
+`dihedral_polyhedral2` yields to every lever; `printed_mass_x1.10` refuses two.
+A cap that frees one member can be the cap with no design behind it on another —
+`c_root_0.300` is a 3-minute fix on the dihedral corner and is §5's one genuine
+failure on `nominal`. "Raise cap X" is not a well-formed remedy at this
+aeroplane's operating point.
+
+**4. `fineness_max` unsticks BOTH corners, which contradicts the prediction it
+was measured against.** `c37ee07` reasoned that neither pod-length lever should
+be expected to unstick a failing member, because the motor row stays exactly
+binding in every stage-B cell (slack ≤ 0.2 µm) and every millimetre bought goes
+to slenderness rather than nose margin. That reasoning is sound on a design that
+solves, and it does not carry to one that does not: on both corners
+`fineness_9.0` converges, and it is the FASTEST lever on both (2.7 and 2.8 min).
+On `printed_mass_x1.10` it also produces much the worst aeroplane (104.886
+against span's 123.199) — it frees the corner cheaply and leaves a bad design,
+which is a different thing from being the right lever.
+
+> **`boat_tail_1.5` inherits `c37ee07`'s saturation caveat.** That lever never
+> reaches 1.5 — `pod_tail` lands on its own box lower bound of 100 mm and leaves
+> the relaxed row inactive — so 119.409 on the dihedral corner is the SATURATED
+> value, and the `printed_mass` failure is a failure of *whatever the box
+> allows*, not of a 1.5 d_eq boat tail.
+
+### And a correction to this study's own instrument
+
+§5c called `usable_nose / motor["length"] >= 1.0` the row that blocks this
+aeroplane, on a count of four independent corners. With all 12 corner cells in,
+`tools/price_caps.py misses` ranks **lift equilibrium first (4 stuck cells) and
+`usable_nose` second (3)**.
+
+More importantly, **the closest-miss row does not predict which lever frees a
+corner**, and this study has a direct counterexample: `printed_mass_x1.10` misses
+on lift equilibrium and is freed by a pod-length lever anyway. So the tally is a
+signal about where solves stall, and it is NOT a shortlist of what to fix. It is
+reported that way now.
 
 ## 6. What the converged rows do NOT license
 
@@ -438,21 +550,18 @@ committed with this study are under `docs/`, so reading THEM takes the override:
 
 ## 8. Still open
 
-**The study priced the caps and never priced the corners.** Stage D exists to
-run every lever against every member that FAILS, and it skipped itself reporting
-`stuck corners: none` — correctly, because at the time it ran the only
-configuration measured was the declared baseline, where all six converge. The
-two genuine corners (§5c) surfaced hours later, in the greedy state, long after
-that stage was over.
-
-So the question this study was built to answer is the one it has not answered:
+Stage D is measured (§5e), so the question this study was built for is answered.
+What remains:
 
 | | |
 |---|---|
-| **price the two real corners** | `dihedral_polyhedral2` and `printed_mass_x1.10`, both in the greedy state, against all six levers — 12 cells |
-| `usable_nose` | the closest miss in FOUR independent corners (§5, §5c, the 1.82 m span, the 2026-08-07 battery) and touched by none of HANDOFF's four caps. The one to bet on |
 | the span floor | known to lie between 1.82 and 1.88 m; not bisected |
 | flatness relaxations | never run against the stuck spans — deliberately deprioritised, since the design sits on the 2.0 m cap regardless |
+| `fineness_max` | §5e finds it unsticks both corners, and `c37ee07` shows raising it is a request for a better fuselage drag model rather than a decision the user can make. FUSELAGE_DRAG_PLAN tiers 2-3 are worth more than that plan estimated |
+| the 2026-08-07 battery's other losses | `winglet_off`, `winglet_continuous_cant` and the perturbed multistarts are expressible now (`cbd43e2`) and unpriced |
 
-Everything else is measured: all six stage-F spans, the greedy chain (§5c), and
-the rescale (§5d).
+**The headline for whoever picks this up:** none of the four caps HANDOFF names
+is a good answer. The two levers worth real minutes are the payload and the span
+cap, both of which are the user's call and neither of which the model can
+evaluate; the static-margin window is the worst lever measured; and the caps
+interact with the member, so there is no single cap to raise.

@@ -348,6 +348,37 @@ def _convergence_trace(stats: dict, tail: int = 25) -> dict:
 POD_LIMIT_ACTIVE_REL = 1e-6
 
 
+def multistart_inits(aircraft, count: int) -> list[dict]:
+    """The perturbed starting points `optimize` uses, as a reusable sequence.
+
+    PUBLIC because it is the only honest way for a tool to reproduce a battery's
+    `perturbed_N` member. The draws come from a seeded generator, so replaying
+    them elsewhere is possible — and doing it by copying these six lines into
+    `tools/` would create a second source of truth that desynchronizes silently
+    the first time this block is edited, which is the failure `_TRACE_READINGS`
+    documents itself against. One generator, one caller-visible sequence.
+
+    Seeded at 0 deliberately: a battery's multistart must be reproducible, or a
+    member that failed cannot be re-run and diagnosed. Note the draw COUNT per
+    start depends on `aircraft.winglet`, so the sequence is a property of the
+    aircraft as well as the index.
+    """
+    rng = np.random.default_rng(0)
+    out = []
+    for _ in range(count):
+        inits = {
+            "span": float(1.8 * rng.uniform(0.88, 1.12)),
+            "c_root": float(0.22 * rng.uniform(0.88, 1.12)),
+            "taper": float(np.clip(0.68 * rng.uniform(0.85, 1.15), 0.45, 0.95)),
+            "V": float(11 * rng.uniform(0.85, 1.2)),
+        }
+        if getattr(aircraft, "winglet", False):
+            inits["wl_len"] = float(0.12 * rng.uniform(0.5, 1.8))
+            inits["wl_cant"] = float(rng.uniform(60.0, 85.0))
+        out.append(inits)
+    return out
+
+
 def _shadow_price_provenance(
     final_bump: dict,
     screen_per_g: float | None,
@@ -2507,21 +2538,11 @@ def optimize(
                 phase_minutes.get(label, 0.0) + (time.monotonic() - t_phase) / 60.0, 1
             )
 
-    rng = np.random.default_rng(0)
     # The nominal start is warmed; the PERTURBED starts are deliberately left
     # cold, so multistart still answers "does this converge from elsewhere?".
     # A warm start that also seeded them would agree with itself by construction.
     jobs = [("nominal", dict(warm))]
-    for i in range(multistart - 1):
-        inits = {
-            "span": float(1.8 * rng.uniform(0.88, 1.12)),
-            "c_root": float(0.22 * rng.uniform(0.88, 1.12)),
-            "taper": float(np.clip(0.68 * rng.uniform(0.85, 1.15), 0.45, 0.95)),
-            "V": float(11 * rng.uniform(0.85, 1.2)),
-        }
-        if getattr(aircraft, "winglet", False):
-            inits["wl_len"] = float(0.12 * rng.uniform(0.5, 1.8))
-            inits["wl_cant"] = float(rng.uniform(60.0, 85.0))
+    for i, inits in enumerate(multistart_inits(aircraft, multistart - 1)):
         jobs.append((f"perturbed_{i}", {"inits": inits}))
     # the +20 g shadow-price bump is independent of the champion, so it rides
     # the same batch; its delta is computed afterwards

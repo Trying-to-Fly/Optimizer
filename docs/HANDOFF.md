@@ -1,4 +1,81 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-07, eighteenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-08, eighteenth session)
+
+## NEW (Mac side of the eighteenth session, 2026-08-07/08): the caps are priced, and none of the four is the answer
+
+**`docs/studies/RCV2_CAP_PRICING.md` is complete**, including stage D — the
+question the study was built for and the one `c37ee07` recorded as UNMEASURED:
+not "what does a cap cost" but "what unsticks a member that fails". 40 cells,
+`docs/studies/rcv2_cap_pricing/cells.jsonl`.
+
+> ### THE DECISION, AND IT IS NOT ONE OF HANDOFF'S FOUR CAPS
+>
+> On the champion AND on both genuine corners, the ranking is the same:
+>
+> | lever | on `nominal` | on the two corners |
+> |---|---|---|
+> | **drop the optional payload** (−192 g) | **+7.907 min** | best on both |
+> | **span cap 2.0 → 2.2 m** | **+5.170 min** | second on both |
+> | `fineness_max` 8 → 9 | +1.077 | unsticks both, FASTEST, but a model-validity bound (`c37ee07`) |
+> | SM floor 0.08 → 0.05 | +0.851 | **worst lever measured** — last on one corner, NO DESIGN on the other |
+> | boat-tail 1.8 → 1.5 | +0.452, saturated | no design on one corner |
+> | `c_root` 0.275 → 0.300 | **no design** | a 3-minute fix on one corner |
+>
+> **The two levers worth real minutes are the payload and the span cap, and both
+> are yours rather than the model's.** The static-margin window — the one this
+> HANDOFF has framed as the stability remedy — is the worst lever measured
+> anywhere in the study.
+
+**Three results that contradict something previously written here, including by
+me earlier in the same study:**
+
+- **A cap that frees one member is the cap with no design behind it on another.**
+  `c_root_0.300` fails on `nominal` (415 iterations, full budget) and fixes
+  `dihedral_polyhedral2` in 3 minutes. "Raise cap X" is not well-formed at this
+  operating point.
+- **`fineness_max` unsticks BOTH corners**, against `c37ee07`'s reasoning that
+  neither pod-length lever should be expected to — that reasoning holds on a
+  design that solves (the motor row stays binding to 0.2 µm) and does not carry
+  to one that does not.
+- **The closest-miss row does not predict which lever frees a corner.**
+  `printed_mass_x1.10` misses on lift equilibrium and is freed by a pod-length
+  lever. With all 12 corner cells in, `price_caps.py misses` ranks lift
+  equilibrium first (4 stuck cells) and `usable_nose` second (3) — so the
+  "four independent corners name the motor row" reading, which this study
+  itself pushed, is weaker than it looked.
+
+**A converged rcv2 champion is airworthy**, confirmed on both machines
+independently (`candidates_source: legal`; this study twice, the WSL battery
+once). FINDINGS §28's illegal champion was the 3-iteration truncation.
+
+### Two source fixes, both found by running rather than reading
+
+- **`solve.py` now measures SUSPENSION.** `ipopt.max_wall_time` is a wall clock
+  and charges a member for time the process spent asleep, so a napping laptop
+  and an infeasible corner produced the identical `Maximum_WallTime_Exceeded`.
+  Four cells of this study died that way; re-measured awake, three converge in
+  2-9 minutes. `time.time()` runs through sleep and `time.monotonic()` does not,
+  on both macOS and Linux, so the difference IS the suspension — no platform
+  API. Reported in the failure message past a 20-second floor (an ntpd step must
+  not read as "the machine slept") and carried in `_FAILURE_FIELDS`.
+- **Nine `test_gui.py` tests went red on any machine without the `gui` extra**,
+  where every sibling skips. Routed through one `importorskip` helper. Watched
+  both ways: 0 failed / 484 passed / 22 skipped without the extra, 42 of 42
+  passing in that file with it.
+
+> **`caffeinate -i` is necessary and NOT sufficient on a laptop.** It blocks idle
+> sleep and does nothing about **clamshell sleep** — a closed lid slept the
+> machine on battery and cost this study four cells, twice. Lid open, on AC, for
+> anything unattended.
+
+### What is open
+
+| | |
+|---|---|
+| the span floor | between 1.82 and 1.88 m, not bisected |
+| the 2026-08-07 battery's other losses | `winglet_off`, `winglet_continuous_cant`, perturbed multistarts — expressible since `cbd43e2`, unpriced |
+| `FUSELAGE_DRAG_PLAN` tiers 2-3 | worth more than that plan estimated: `fineness_max` is the best non-build lever and it is a model-validity bound, so raising it is a request for a better drag model |
+| flatness relaxations | never run against the stuck spans; deprioritised since the design sits on the 2.0 m cap |
+
 
 ## NEW this session (eighteenth, 2026-08-07): the rcv2 battery converged, and the fuselage is pinned between two declared limits
 
@@ -127,6 +204,49 @@ moved, so no objective moves and this run stays comparable.
 > Underneath is a real model-design tension worth naming: `fineness_max = 8`
 > says *no needles* and the afterbody term says *longer tail*. On an aeroplane
 > whose bay length is set by a BOM, both cannot be satisfied.
+>
+> ### BOTH LEVERS ARE NOW PRICED (2026-08-07, `docs/studies/RCV2_CAP_PRICING.md` §5)
+>
+> Measured on `nominal` at `913d2bc`, one process per cell, against a reference
+> that reproduced 105.81838501037146 — identical to eleven significant figures
+> to the cell measured at `1ff0917`, which incidentally proves stage 5's exact
+> Hessian is solution-preserving and that the `boat_tail_min_d_eq` refactor is a
+> genuine no-op.
+>
+> | lever | Δ objective | what binds afterwards |
+> | --- | --- | --- |
+> | `span_cap` 2.0 → 2.2 m | **+5.172** | a BUILD decision, already settled |
+> | **`fineness_max` 8 → 9** | **+1.076** | `f = 9.000000` — still the ceiling |
+> | SM floor 0.08 → 0.05 | +0.851 | the new floor |
+> | **boat-tail 1.8 → 1.5 d_eq** | **+0.452** | `pod_tail` BOX at 100 mm — saturated |
+> | `c_root` 0.275 → 0.300 | **fails** | the motor row, short by 5.1e−2 |
+>
+> **The most valuable lever that is not a build decision is a model-validity
+> bound.** `fineness_max` outprices giving up over a third of the required
+> static margin, and it protects nothing about the aeroplane — only the range
+> where the Hoerner form factor is trusted. So it is not a cap the user can
+> choose to raise; **it is a request for a better fuselage drag model**, and it
+> makes Tier 2/3 of `FUSELAGE_DRAG_PLAN.md` worth more than its own §6 estimated.
+>
+> Raising it makes the pod **thinner, not longer** — d_eq 67.64 → 61.99 mm
+> against length 541 → 558 mm, and −14 g.
+>
+> Three invariants held across all three cells, and they are the finding:
+> **the bay is 345.30 mm to the micron** (the parts list sets it), **the motor
+> row stays exactly binding** (slack ≤ 0.2 µm — every millimetre freed goes to
+> slenderness, not to nose margin), and **`boat_tail_1.5` never reached 1.5**
+> (`pod_tail` hit its own 100 mm box bound, leaving the relaxed row inactive
+> with 1.53 mm of slack, so +0.452 is that lever *saturated*).
+>
+> **Because the motor row stays binding under both, neither should be expected
+> to unstick the failing members.** That is stage D and it is UNMEASURED — the
+> obvious next run, and the one thing these cells do not answer.
+>
+> Independently confirmed from the other device the same morning: `c_root 0.300`
+> is a genuine corner whose dominant violation is `usable_nose / motor_length`,
+> short by 5.14e−2 — nearly 8× the next row. **Raising the chord cap is not a
+> remedy because it hits the motor row too**, which is the same row five of this
+> battery's six losses died on, found from the opposite direction.
 
 ### Static margin: unchanged in shape from the seventeenth session, and still disclosed rather than fixed
 
