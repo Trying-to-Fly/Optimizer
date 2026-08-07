@@ -164,12 +164,41 @@ def member_spec(name: str) -> dict:
     raise SystemExit(f"unknown member {name!r}")
 
 
-def relax_spec(name: str) -> dict:
+def _one_relax_spec(name: str) -> dict:
     if name in RELAXATIONS:
         return RELAXATIONS[name]
     if name.startswith("sm_floor_"):
         return {"sm_floor": float(name.removeprefix("sm_floor_"))}
     raise SystemExit(f"unknown relaxation {name!r}")
+
+
+def relax_spec(name: str) -> dict:
+    """One relaxation, or several composed with `+`.
+
+    Composition exists because the corners this study set out to price are only
+    reachable in the GREEDY state — `dihedral_polyhedral2` and
+    `printed_mass_x1.10` converge in under three minutes at the declared
+    incumbent prop and have no design at all under the adopted one (§5c). So
+    pricing a lever against them means applying `prop_12x10` AND the lever,
+    which a single-relaxation cell cannot express:
+
+        --relax prop_12x10+sm_floor_0.05
+
+    Order matters and is left-to-right, so a later term wins a key an earlier
+    one also sets. Nothing composes that way today; it is defined rather than
+    left to dict ordering because the day it does happen, silently taking one of
+    the two would be a cell whose label does not describe what it solved.
+    """
+    merged: dict = {}
+    for part in name.split("+"):
+        spec = _one_relax_spec(part)
+        merged["set"] = {**merged.get("set", {}), **spec.get("set", {})}
+        for k, v in spec.items():
+            if k != "set":
+                merged[k] = v
+    if not merged["set"]:
+        del merged["set"]
+    return merged
 
 
 # --- the record ------------------------------------------------------------
