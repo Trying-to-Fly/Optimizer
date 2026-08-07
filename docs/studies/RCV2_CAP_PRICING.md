@@ -1,24 +1,21 @@
 # Pricing the caps behind the rcv2 corners
 
-> **STATUS: INTERIM, AND NOT RUNNING.** The driver was started 2026-08-07 00:26
-> local on a 9-hour budget and stopped after stage A's first four cells; nothing
-> has run since (checked 2026-08-07 06:30, no process, `runs/_capprice/` absent).
-> Stages B through F below were never reached. Numbers here are those four cells
-> and nothing else. Raw data: `docs/studies/rcv2_cap_pricing/cells.jsonl`, one
-> JSON line per cell.
->
-> **The headline is already a reversal, so read the caveat in §3 before acting
-> on it.**
->
-> ### Stage C is answered, by a different run
->
-> Stage C asked whether a CONVERGED rcv2 design is airworthy at all. The
-> 2026-08-07 battery `runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2`
-> settles it: **`candidates_source: "legal"`**, `reported_point_violations`
-> empty, trim −3.33° against a 6.53° cap. So the FINDINGS §28 failure was the
-> 3-iteration truncation, not the aeroplane — a converged rcv2 champion does
-> solve its own balance. That battery also independently reproduces this study's
-> `nominal` (105.8 against 105.818) and its five-limits-at-once signature.
+> **STATUS: INTERIM** — stages A, B and C are measured; the three stage-B cells
+> the machine slept through are being re-measured and stage F is still to run.
+> Branch `rcv2-cap-pricing`. Raw data: `docs/studies/rcv2_cap_pricing/cells.jsonl`,
+> one JSON line per cell.
+
+## 0. The two results, before anything else
+
+1. **Every corner the battery lost converges here in 2-5 minutes.** All six
+   members, including the three studies that returned no verdict and the exact
+   member `degeneracy.py` was run on. Stage A cost ~19 minutes of solving for
+   what cost that battery 287.7 minutes of nothing.
+2. **Every failure this study produced was the laptop going to sleep**, not a
+   constraint. IPOPT's guard is a WALL clock, so a suspended process is charged
+   for the time it spends suspended. See §4 — it may also be the largest single
+   explanation for the original battery's ten losses, and it is checkable there
+   in one command.
 
 ## 1. Why
 
@@ -28,98 +25,166 @@ studies returned no verdict (tail type, both candidates; fuselage topology; wing
 dihedral) and the flatness sweep reported 2 of its 6 spans.
 
 `tools/degeneracy.py` settled what those members are: **not degenerate** (cond
-2.49, smallest singular value 0.41, LICQ holds) but **over-constrained corners**
-— 18 rows violated at once, dominated by lift equilibrium and the static-margin
-floor. FINDINGS §14.5.7 measured that more clock does not convert one.
+2.49, LICQ holds) but **over-constrained corners** — 18 rows violated at once.
+FINDINGS §14.5.7 measured that more clock does not convert one. HANDOFF names
+the remedy — raise chord, raise span, widen the SM window, or carry less kit —
+and says it is the user's decision. **None of the four had a price.**
 
-HANDOFF names the remedy — raise chord, raise span, widen the SM window, or
-carry less kit — and says it is the user's decision. **None of the four had a
-price.** This measures them, on the recipe §14.5.8 validated on `vtail_sample`.
+## 2. Stage A — the corners do not reproduce
 
-## 2. Stage A — do the corners still fail at the shipped caps?
+Current tree (`1ff0917`), 15-minute budget, one solve per process, each member
+in the configuration it declares.
 
-Every member re-run on the current tree (`1ff0917`), 15-minute budget, one solve
-per process, the configuration each member declares.
-
-| member | battery verdict | here | minutes | SM | AUW kg |
+| member | battery | here | min | SM | AUW kg |
 |---|---|---|---|---|---|
-| `nominal` | converged | **converged 105.818** | 2.64 | 0.0800 | 2.158 |
-| `tail_conventional` | **no verdict** | **converged 100.867** | 4.73 | 0.0800 | 2.229 |
-| `tail_ttail` | **no verdict** | **converged 98.118** | 3.50 | 0.0800 | 2.275 |
-| `fuselage_integrated` | **no verdict** | **converged 102.001** | 2.44 | 0.0800 | 2.232 |
+| `nominal` | converged | 105.818 | 2.64 | 0.0800 | 2.158 |
+| `tail_conventional` | **no verdict** | **100.867** | 4.73 | 0.0800 | 2.229 |
+| `tail_ttail` | **no verdict** | **98.118** | 3.50 | 0.0800 | 2.275 |
+| `fuselage_integrated` | **no verdict** | **102.001** | 2.44 | 0.0800 | 2.232 |
+| `dihedral_polyhedral2` | **no verdict** | **103.362** | 2.68 | 0.0800 | 2.221 |
+| `printed_mass_x1.10` | **no verdict** | **96.504** | 2.74 | 0.0800 | 2.326 |
 
-*(remaining members still running)*
+**All six land on the same five limits at once**: `span` on its 2.0 m cap,
+`c_root` on its 0.275 m cap, `cs_frac` on its 0.4 bound, `ballast_kg` on zero,
+and the static margin **exactly on its 0.0800 floor**. The aeroplane IS in the
+corner the failures were attributed to. It simply solves there.
 
-**All four land on the same five limits at once**: `span` on its 2.0 m cap,
-`c_root` on its 0.275 m cap, `cs_frac` on its 0.4 upper bound, `ballast_kg` on
-zero, and the static margin **exactly on its 0.0800 floor** — which is what a
-binding constraint looks like (§14.5.8: the relaxed corners "both land exactly
-on whatever floor they are given"). So the aeroplane IS in the corner the
-battery's failures were attributed to. It simply solves there now, in 2-5
-minutes.
+## 3. Stage C — the converged champion is airworthy
 
-## 3. The caveat that has to be read first
+`diagnostics.candidates_source` = **`legal`**, and notes[0] is the ordinary
+stall caveat rather than §28's fallback banner.
 
-**The battery ran on a tree that has since been reverted.**
+This closes the question §28.4 left open. That section measured a **3-iteration**
+rcv2 champion whose every swept speed was illegal (trim at 4.2x its throw limit,
+SM 0.439) and asked whether a CONVERGED battery would solve its own balance —
+it has `ballast_kg`, ten placement variables and the throw limit as a hard NLP
+row, so it should. **It does.**
 
-| | |
-|---|---|
-| battery started | 2026-08-06 03:17 |
-| the ordering-row rescale reverted | 2026-08-06 08:22 (`1363ea8`) |
+## 4. Every failure here was idle sleep, and the clock is a wall clock
 
-That rescale was **provably solution-preserving** (nine converged members
-matched to eight significant figures) and **cost ~45% in solve time**; it took
-`winglet_study__off` from 5.18 to 27.50 min and pushed
-`winglet_study__continuous_cant` — which had converged in 11.97 min — past its
-30-minute budget while still converging. The battery ran with it in place; the
-revert landed five hours later.
+Nine cells "exceeded" a 30-minute wall budget after 2-6 minutes of solving. The
+cause is not the solver:
 
-So an unknown share of the ten lost members was **that regression, not a cap**,
-and the four converged members above are consistent with the share being large.
+```
+00:16:46  Entering Sleep state due to 'Idle Sleep'
+00:42:46  Entering Sleep state ...   01:02:18 'Maintenance Sleep'
+01:19:26  01:35:29  01:52:34  02:10:26  02:26:53  ...
+```
 
-The revert commit already drew the line on its own evidence, and it is the line
-this study has to keep drawing: genuine corners read *"dual blow-up: stuck, not
-slow"*, while the regression's victim read *"the primal side stopped moving."*
-`solve._convergence_trace` prints that reading and this harness records it.
+`solve._solve_nlp` sets `ipopt.max_wall_time`, deliberately and correctly — it
+is protecting the run's wall clock against a solve that starts swapping
+(HANDOFF, and the comment at `solve.py:1618`). But a **suspended process is
+charged for its suspension**, so a member that spans an idle-sleep window is
+killed for time it never got to use.
 
-**What the four converged rows do NOT license:** "the caps are fine." They
-license "these four members are not cap-blocked on the current tree." Only the
-members that still fail can be used to price a cap, which is what stages D and E
-are for.
+| cell | ran (local) | verdict | machine |
+|---|---|---|---|
+| six baselines + `sm_floor_0.05` | 00:17-00:41 | **all converged** | awake |
+| `c_root_0.300` | 01:12-01:18 | wall-time | slept 01:02-01:18 |
+| `span_cap_2.2` | 02:06-02:08 | wall-time | slept 01:52-02:08 |
+| `kit_core` | 02:51-02:54 | wall-time | slept 02:26-… |
 
-## 4. A second difference, smaller but real
+Perfect separation, and the 31-, 48- and 43-minute gaps BETWEEN those cells are
+the machine asleep between them. `solve._convergence_trace` called all three
+*"still converging when the clock stopped — the one case where a larger
+`--solve-timeout-min` may actually pay"*, which is exactly right and, on its
+own, would have sent the next reader to raise a cap that was never the problem.
 
-The battery's discrete studies run **greedily** — each study solves with the
-previously adopted values, so its `tail_conventional` member carried the adopted
-prop and topology. The cells above carry each member's **declared baseline**
-(incumbent prop `ancf_11x6`). Same label, different aeroplane.
+**The fix is one word:** `caffeinate -i <command>`. The remaining measurements
+run under it.
 
-Reproducing the greedy state is cheap and is planned: `solve.screen_discrete`
-ranks the prop catalogue at the champion's operating point **with no NLP at
-all**, so recovering the prop that battery would have adopted costs seconds. It
-is not done yet, and until it is, a converged cell here does not prove the same
-member converges in a battery.
+### What this predicts about the original battery, and how to check it in one command
 
-## 5. What is still running
+That battery started at **03:17** — unattended, overnight. If it ran on a Mac
+that was allowed to idle-sleep, some of its ten losses are this artifact and not
+corners. The signature is unmistakable and its own artifact already records it:
 
-| stage | question |
-|---|---|
-| A | *(above)* — plus `dihedral_polyhedral2`, `printed_mass_x1.10` |
-| B | what each of the four caps costs on the champion itself |
-| C | `candidates_source` on the converged champion — **is a converged rcv2 design airworthy at all**, or does its sweep have no legal point (FINDINGS §28)? |
-| D | which relaxation unsticks each corner that DOES still fail |
-| E | bisect the SM floor — "give up 0.01" and "give up 0.03" are different decisions |
-| F | the four lost flatness spans |
+    python3 -c "import json;d=json.load(open('runs/20260806T031736-.../run.json'));\
+    print([(k,v.get('solve_minutes'),v.get('return_status')) for k,v in ... if 'failed' in v])"
 
-## 6. Reproducing
+**A member that reports `Maximum_WallTime_Exceeded` with `solve_minutes` far
+below `--solve-timeout-min` did not run out of time — it was asleep.** A genuine
+corner burns its whole budget and hundreds of iterations; §14.5.7's pusher did
+187 and then 474. The three cells here died at 68, 25 and 15 iterations.
 
-`drive` must have the machine to itself — a cell peaks near 15 GB and so does a
-battery. There is no lock that enforces it; check `ps` first.
+**This matters directly for the full solve on the more powerful device.** If it
+is a Mac and it is left alone, it will lose members the same way, and the
+artifact will report them in the same words the battery used.
 
-    uv run python tools/price_caps.py drive
+### The check has been run on the WSL battery, and it comes back CLEAN
+
+The prediction above was applied to
+`runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2` (WSL, 342.3 min,
+2026-08-07). **Every one of its six losses burned its full budget**, so none of
+them is this artifact:
+
+| member | solved | budget | iterations |
+|---|---|---|---|
+| `wing_dihedral_form polyhedral2` | 33.3 | 30 | 209 |
+| `winglet continuous_cant` | 32.3 | 30 | 317 |
+| `multistart perturbed_1` | 33.3 | 30 | 206 |
+| `re-solve mass_bump` | 32.3 | 30 | — |
+| `flatness 1.76` | 22.3 | **20** | 206 |
+| `flatness 1.7` | 22.3 | **20** | 205 |
+
+Two things make this a clean read rather than a lucky one. The flatness pair
+look short against 30 but are not: the sweep runs on `FLATNESS_TIMEOUT_MIN =
+20.0`, so **the budget is per phase and the comparison has to use the right
+one** — a check that assumed `--solve-timeout-min` for every member would have
+called those two sleep artifacts. And the iteration counts are 205-317, against
+the 68/25/15 of the cells that really were asleep, which is the second half of
+§4's own signature.
+
+WSL under WSLg does not idle-suspend the way the Mac did here, so this is the
+expected result — but it had to be checked rather than assumed, because the
+consequence of being wrong is the same either way: chasing a cap that was never
+the problem.
+
+## 5. Stage B — what the caps are worth
+
+| relaxation | objective | vs 105.818 | note |
+|---|---|---|---|
+| SM floor 0.08 → 0.05 | **106.669** | **+0.851 min** | lands exactly on the new floor |
+| `c_root` 0.275 → 0.300 | *re-measuring* | | slept through |
+| `span_cap` 2.0 → 2.2 | *re-measuring* | | slept through |
+| kit `full` → `core` | *re-measuring* | | slept through |
+
+The one clean number so far says the static-margin floor **binds but is nearly
+worthless to relax**: giving up 0.03 of static margin — over a third of the
+required 0.08 — buys 51 seconds of endurance.
+
+## 6. What the converged rows do NOT license
+
+**Not "the caps are fine."** They license "these six members are not cap-blocked
+on the current tree." Two differences from the battery are unresolved:
+
+1. **The battery ran on a tree that has since been reverted.** It started
+   2026-08-06 03:17; the ordering-row rescale was reverted at 08:22 the same day
+   (`1363ea8`). That rescale was solution-preserving and cost ~45% of solve time
+   — on its own enough to push a converging member past a 30-minute budget,
+   which is what it did to `winglet_study__continuous_cant`.
+2. **The battery's studies run greedily**, so its `tail_conventional` carried the
+   adopted prop and topology; these cells carry the declared baseline
+   (`ancf_11x6`). Same label, different aeroplane. `solve.screen_discrete` ranks
+   the prop catalogue with no NLP at all, so closing this is cheap — it is not
+   closed yet.
+
+Between them and §4, there are now **three** candidate explanations for the 69%,
+and none of them is a cap.
+
+## 7. Reproducing
+
+`caffeinate -i` is a macOS command and is what §4 is about; on the WSL box it is
+neither available nor needed. `drive` must have the machine to itself either way
+— a cell peaks near 15 GB and so does a battery, and nothing enforces that, so
+check `ps` first. (There is no `.runqueue/runlock` in this repo; the earlier
+command line named one and could not run.)
+
+    caffeinate -i uv run python tools/price_caps.py drive        # macOS
+    uv run python tools/price_caps.py drive                      # WSL
     uv run python tools/price_caps.py cell --member tail_ttail --relax sm_floor_0.05
 
-`report` reads `runs/_capprice/` (untracked, written by `drive`). The four cells
+`report` reads `runs/_capprice/` (untracked, written by `drive`). The cells
 committed with this study are under `docs/`, so reading THEM takes the override:
 
     PRICE_CAPS_OUT=docs/studies/rcv2_cap_pricing uv run python tools/price_caps.py report
