@@ -7,6 +7,7 @@ running the app, not by asserting on pixels.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
@@ -17,6 +18,21 @@ import pytest
 from planeopt.gui import jobs, missionfile, runindex
 from planeopt.gui.workspace import Workspace, resolve
 from planeopt.types import MissionSpec
+
+
+def _gui(name: str):
+    """Import a `planeopt.gui` module, SKIPPING when the `gui` extra is absent.
+
+    The tests below exercise pure logic and say so — `RunQueue.__new__`, "no Qt
+    event loop needed" — but the module they reach through imports PySide6 at
+    import time, so without the extra they FAILED where every sibling skips
+    (test_fonts, test_liveview, test_newrun_dialog, and lines 449 and 584 of
+    this file). Nine red tests on a machine that simply has not installed a
+    heavy optional dependency is how a real regression goes unnoticed.
+    """
+    pytest.importorskip("PySide6.QtCore")
+    return importlib.import_module(f"planeopt.gui.{name}")
+
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -213,7 +229,7 @@ def test_the_live_frame_directory_reaches_the_child(tmp_path):
 def test_pause_writes_the_sentinel_only_for_the_running_job(tmp_path):
     """Pause must never kill: it asks, and the run stops at a boundary it
     chooses. A queued (not yet started) job has nothing to ask."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue = runner.RunQueue.__new__(runner.RunQueue)  # no Qt event loop needed
     pause_path = tmp_path / "ckpt" / "m.PAUSE"
@@ -237,7 +253,7 @@ def test_the_dialog_default_matches_the_solver_default():
     """newrun copies the number instead of importing planeopt.solve (which drags
     in aerosandbox and would stall the dialog). Copies drift; this pins them."""
     from planeopt import solve
-    from planeopt.gui import newrun
+    newrun = _gui("newrun")
 
     assert newrun.SOLVE_TIMEOUT_MIN_DEFAULT == solve.SOLVE_TIMEOUT_MIN
 
@@ -331,7 +347,7 @@ def _paused_queue(tmp_path, stdout: str = "PAUSED — stopped at a member bounda
     Built without a Qt event loop: `_on_finished` is the whole of what the queue
     does when a child ends, and it is pure state.
     """
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue = runner.RunQueue.__new__(runner.RunQueue)
     pause_path = tmp_path / "ckpt" / "m.PAUSE"
@@ -347,7 +363,7 @@ def test_a_paused_job_is_not_reported_as_done(tmp_path, monkeypatch):
     """The child EXITS 0 on a pause — deliberately, so a shell loop does not read
     it as a crash — so without a state of its own a paused battery showed the
     same '✓ done' as a finished one, with no way back to it."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, pause_path = _paused_queue(tmp_path)
     pause_path.write_text("pause requested", encoding="utf-8")
@@ -364,7 +380,7 @@ def test_a_finished_job_is_still_done_even_if_a_pause_was_requested_late(tmp_pat
     """The sentinel alone is not enough: a pause asked for after the last member
     started leaves the file behind on a run that finished and wrote artifacts.
     That run has a run directory, and a run directory means DONE."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     run_dir = tmp_path / "20260804T120000-endurance_sample-fixture"
     run_dir.mkdir(parents=True)
@@ -382,7 +398,7 @@ def test_a_finished_job_is_still_done_even_if_a_pause_was_requested_late(tmp_pat
 def test_an_ordinary_finish_is_not_mistaken_for_a_pause(tmp_path, monkeypatch):
     """No sentinel on disk — `cli.optimize` unlinks it at startup — so a run that
     was never paused must not acquire the state."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, _ = _paused_queue(tmp_path, stdout="status: M3\n")
     monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
@@ -398,7 +414,7 @@ def test_resume_requeues_the_same_job_rather_than_a_new_one(tmp_path, monkeypatc
     directory. Re-filling the New Run dialog by hand is the alternative, and a
     field typed differently would not fail loudly; it would produce one artifact
     from two configurations."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, _ = _paused_queue(tmp_path)
     job.state, job.exit_code = jobs.JobState.PAUSED, 0
@@ -413,7 +429,7 @@ def test_resume_requeues_the_same_job_rather_than_a_new_one(tmp_path, monkeypatc
 
 
 def test_only_a_paused_job_can_be_resumed(tmp_path, monkeypatch):
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, _ = _paused_queue(tmp_path)
     monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
@@ -427,7 +443,7 @@ def test_only_a_paused_job_can_be_resumed(tmp_path, monkeypatch):
 def test_resume_leaves_the_sentinel_for_the_cli_to_clear(tmp_path, monkeypatch):
     """One owner for that file. `cli.optimize` unlinks it at startup and says so,
     which is what makes a CLI resume and a GUI resume behave identically."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, pause_path = _paused_queue(tmp_path)
     pause_path.write_text("pause requested", encoding="utf-8")
@@ -537,7 +553,7 @@ def test_the_queue_file_is_written_atomically(tmp_path):
 
 def test_restore_does_not_start_anything(tmp_path, monkeypatch):
     """`restore` exists separately from `submit` for exactly this."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue = runner.RunQueue.__new__(runner.RunQueue)
     queue.jobs, queue._current, queue._process = [], None, None
