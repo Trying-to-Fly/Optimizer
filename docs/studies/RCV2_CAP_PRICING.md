@@ -124,6 +124,39 @@ without re-solving. The `20260806T031736` battery started at **03:17**,
 unattended; if it ran on a Mac allowed to sleep, some of its ten losses are this
 and not corners.
 
+**This matters directly for the full solve on the more powerful device.** If it
+is a Mac and it is left alone, it will lose members the same way, and the
+artifact will report them in the same words the battery used.
+
+### The check has been run on the WSL battery, and it comes back CLEAN
+
+The prediction above was applied to
+`runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2` (WSL, 342.3 min,
+2026-08-07). **Every one of its six losses burned its full budget**, so none of
+them is this artifact:
+
+| member | solved | budget | iterations |
+|---|---|---|---|
+| `wing_dihedral_form polyhedral2` | 33.3 | 30 | 209 |
+| `winglet continuous_cant` | 32.3 | 30 | 317 |
+| `multistart perturbed_1` | 33.3 | 30 | 206 |
+| `re-solve mass_bump` | 32.3 | 30 | — |
+| `flatness 1.76` | 22.3 | **20** | 206 |
+| `flatness 1.7` | 22.3 | **20** | 205 |
+
+Two things make this a clean read rather than a lucky one. The flatness pair
+look short against 30 but are not: the sweep runs on `FLATNESS_TIMEOUT_MIN =
+20.0`, so **the budget is per phase and the comparison has to use the right
+one** — a check that assumed `--solve-timeout-min` for every member would have
+called those two sleep artifacts. And the iteration counts are 205-317, against
+the 68/25/15 of the cells that really were asleep, which is the second half of
+§4's own signature.
+
+WSL under WSLg does not idle-suspend the way the Mac did here, so this is the
+expected result — but it had to be checked rather than assumed, because the
+consequence of being wrong is the same either way: chasing a cap that was never
+the problem.
+
 ## 5. Stage B — what every lever is actually worth
 
 Measured awake, on the nominal design (105.818 baseline).
@@ -388,12 +421,15 @@ of which is a cap.
 
 ## 7. Reproducing
 
-`drive` must have the machine to itself — a cell peaks near 15 GB and so does a
-battery. There is no lock that enforces it; check `ps` first. And it must have
-the machine AWAKE: lid open, on AC, `caffeinate -i` (§4).
+`caffeinate -i` is a macOS command and is what §4 is about; on the WSL box it is
+neither available nor needed. `drive` must have the machine to itself either way
+— a cell peaks near 15 GB and so does a battery, and nothing enforces that, so
+check `ps` first. (There is no `.runqueue/runlock` in this repo; the earlier
+command line named one and could not run.)
 
-    caffeinate -i uv run python tools/price_caps.py drive
-    caffeinate -i uv run python tools/price_caps.py cell --member tail_ttail --relax sm_floor_0.05
+    caffeinate -i uv run python tools/price_caps.py drive        # macOS
+    uv run python tools/price_caps.py drive                      # WSL
+    uv run python tools/price_caps.py cell --member tail_ttail --relax sm_floor_0.05
 
 `report` reads `runs/_capprice/` (untracked, written by `drive`). The cells
 committed with this study are under `docs/`, so reading THEM takes the override:
