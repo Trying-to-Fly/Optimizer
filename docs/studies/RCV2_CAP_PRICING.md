@@ -207,6 +207,57 @@ failures name `aircraft.py:1138` as their closest miss**, by 1.4 to 3.3 mm of
 usable nose. Two machines, two routes, same row. `POD_LENGTH_RELAXATIONS` in
 `tools/price_caps.py` is where that lead is being followed.
 
+## 5b. Stage F — a hard span floor, and a proof that was one iteration away
+
+| span | result |
+|---|---|
+| 2.00 m | 105.818 (re-derives `nominal` exactly) |
+| 1.94 m | 104.336 |
+| 1.88 m | 99.517 |
+| 1.82 m | **no design** — 176 iters, full budget, *"dual blow-up: stuck"* |
+| 1.76 m | **no design** — 183 iters, full budget, *"dual blow-up: stuck"* |
+| 1.70 m | **`Infeasible_Problem_Detected`** — proved |
+
+So three of the battery's four lost spans come back, one is a genuine corner,
+and the sweep is **not flat on the low side**: the first 60 mm below the cap
+costs 1.48 min, the second costs 4.82, and below ~1.85 m there is no aeroplane.
+The dominant miss is lift equilibrium throughout, and it grows monotonically as
+span shrinks (4.68e-02 at 1.82, 5.31e-02 at 1.76) — which is the direct evidence
+for the interval-feasibility assumption `flatness_sweep`'s downward cascade
+rests on, and which had been an argument rather than a measurement.
+
+### The cascade is not dead code — it has never been given eight seconds
+
+`flatness_sweep`'s docstring records that the infeasibility gate has never once
+fired: *"on THIS model that proof has never arrived… every failure ever
+recorded, in every run, is `Maximum_WallTime_Exceeded`, so the 2026-07-31 sweep
+spent 130.6 minutes on four spans and skipped none."*
+
+The same member, same tree, same configuration, at two budgets:
+
+| budget | outcome | after |
+|---|---|---|
+| 15 min | `Maximum_WallTime_Exceeded` | 16.04 min, **192 iterations** |
+| 30 min | **`Infeasible_Problem_Detected`** | 16.16 min, **193 iterations** |
+
+**One iteration.** The certificate was ~8 seconds past where the budget cut it
+off, and the convergence trace had said so in words — *"still converging when the
+clock stopped, the one case where a larger `--solve-timeout-min` may actually
+pay"*. It is the one case, and it paid.
+
+`FLATNESS_TIMEOUT_MIN` is 20 minutes and this member wanted 16.2, so the shipped
+sweep would have got the proof here. What it would NOT have got is the two
+neighbours above (1.82, 1.76 both grind their whole budget and read STUCK), and
+the cascade only skips spans BELOW a proof — so the proof arriving at the BOTTOM
+of the range saves nothing. **The value is in the budget being long enough at the
+first infeasible span, not at the last.** On this sweep that is 1.82 m, and it
+did not certify in 16 minutes.
+
+Worth measuring before anyone changes the constant: whether 1.82 m certifies
+given 45-60 minutes. If it does, one long member buys the three below it, and
+the sweep gets cheaper AND more honest. If it does not, the 20-minute budget is
+right and this proof was luck of the geometry.
+
 ## 6. What the converged rows do NOT license
 
 **Not "the caps are fine."** They license "these six members are not cap-blocked
