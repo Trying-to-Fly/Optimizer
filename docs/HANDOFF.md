@@ -86,6 +86,48 @@ The two readings license opposite things, which is why they are now two flags:
 Both now emit a diagnostic and a loud note. Reporting only — no constraint
 moved, so no objective moves and this run stays comparable.
 
+> ### THE POD IS A FULLY DETERMINED SYSTEM, AND THAT CONFOUNDS §7's EXPERIMENT
+>
+> The two limits above are not independent findings. **Three pod rows are
+> exactly active at once**, and a third one nobody was watching is the link:
+>
+> | row | value | slack |
+> | --- | --- | --- |
+> | fineness ceiling | `L = 8.0000 d_eq` (541.13 mm) | **0.000 mm** |
+> | boat-tail floor | `pod_tail = 1.8000 d_eq` (121.75 mm) | −1e−8 m |
+> | **motor fit** | `pod_nose = 74.07 mm` | **−0.00 mm** |
+>
+> The bay takes what is left (345.30 mm) and must still hold the stack — and
+> `equipment.py:383 stack.available/needed >= 1.0` appears as a violation in one
+> of the failures, so it is tight too. **The nose is sized by the MOTOR, not by
+> its 1.0·d_eq proportion floor**, which is why that floor reads 6.4 mm slack
+> while the nose cannot actually move.
+>
+> **None of these is a box bound.** `pod_xs` is 0.874 inside [0.75, 1.3] and
+> `pod_wh` is 1.0017 inside [0.65, 1.55], so `active_bounds` — the run's own
+> "what to relax next" list — reports eleven entries and **not one pod
+> variable**. The entire fuselage is set by rows that list structurally cannot
+> show. That is why both limits went unreported for a run and a half.
+>
+> **What this does to the §7 measurement.** To stop separating the boat-tail
+> needs **2.902 d_eq = 196.3 mm**; it has 121.8. The missing **74.5 mm** has to
+> come from somewhere and there is **0.000 mm** under the fineness ceiling.
+> Fattening the section does not rescue it either: **+25% on d_eq still leaves
+> the bay 9.4 mm short** of what it currently uses.
+>
+> So the verdict above stands — an active floor means the optimizer wants a
+> SHORTER tail than 1.8, so the term is not holding it open on its own — but
+> **§7 wanted to know whether the constants are too weak IN GENERAL, and this
+> battery cannot answer that.** Here the term competes against a length budget
+> exhausted by the fineness ceiling and a parts list. That contest is far
+> fiercer on `vtail_rcv2` than on `vtail_sample`, which is lighter with a
+> smaller bay. **Do not carry the "constants are too weak" verdict over to
+> `vtail_sample` without re-measuring it there.**
+>
+> Underneath is a real model-design tension worth naming: `fineness_max = 8`
+> says *no needles* and the afterbody term says *longer tail*. On an aeroplane
+> whose bay length is set by a BOM, both cannot be satisfied.
+
 ### Static margin: unchanged in shape from the seventeenth session, and still disclosed rather than fixed
 
 `static_margin_nlp = 0.0800` at the speed the NLP solved for (**9.742 m/s**);

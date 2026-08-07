@@ -98,12 +98,38 @@ MEMBERS: dict[str, dict] = {
 #: `span_cap_2.2` is included because HANDOFF lists it, and reported with the
 #: caveat that this model prices none of what the 2.0 m cap is actually for
 #: (transport, storage, hand-launch, print bed — see `VTailSample.span_cap_m`).
+#: The two POD-LENGTH levers, added 2026-08-07 because the row that actually
+#: blocks this aeroplane was not in the list above. On the
+#: `20260807T061330` battery **five of six failures name
+#: `aircraft.py:1138`, `usable_nose / motor["length"] >= 1.0`, as their closest
+#: miss** — and they miss it by 1.4 to 3.3 mm of usable nose. None of the four
+#: caps above touches it.
+#:
+#: The row is unrelievable on its own terms because the pod is a fully
+#: determined system: the fineness ceiling pins total length at exactly
+#: 8.0000 d_eq, the boat-tail floor pins the tail at exactly 1.8000 d_eq, the
+#: motor pins the nose at exactly 74.07 mm, and the bay takes what is left and
+#: must still hold the stack. So the levers are the two rows that BUY LENGTH.
+#:
+#: `boat_tail_1.5` is only expressible because `boat_tail_min_d_eq` became a
+#: named attribute this session; it was a literal inside `geometry_constraints`
+#: before, and `--set` cannot reach a literal.
+#:
+#: Not included, deliberately: a smaller motor can. It would unstick the row
+#: too, but `COMPONENT_ENVELOPES` is a nested dict rather than a scalar
+#: attribute, and swapping the motor is a hardware decision rather than a cap.
+POD_LENGTH_RELAXATIONS: dict[str, dict] = {
+    "fineness_9.0": {"set": {"fineness_max": 9.0}},
+    "boat_tail_1.5": {"set": {"boat_tail_min_d_eq": 1.5}},
+}
+
 RELAXATIONS: dict[str, dict] = {
     "none": {},
     "sm_floor_0.05": {"sm_floor": 0.05},
     "c_root_0.300": {"set": {"c_root_max_m": 0.300}},
     "span_cap_2.2": {"set": {"span_cap_m": 2.2}},
     "kit_core": {"set": {"equipment_fit": "core"}},
+    **POD_LENGTH_RELAXATIONS,
 }
 
 
