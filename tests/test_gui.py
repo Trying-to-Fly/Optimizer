@@ -123,6 +123,76 @@ def test_corrupt_run_json_does_not_break_the_scan(tmp_path):
     assert runindex.scan(tmp_path)[0].error
 
 
+def _renderable(summaries):
+    """Every field the run tree and the detail pane touch."""
+    for s in summaries:
+        assert isinstance(s.objective_text, str)
+        assert isinstance(s.label, str)
+        assert isinstance(s.active_constraints, list)
+        assert isinstance(s.violated_constraints, list)
+        s.has_report, s.has_3d  # noqa: B018
+
+
+@pytest.mark.parametrize("body", ["null", "[1, 2, 3]", '"a run"', "42"])
+def test_json_that_is_not_a_run_record_costs_one_flagged_row(tmp_path, body):
+    """Valid JSON, but not an object — nothing below can read it.
+
+    The runs list is fed by any folder holding a `run.json`, so it reads
+    artifacts this app did not write. `{not json` was already caught; this was
+    not, and it raised out of `scan` and emptied the whole list.
+    """
+    _write_run(tmp_path, "20260725T120000")  # a good run, which must survive
+    bad = tmp_path / "20260726T120000-not-a-record"
+    bad.mkdir()
+    (bad / "run.json").write_text(body, encoding="utf-8")
+
+    summaries = runindex.scan(tmp_path)
+    assert len(summaries) == 2, "the good run was lost with the bad one"
+    wrong, good = summaries  # newest first
+    assert wrong.error, "a file that is not a run record must say so"
+    assert good.objective_text == "110.0 min", "the good run still reads"
+    _renderable(summaries)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"constraints": [1, 2]},
+        {"constraints": "none"},
+        {"masses": "heavy"},
+        {"geometry": 3},
+        {"performance": []},
+        {"performance": {"best": []}},
+        {"aircraft": 7, "status": 3},
+    ],
+    ids=lambda o: "+".join(sorted(o)),
+)
+def test_a_wrong_typed_block_reads_as_blank_not_a_crash(tmp_path, overrides):
+    """`data.get("masses") or {}` covers a MISSING or null block and nothing
+    more: one that is present but is a list, a string or a number sailed through
+    and raised on the next `.get` — out of `scan`, taking every other run with
+    it. This module's contract is the opposite ("must list those rather than
+    refuse to start"), so the row renders with whatever it could read.
+    """
+    _write_run(tmp_path, "20260725T120000")
+    _write_run(tmp_path, "20260726T120000", **overrides)
+
+    summaries = runindex.scan(tmp_path)
+    assert len(summaries) == 2
+    _renderable(summaries)
+    assert summaries[1].objective_text == "110.0 min", "the good run still reads"
+
+
+def test_a_non_numeric_objective_reads_as_a_dash_not_a_crash(tmp_path):
+    """`objective_text` is built while the tree is being filled in, so a
+    ValueError there empties the list rather than one cell."""
+    _write_run(
+        tmp_path, "20260725T120000",
+        performance={"objective_units": "min", "best": {"objective_value": "n/a"}},
+    )
+    assert runindex.scan(tmp_path)[0].objective_text == "—"
+
+
 def test_scan_of_a_missing_root_is_empty(tmp_path):
     assert runindex.scan(tmp_path / "nope") == []
 
