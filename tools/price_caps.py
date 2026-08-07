@@ -84,6 +84,13 @@ MEMBERS: dict[str, dict] = {
     "fuselage_integrated": {"set": {"fuselage_topology": "integrated"}},
     "dihedral_polyhedral2": {"set": {"wing_dihedral_form": "polyhedral2"}},
     "printed_mass_x1.10": {"kw": {"printed_scale": 1.10}},
+    #: Not a lost member — the +20 g bump the battery rides in its own multistart
+    #: batch. It is here because `solve.screen_discrete` needs the run's OWN
+    #: shadow price in minutes per gram, and without it the prop screen is
+    #: systematically biased toward big propellers (a 14 in disc arrives
+    #: weightless — the defect that held the diameter cap at 11 in until
+    #: 2026-07-30). Reproducing the battery's greedy chain therefore starts here.
+    "mass_bump": {"kw": {"extra_mass_kg": 0.020}},
     # `flatness_<span>` is accepted dynamically — the sweep's spans depend on the
     # champion's span, which is not known until the nominal member converges.
 }

@@ -18,7 +18,8 @@
    row (§5).
 3. **Four cells "failed" because the laptop was asleep**, not because of a
    constraint. IPOPT's guard is a WALL clock and a suspended process is charged
-   for its suspension (§4).
+   for its suspension (§4). Re-measured awake, three of the four converge; the
+   fourth (`c_root_0.300`) is the study's one genuine corner.
 
 ## 1. Why
 
@@ -112,16 +113,32 @@ without re-solving. The `20260806T031736` battery started at **03:17**,
 unattended; if it ran on a Mac allowed to sleep, some of its ten losses are this
 and not corners.
 
-## 5. Stage B — what the four caps are actually worth
+## 5. Stage B — what every lever is actually worth
 
 Measured awake, on the nominal design (105.818 baseline).
 
 | relaxation | result | vs baseline |
 |---|---|---|
+| payload dropped (`airframe_only`, −192 g) | **113.725**, converged 9.41 min | **+7.907 min** |
 | `span_cap` 2.0 → 2.2 m | **110.989**, converged 2.97 min | **+5.170 min** |
+| `fineness_max` 8.0 → 9.0 | 106.895, converged 2.95 min | +1.077 min |
 | SM floor 0.08 → 0.05 | 106.669, converged 4.31 min | +0.851 min |
+| `boat_tail_min_d_eq` 1.8 → 1.5 | 106.270, converged 3.72 min | +0.452 min |
 | `c_root` 0.275 → 0.300 m | **no design** — 415 iters, full 30.92 min | — |
-| kit `full` → `core` | not measured — slept | — |
+| *+20 g reference bump* | 104.400 | −1.418 → **−0.0709 min/g** |
+
+**The two that matter are the payload and the span**, and both are decisions this
+model cannot make: the payload is why the aeroplane exists (`priced, never
+adopted`, and the call on main is that it is fitted), and the 2.0 m cap prices
+transport, storage, hand-launch and the print bed, none of which is in the model.
+
+The three pod/stability levers are real but small — about a minute each, and
+under half a minute for the boat tail.
+
+**The 20 g shadow price does not extrapolate to the payload step.** −0.0709 min/g
+predicts +13.6 min for 192 g; the measurement is +7.9. That is the re-optimization
+the local derivative cannot see, and it is the reason `screen_discrete` is a
+shortlister rather than a verdict.
 
 **Span is the binding cap and the only one worth real minutes.** At 2.2 m the
 design comes off BOTH caps — neither `span` nor `c_root` is pinned any more,
@@ -183,7 +200,6 @@ committed with this study are under `docs/`, so reading THEM takes the override:
 
 | | |
 |---|---|
-| `kit_core` | slept through twice; the only one of the four caps still unpriced |
 | stage F | 5 of 6 flatness spans unmeasured |
 | the greedy chain | §6.2 — cheap, not done |
 | `usable_nose` | §5 — the row that actually blocks this aeroplane |
