@@ -550,25 +550,42 @@ def report(args) -> None:
         raise SystemExit(f"nothing measured yet — {CELLS} is empty or absent{hint}")
     members = sorted({r["member"] for r in cells.values()})
     relaxes = sorted({r["relax"] for r in cells.values()})
-    width = max(len(m) for m in members) + 2
+
+    def render(rec: dict | None) -> str:
+        if rec is None:
+            return "-"
+        if rec.get("status") == "converged":
+            return f"{rec['objective_value']:.2f} ({rec.get('solve_minutes')}m)"
+        if rec.get("status") == "truncated":
+            return f"TRUNCATED@{rec.get('iter_count')}"
+        if rec.get("status") == "reevaluated":
+            return str(rec.get("candidates_source"))
+        # `Maximum_WallTime_Exceeded` on its own is the least informative true
+        # statement this tool can make: it is what a genuine corner and a
+        # sleeping machine both report. The iteration count and the minutes
+        # actually spent separate them, and the trace's own verdict names which
+        # one it thinks it is.
+        status = rec.get("return_status") or rec.get("status") or "?"
+        short = "WallTime" if status == "Maximum_WallTime_Exceeded" else status[:12]
+        verdict = stuck_or_cutoff(rec)
+        return (f"{short} {rec.get('iter_count')}it/{rec.get('solve_minutes')}m"
+                f"{'' if verdict == 'unknown' else ' ' + verdict}")
+
+    grid = {(m, rx): render(cells.get(f"{m}|{rx}")) for m in members for rx in relaxes}
+    # Sized to the widest thing actually in the table, so a cell can never run
+    # into its neighbour and read as one word.
+    width = max(len(m) for m in [*members, "member"]) + 2
+    col = max(len(v) for v in [*grid.values(), *relaxes]) + 2
+
     print("objective (min) if converged, else the solver's verdict\n")
-    print("member".ljust(width) + "".join(r.ljust(22) for r in relaxes))
+    print("a FAILED cell reports iterations and minutes, because the status "
+          "alone cannot\ntell a corner from a cut-off: this study's one real "
+          "corner burned 415 iterations\nand its whole 30-minute budget, while "
+          "the cells the machine SLEPT through gave up\nat 15-75 iterations "
+          "and reported the identical `Maximum_WallTime_Exceeded`.\n")
+    print("member".ljust(width) + "".join(r.ljust(col) for r in relaxes))
     for m in members:
-        row = m.ljust(width)
-        for rx in relaxes:
-            rec = cells.get(f"{m}|{rx}")
-            if rec is None:
-                cell = "-"
-            elif rec.get("status") == "converged":
-                cell = f"{rec['objective_value']:.2f} ({rec.get('solve_minutes')}m)"
-            elif rec.get("status") == "truncated":
-                cell = f"TRUNCATED@{rec.get('iter_count')}"
-            elif rec.get("status") == "reevaluated":
-                cell = str(rec.get("candidates_source"))
-            else:
-                cell = (rec.get("return_status") or rec.get("status") or "?")[:20]
-            row += cell.ljust(22)
-        print(row)
+        print(m.ljust(width) + "".join(grid[(m, rx)].ljust(col) for rx in relaxes))
 
 
 def main() -> None:
