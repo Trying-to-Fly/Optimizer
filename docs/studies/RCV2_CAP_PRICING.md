@@ -253,10 +253,34 @@ of the range saves nothing. **The value is in the budget being long enough at th
 first infeasible span, not at the last.** On this sweep that is 1.82 m, and it
 did not certify in 16 minutes.
 
-Worth measuring before anyone changes the constant: whether 1.82 m certifies
-given 45-60 minutes. If it does, one long member buys the three below it, and
-the sweep gets cheaper AND more honest. If it does not, the 20-minute budget is
-right and this proof was luck of the geometry.
+### Measured, and it says leave the constant alone
+
+The obvious next move was to raise `FLATNESS_TIMEOUT_MIN`. **That was proposed
+here three hours before it was measured, and the measurement kills it.** Same
+member, 1.82 m — the FIRST infeasible span, the only one where a proof would
+actually pay:
+
+| budget | outcome | iterations |
+|---|---|---|
+| 15 min | wall-time | 176 |
+| 60 min | wall-time | **677** |
+
+Four times the clock, no certificate, and the dual side blew up doing it:
+`inf_du` reached **3.6e+16** and `inf_pr` went BACKWARDS over the last 25
+iterations (−0.134). The trace's verdict changed accordingly — *"dual blow-up:
+the multipliers diverged while the primal side sat still. Stuck, not slow — more
+clock buys nothing"* — which is §14.5.7's finding reproduced on a different
+member of a different aircraft.
+
+So the 1.70 m proof was **luck of that geometry**, not something a longer budget
+generally buys. `FLATNESS_TIMEOUT_MIN` stays at 20: raising it would spend real
+minutes on every sweep chasing a certificate that does not arrive where it would
+be worth anything.
+
+One thing did change at 60 minutes: the dominant violation flipped from lift
+equilibrium to **`usable_nose / motor["length"] >= 1.0`, by 1.21e-01**. That is
+the third independent appearance of that row — the chord-cap corner (§5), the
+2026-08-07 battery's five-of-six failures, and now the deepest flatness corner.
 
 ## 6. What the converged rows do NOT license
 
