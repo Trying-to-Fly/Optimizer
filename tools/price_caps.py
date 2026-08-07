@@ -140,6 +140,19 @@ RELAXATIONS: dict[str, dict] = {
     # payload?", and a yes points at pod size rather than at the parts list.
     "airframe_only": {"set": {"equipment_fit": "airframe_only"}},
     **POD_LENGTH_RELAXATIONS,
+    #: NOT a relaxation — the GREEDY STATE. A battery's studies run in declared
+    #: order, each with the previous studies' adopted values, so by the time
+    #: `tail_type` is judged the aeroplane already carries the prop the prop
+    #: study adopted. Every cell in this study carries the declared incumbent
+    #: (`ancf_11x6`) instead, which is the same label on a different aeroplane
+    #: and was the study's last open caveat.
+    #:
+    #: `ancf_12x10` is not a guess: `screen` ranks it first of 65 candidates at
+    #: the champion's own operating point and its own shadow price, and it is
+    #: what the 2.0 m sample battery adopted. Running the members under it is
+    #: what turns "these converge" into "these converge where the battery ran
+    #: them".
+    "prop_12x10": {"set": {"prop_choice": "ancf_12x10"}},
 }
 
 
@@ -264,6 +277,15 @@ def run_cell(args) -> dict:
             "static_margin": r["static_margin"],
             "auw_kg": r["auw_kg"],
             "V_ms": r["V_ms"],
+            # `screen_discrete` re-solves the powertrain at the incumbent's
+            # (V, thrust), so a record without `drag_n` cannot be screened
+            # against — and the omission only shows up as a KeyError hours
+            # later, once the solving is done and the cell is unrepeatable
+            # without paying for it again. Which is exactly what happened.
+            "drag_n": r["drag_n"],
+            "J": r.get("J"),
+            "rpm": r.get("rpm"),
+            "P_elec_w": r.get("P_elec_w"),
             "deflection_deg": r["deflection_deg"],
             "dv": r["dv"],
             "active_bounds": r.get("active_bounds"),
