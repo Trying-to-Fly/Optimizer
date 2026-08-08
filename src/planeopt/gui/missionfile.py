@@ -14,10 +14,25 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
 from ..types import MissionSpec
+
+#: What may appear in a mission module's FILENAME. The New Run dialog takes the
+#: name from a free-text field, and that one string was being used as two things
+#: that disagree about what is legal in it: a path, and Python source.
+#:
+#: `missions/<name>.py` with a name a human would actually type:
+#:   "endurance 3m/s wind"   -> created `missions/endurance 3m/` and put the
+#:                              module inside it, where `workspace.missions()`
+#:                              (a non-recursive glob) can never see it again
+#:   "../aircraft/aircraft"  -> wrote OUTSIDE missions/ and overwrote a real
+#:                              aircraft definition
+#: Same rule as `assemble.write_run_dir`'s run-directory slug, so the two kinds
+#: of artifact name in this project are legible the same way.
+_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 
 _TEMPLATE = '''"""{name} — written by the planeopt GUI.
 
@@ -44,6 +59,33 @@ FORM_FIELDS = (
     "ballast_max_kg",
     "notes",
 )
+
+
+def module_name(name: str) -> str:
+    """A mission name reduced to something safe to be a filename.
+
+    The name the user typed is kept verbatim in the `name=` field — that is the
+    authoritative record and it round-trips exactly. This is only what the file
+    is CALLED. Falls back to "mission" when nothing survives, which is the same
+    fallback the dialog already applies to an empty field.
+    """
+    return _UNSAFE.sub("_", name).strip("_") or "mission"
+
+
+def path_for(missions_dir: Path, mission: MissionSpec) -> Path:
+    """Where `mission`'s module belongs. The one place that decides."""
+    return Path(missions_dir) / f"{module_name(mission.name)}.py"
+
+
+def _docstring_safe(name: str) -> str:
+    """`name` with the three things that can break the docstring it lands in.
+
+    A name is rendered into a `\"\"\"...\"\"\"` header, so a name containing a
+    triple quote produced a module that would not parse — the dialog accepted
+    it, queued the job, and the child died on a SyntaxError before it read the
+    aircraft. Backslashes and newlines go for the same reason.
+    """
+    return name.replace("\\", " ").replace('"', "'").replace("\n", " ").replace("\r", " ").strip()
 
 
 def load(path: Path) -> MissionSpec:
@@ -73,7 +115,10 @@ def render(mission: MissionSpec) -> str:
             lines.append(f"    {f.name}={value!r},")
         else:
             lines.append(f"    {f.name}={value!r},")
-    return _TEMPLATE.format(name=mission.name, fields="\n".join(lines))
+    return _TEMPLATE.format(
+        name=_docstring_safe(mission.name) or module_name(mission.name),
+        fields="\n".join(lines),
+    )
 
 
 def save(mission: MissionSpec, path: Path) -> Path:

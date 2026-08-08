@@ -420,7 +420,7 @@ class NewRunDialog(QDialog):
         # Starting from an existing mission pre-fills its name, so queueing would
         # quietly rewrite the file it was loaded from. Only ask when the content
         # would actually change — re-running an unedited mission is not a hazard.
-        target = self._missions_dir / f"{self.mission().name}.py"
+        target = missionfile.path_for(self._missions_dir, self.mission())
         if target.exists() and target.read_text(encoding="utf-8") != missionfile.render(self.mission()):
             answer = QMessageBox.question(
                 self,
@@ -439,7 +439,10 @@ class NewRunDialog(QDialog):
         """Write the mission module, then describe the run to queue."""
         mission = self.mission()
         aircraft = Path(self.aircraft.currentData())
-        path = missionfile.save(mission, self._missions_dir / f"{mission.name}.py")
+        # `path_for`, not an f-string: the name is free text and was being used
+        # as a path as well as a label. Both call sites must agree, or `accept`
+        # checks one file for the overwrite prompt and `job` writes another.
+        path = missionfile.save(mission, missionfile.path_for(self._missions_dir, mission))
         return Job(
             mission=path,
             aircraft=aircraft,
