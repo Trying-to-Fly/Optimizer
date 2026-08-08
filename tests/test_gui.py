@@ -276,6 +276,62 @@ def test_the_shipped_sample_mission_loads(tmp_path):
     assert reloaded.static_margin_range == mission.static_margin_range
 
 
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("endurance_sample", "endurance_sample.py"),
+        # A slash reads as a UNIT to a human and as a PATH to the filesystem.
+        # This one created `missions/endurance 3m/` and hid the module inside it,
+        # where `workspace.missions()` — a non-recursive glob — never sees it.
+        ("endurance 3m/s wind", "endurance_3m_s_wind.py"),
+        ("endurance (2026-08-08)", "endurance_2026-08-08.py"),
+        ("Bob's mission", "Bob_s_mission.py"),
+        ("wind\nspeed", "wind_speed.py"),
+        ("   ", "mission.py"),
+        ("", "mission.py"),
+    ],
+)
+def test_a_mission_name_is_confined_to_the_missions_directory(tmp_path, name, expected):
+    missions = tmp_path / "missions"
+    missions.mkdir()
+    path = missionfile.path_for(missions, MissionSpec(name=name, objective="endurance"))
+
+    assert path.name == expected
+    assert path.parent == missions, "a name must not choose its own directory"
+
+
+def test_a_name_cannot_climb_out_of_the_missions_directory(tmp_path):
+    """`../aircraft/aircraft` wrote OUTSIDE missions/ and overwrote a real
+    aircraft definition — the dialog's name field is free text."""
+    missions = tmp_path / "missions"
+    missions.mkdir()
+    victim = tmp_path / "aircraft"
+    victim.mkdir()
+    (victim / "aircraft.py").write_text("REAL = 'do not clobber'\n", encoding="utf-8")
+
+    mission = MissionSpec(name="../aircraft/aircraft", objective="endurance")
+    missionfile.save(mission, missionfile.path_for(missions, mission))
+
+    assert (victim / "aircraft.py").read_text(encoding="utf-8") == "REAL = 'do not clobber'\n"
+    assert not list(victim.glob("*.py.bak"))
+    assert [p.name for p in missions.glob("*.py")] == ["aircraft_aircraft.py"]
+
+
+def test_a_name_with_a_triple_quote_still_produces_a_module_that_loads(tmp_path):
+    """The name is rendered into the module's docstring, so a triple quote made
+    a file that would not parse. The dialog accepted it, queued the job, and the
+    child died on a SyntaxError before it ever read the aircraft."""
+    mission = MissionSpec(name='quoted """ name', objective="endurance", v_wind_ms=4.0)
+    path = missionfile.save(mission, missionfile.path_for(tmp_path, mission))
+
+    loaded = missionfile.load(path)
+    assert loaded.objective == "endurance"
+    assert loaded.v_wind_ms == 4.0
+    # The name the user typed survives verbatim in the field, which is the
+    # authoritative record — only the FILENAME and the docstring are sanitised.
+    assert loaded.name == 'quoted """ name'
+
+
 # --- job commands -------------------------------------------------------
 
 

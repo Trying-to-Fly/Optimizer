@@ -143,6 +143,37 @@ the champion gate skipped the flatness sweep and the sensitivity battery,
 `mass_bump` was retained so the shadow price survived, and a complete artifact
 was still written.
 
+### `verify_shared_ll.py` — is one shared lifting-line the same model as four?
+
+    uv run python tools/bughunt/verify_shared_ll.py [<run-dir>] [<aircraft-dir>]
+
+For the "four inline graphs -> one shared function" change. `solve.py` builds
+four LiftingLine graphs per member and they are NOT four copies of one thing:
+the trim run is on `airplane.with_control_deflections({pitch: defl})` and the
+three SM runs are on the UNDEFLECTED airplane. Collapsing them is only correct
+if deflection stayed an INPUT.
+
+Verified 2026-08-08 on `vtail_sample`: the shared arm reproduces all four
+evaluations to **1.9e-15** — CL, Cm, L, D on each, and the static-margin
+constraint row itself. Sharing the graph does not change the physics.
+
+**The trap, priced on the same aeroplane.** Call the SM rows with the trim
+deflection instead of zero and the margin goes +0.064577 -> +0.239107, a shift
+of **+0.175 — 249% of the whole 0.08..0.15 window**, flipping the verdict from
+below-floor to above-ceiling. Both states CONVERGE and report a margin inside
+their bounds, so nothing downstream complains. Section 18's shape.
+
+Seconds, not a solve: geometry is held numeric and only alpha and deflection are
+symbolic, which is exactly the axis the refactor changes. It therefore does NOT
+measure the speedup — with numeric geometry the inline arm is four cheap numeric
+evaluations, so the ratio is meaningless and is not printed. Time that in the
+NLP. It also cannot say a converged champion is unchanged; run both arms to
+convergence and compare objective, design vector and active set.
+
+After a real run the same leak reads off the artifact as
+`constraints.static_margin_gap`: ~1e-7 normal, ~2e-3 a legitimate NLP-vs-reeval
+alpha difference, **~1e-1 the leak**.
+
 ### `audit_run.py` — read an artifact for the claims it is entitled to make
 
     uv run python tools/bughunt/audit_run.py <run-dir> [<run-dir> ...]
