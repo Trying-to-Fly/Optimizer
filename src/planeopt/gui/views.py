@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QUrl
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -74,6 +75,130 @@ def _fixed_height(widget: QWidget) -> QWidget:
     return widget
 
 
+class ChipRow(QWidget):
+    """Chips left to right, wrapping onto another line when they run out of one.
+
+    A QHBoxLayout cannot be narrower than the sum of its children, so a row of
+    chips sets a hard MINIMUM WIDTH on everything above it. `vtail_rcv2` adopts
+    five discrete studies and prices a sixth, and those six chips came to
+    1051 px — against the 896 px the detail pane gets in a 1280-wide window. The
+    whole pane then scrolled SIDEWAYS: not only the chips, but the metric grids
+    and the notes, all of which fit perfectly well.
+
+    Wrapping is the fix rather than eliding because a study chip is a VERDICT
+    (`prop_choice: ancf_12x10`), and half of one is no use. Height therefore
+    depends on width, which is why this reports `heightForWidth` and why
+    `DetailView` re-measures the body on resize — a QScrollArea sizes its widget
+    from `sizeHint` alone and would otherwise leave the last line clipped.
+    """
+
+    def __init__(self, top_margin: int = 0, spacing: int = 6) -> None:
+        super().__init__()
+        self._flow = _FlowLayout(self, spacing=spacing)
+        self._flow.setContentsMargins(0, top_margin, 0, 0)
+        policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def add(self, chip: QWidget) -> None:
+        self._flow.addWidget(chip)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 — Qt's spelling
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 — Qt's spelling
+        return self._flow.heightForWidth(width)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt's spelling
+        return self._flow.sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 — Qt's spelling
+        # One chip wide, one line tall. Deliberately NOT the sum: this number is
+        # exactly what used to force the pane sideways.
+        return self._flow.minimumSize()
+
+
+class _FlowLayout(QLayout):
+    """The wrapping layout behind `ChipRow` — Qt's own FlowLayout, in Python.
+
+    Kept private because chips are the only thing in this app that wrap; if a
+    second caller ever appears, promote it rather than copy it.
+    """
+
+    def __init__(self, parent: QWidget | None = None, spacing: int = 6) -> None:
+        super().__init__(parent)
+        self._items: list = []
+        self._spacing = spacing
+
+    # --- the five methods QLayout requires a subclass to provide -----------
+    def addItem(self, item) -> None:  # noqa: N802 — Qt's spelling
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):  # noqa: N802 — Qt's spelling
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):  # noqa: N802 — Qt's spelling
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):  # noqa: N802 — Qt's spelling
+        return Qt.Orientations(0)
+
+    # --- geometry ----------------------------------------------------------
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 — Qt's spelling
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 — Qt's spelling
+        return self._lay_out(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802 — Qt's spelling
+        super().setGeometry(rect)
+        self._lay_out(rect, apply=True)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt's spelling
+        # The natural size is ONE line — what the row would like if the pane
+        # were wide enough. `heightForWidth` is what reports the truth once a
+        # width is known, and it is what the box layout above actually asks.
+        margins = self.contentsMargins()
+        width = sum(i.sizeHint().width() for i in self._items)
+        width += self._spacing * max(0, len(self._items) - 1)
+        height = max((i.sizeHint().height() for i in self._items), default=0)
+        return QSize(width + margins.left() + margins.right(),
+                     height + margins.top() + margins.bottom())
+
+    def minimumSize(self) -> QSize:  # noqa: N802 — Qt's spelling
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        return size + QSize(margins.left() + margins.right(),
+                            margins.top() + margins.bottom())
+
+    def _lay_out(self, rect: QRect, *, apply: bool) -> int:
+        """Place the chips, or just measure how tall doing so would be."""
+        margins = self.contentsMargins()
+        x = rect.x() + margins.left()
+        y = rect.y() + margins.top()
+        right = rect.right() - margins.right()
+        line_height = 0
+        for item in self._items:
+            hint = item.sizeHint()
+            # `line_height` is the "not the first chip on this line" test: the
+            # first one is placed even when it does not fit, because dropping it
+            # to the next line would leave the line empty and loop forever.
+            if line_height and x + hint.width() - 1 > right:
+                x = rect.x() + margins.left()
+                y += line_height + self._spacing
+                line_height = 0
+            if apply:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._spacing
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + margins.bottom()
+
+
 class MetricGrid(QWidget):
     """Label/value pairs in two columns, values monospaced so they line up."""
 
@@ -121,6 +246,28 @@ class DetailView(QScrollArea):
         self._layout.setContentsMargins(20, 16, 20, 20)
         self._layout.setSpacing(4)
         self.show_placeholder("Select a run to see its details.")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt's spelling
+        """Re-measure the body, because one of its children wraps.
+
+        `setWidgetResizable(True)` gives the body the viewport's width and its
+        own `sizeHint` height. That is right for every child whose height is
+        fixed, and wrong for `ChipRow`, whose height depends on the width it is
+        given — narrow the pane, a chip drops to a second line, and the extra
+        line is drawn outside the body and clipped, with the scrollbar unaware
+        of it. Asking the layout for `heightForWidth` at the real width is the
+        supported way to reconcile the two.
+        """
+        super().resizeEvent(event)
+        body = self.widget()
+        if body is None:
+            return
+        layout = body.layout()
+        if layout is None or not layout.hasHeightForWidth():
+            return
+        needed = layout.heightForWidth(self.viewport().width())
+        if needed > 0 and needed != body.height():
+            body.setMinimumHeight(needed)
 
     def _clear(self) -> None:
         while self._layout.count():
@@ -229,37 +376,29 @@ class DetailView(QScrollArea):
             self._layout.addWidget(grid)
 
             tail = runindex.mapping(eq.get("tail_group"))
-            chips = QWidget()
-            row = QHBoxLayout(chips)
-            row.setContentsMargins(0, 6, 0, 0)
-            row.setSpacing(6)
+            chips = ChipRow(top_margin=6)
             if tail.get("total_kg") is not None:
                 over = (tail.get("over_by_kg") or 0) > 0
                 # ADVISORY, not violated. The budget is reported and not
                 # enforced (the printed-surface mass constants are
                 # uncalibrated), so a red chip beside genuinely violated
                 # constraints would claim the run broke a rule it never had.
-                row.addWidget(Chip(
+                chips.add(Chip(
                     f"tail group {tail['total_kg'] * 1000:.0f} g "
                     f"of {tail['budget_kg'] * 1000:.0f} g"
                     + (" — over, advisory" if over else ""),
                     "advisory" if over else "neutral",
                 ))
-            row.addStretch(1)
-            self._layout.addWidget(_fixed_height(chips))
+            self._layout.addWidget(chips)
 
         if summary.active_constraints or summary.violated_constraints:
             self._layout.addWidget(_section("constraints"))
-            chips = QWidget()
-            row = QHBoxLayout(chips)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(6)
+            chips = ChipRow()
             for name in summary.active_constraints:
-                row.addWidget(Chip(f"{name} binding", "active"))
+                chips.add(Chip(f"{name} binding", "active"))
             for name in summary.violated_constraints:
-                row.addWidget(Chip(f"{name} violated", "violated"))
-            row.addStretch(1)
-            self._layout.addWidget(_fixed_height(chips))
+                chips.add(Chip(f"{name} violated", "violated"))
+            self._layout.addWidget(chips)
 
         optimization = runindex.mapping(performance.get("optimization"))
         if optimization:
@@ -274,12 +413,9 @@ class DetailView(QScrollArea):
             studies = runindex.mapping(optimization.get("discrete_studies"))
             priced = runindex.mapping(optimization.get("priced_options"))
             if studies or priced:
-                chips = QWidget()
-                row = QHBoxLayout(chips)
-                row.setContentsMargins(0, 6, 0, 0)
-                row.setSpacing(6)
+                chips = ChipRow(top_margin=6)
                 for attr, study in studies.items():
-                    row.addWidget(
+                    chips.add(
                         Chip(f"{attr}: {runindex.mapping(study).get('adopted')}", "neutral")
                     )
                 # A PRICED option was measured and deliberately not adopted, so
@@ -289,13 +425,12 @@ class DetailView(QScrollArea):
                     alternatives = runindex.mapping(runindex.mapping(study).get("alternatives"))
                     for cand, entry in alternatives.items():
                         delta = runindex.mapping(entry).get("delta_objective")
-                        row.addWidget(Chip(
+                        chips.add(Chip(
                             f"{attr}={cand} priced"
                             + ("" if delta is None else f" {delta:+.2f}"),
                             "advisory",
                         ))
-                row.addStretch(1)
-                self._layout.addWidget(_fixed_height(chips))
+                self._layout.addWidget(chips)
 
         self._layout.addWidget(_section("artifacts"))
         buttons = QWidget()
