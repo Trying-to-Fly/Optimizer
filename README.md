@@ -38,6 +38,14 @@ Long commands print progress to stderr as each solve lands; `--quiet` silences
 it. A single NLP solve takes minutes and peaks near 14.5 GB of RAM, and a full
 `optimize` battery runs for hours.
 
+On a serial run with at least three multistarts, planeopt first solves the
+nominal and first perturbed starts. If they agree within strict numerical
+tolerances in both objective and every normalized design variable, later cold
+starts are recorded as redundant and skipped. Any failure, missing bound, or
+meaningful disagreement runs the requested starts normally. Parallel POSIX
+runs remain one batch because staging work that can already run side by side
+would make them slower.
+
 RAM is what limits this app, not CPU — a solve uses one core and a lot of
 memory. `--memory-budget-gb N` (or "Dedicate memory" in the GUI) says how much
 of the machine the app may have, and independent solves within a batch then run
@@ -125,6 +133,19 @@ motor mount; see `docs/FINDINGS.md` §10 for the current champion and
 ```sh
 uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
 ```
+
+Serial optimization reuses each converged champion's complete IPOPT
+primal/constraint-dual point for nearby studies and sensitivity re-solves.
+Independent multistarts remain cold by design. Optional alternatives have a
+12-minute member ceiling; flatness members have a 10-minute ceiling, and after
+the first timeout smaller spans are reported as **unproven** without repeatedly
+spending the same budget. These are runtime policies, not feasibility claims.
+
+The final numeric speed sweep applies the static-margin window and local
+stability-sign check before calling an operating point airworthy. The run-level
+`design_trustworthy` verdict also requires a legal final operating point, the
+stall requirement, both static-margin checks, and a mesh-independent objective;
+a failure is shown in a red banner at the top of the report.
 
 A battery runs for hours and holds ~14.5 GB, so it can be stopped and continued:
 

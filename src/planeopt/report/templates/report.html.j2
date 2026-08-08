@@ -11,6 +11,8 @@
   table { border-collapse: collapse; margin: .5rem 0; }
   td, th { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: .3rem .7rem; text-align: left; }
   .status { padding: .6rem 1rem; border-radius: .5rem; background: color-mix(in srgb, orange 18%, transparent); }
+  .trust-failure { padding: .8rem 1rem; border: 2px solid #c33; border-radius: .5rem;
+    background: color-mix(in srgb, red 12%, transparent); font-weight: 650; }
   .meta { opacity: .7; font-size: .85rem; }
   .ok { color: #2c8a2c; font-weight: 600; } .bad { color: #c33; font-weight: 600; }
   /* an ACTIVE BOUND is not a failure — it is the design asking for something it
@@ -41,6 +43,12 @@
 ({{ r.performance.get("objective_units", r.diagnostics.get("objective_units","")) }},
 wind mode: {{ r.diagnostics.get("wind_mode","") }}) · created {{ r.created }}</p>
 <p class="status">{{ r.status }}</p>
+{% if r.diagnostics.get("design_trustworthy") is sameas false %}
+<p class="trust-failure">DESIGN NOT TRUSTWORTHY FOR FLIGHT OR CONSTRUCTION.
+{% for reason in r.diagnostics.get("design_trust_failures") or [] %}
+{% if not loop.first %}; {% endif %}{{ reason }}{% endfor %}.
+The values below remain diagnostic results, not an airworthy design recommendation.</p>
+{% endif %}
 {% if has_3d %}<p><a href="interactive_3d.html">interactive 3D model &#8599;</a> (rotate/zoom in browser)</p>{% endif %}
 
 {% if r.performance.get("best") %}
@@ -132,8 +140,9 @@ which is a question about its neighbourhood. Flatness figures from runs before
 whose feasibility probe returns <code>Infeasible_Problem_Detected</code> holds no
 aircraft, and since feasibility in span is an interval up to the cap, every
 smaller span is then <code>Skipped_Below_Infeasible_Span</code> rather than
-re-derived. A probe that merely times out proves nothing and its member is solved
-in full.</p>
+re-derived. A timeout proves nothing: the timed-out point is recorded as such,
+and smaller points are explicitly marked unproven without repeating the same
+member budget.</p>
 {% endif %}
 {% if opt.get("resolve_battery") %}
 <h2>Re-solve battery (full re-optimizations)</h2>

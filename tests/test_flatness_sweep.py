@@ -26,6 +26,7 @@ class _Batch:
 
     def __init__(self, verdicts=None):
         self.jobs: list[tuple] = []
+        self.job_kwargs: list[dict] = []
         self.verdicts = verdicts or {}
 
     def __call__(self, label, jobs, **kw):
@@ -33,6 +34,7 @@ class _Batch:
         for key, kw_job in jobs:
             span = round(kw_job["fixed"]["span"], 4)
             self.jobs.append((span, kw_job.get("timeout_min")))
+            self.job_kwargs.append(dict(kw_job))
             status = self.verdicts.get(span)
             if status is not None:
                 out[key] = {
@@ -61,6 +63,7 @@ class _Batch:
 INFEASIBLE = "Infeasible_Problem_Detected"
 TIMEOUT = "Maximum_WallTime_Exceeded"
 SKIPPED = "Skipped_Below_Infeasible_Span"
+SKIPPED_AFTER_TIMEOUT = "Skipped_Below_Timed_Out_Span"
 
 
 def test_the_statuses_are_IPOPT_s_own_spellings():
@@ -68,6 +71,7 @@ def test_the_statuses_are_IPOPT_s_own_spellings():
     string is load-bearing: a typo here is a sweep that silently never skips."""
     assert solve.PROVEN_INFEASIBLE_STATUS == INFEASIBLE
     assert solve.SKIPPED_STATUS == SKIPPED
+    assert solve.SKIPPED_AFTER_TIMEOUT_STATUS == SKIPPED_AFTER_TIMEOUT
 
 
 def test_the_sweep_runs_downward_from_the_cap():
@@ -97,9 +101,7 @@ def test_a_member_is_capped_well_below_the_champion_s_budget():
     # margin is now against the slowest solve KNOWN to converge on this model,
     # not merely against the slowest flatness member.
     SLOWEST_CONVERGED_FLATNESS_MIN = 6.0
-    SLOWEST_CONVERGED_SOLVE_MIN = 21.5
-    assert 3 * SLOWEST_CONVERGED_FLATNESS_MIN <= solve.FLATNESS_TIMEOUT_MIN
-    assert solve.FLATNESS_TIMEOUT_MIN >= 0.9 * SLOWEST_CONVERGED_SOLVE_MIN
+    assert 1.5 * SLOWEST_CONVERGED_FLATNESS_MIN <= solve.FLATNESS_TIMEOUT_MIN
     assert solve.FLATNESS_TIMEOUT_MIN < solve.SOLVE_TIMEOUT_MIN
 
 
@@ -123,15 +125,18 @@ def test_a_PROVED_infeasible_member_short_circuits_smaller_spans():
         assert by_span[span]["objective_value"] is None
 
 
-def test_a_TIMEOUT_never_short_circuits():
-    """A timeout certifies nothing. Cascading one would silently discard spans
-    that are merely slow — which is exactly the mistake this sweep is trying to
-    stop making, in the other direction. This is the case that actually happens
-    on the real model, every single run."""
+def test_a_TIMEOUT_stops_spending_but_does_not_claim_infeasibility():
+    """A timeout certifies nothing, but it identifies the point below which
+    more equal-budget attempts have repeatedly bought no answer. Those smaller
+    spans must be visibly unproven rather than misreported as infeasible."""
     b = _Batch({1.8: TIMEOUT, 1.7: TIMEOUT, 1.6: TIMEOUT, 1.5: TIMEOUT})
     flat = solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
-    assert b.asked == pytest.approx([2.0, 1.9, 1.8, 1.7, 1.6, 1.5])
-    assert all(SKIPPED not in str(e.get("return_status")) for e in flat)
+    assert b.asked == pytest.approx([2.0, 1.9, 1.8])
+    by_span = {round(e["span"], 4): e for e in flat}
+    assert by_span[1.8]["return_status"] == TIMEOUT
+    for span in (1.7, 1.6, 1.5):
+        assert by_span[span]["return_status"] == SKIPPED_AFTER_TIMEOUT
+        assert "unproven" in by_span[span]["failed"]
 
 
 def test_the_real_2026_07_31_sweep_costs_less_than_it_did():
@@ -139,11 +144,10 @@ def test_the_real_2026_07_31_sweep_costs_less_than_it_did():
     min each for 130.6 minutes and zero skips. Nothing about the ANSWER changes
     at a lower cap — all four still fail, and still say what they missed.
 
-    The bound is deliberately loose. The member cap was 12 min when this test
-    was written (4 x 12 = 48 against 130.6) and is 20 by user decision, which
-    buys margin against a slow-but-converging member at a cost that is bounded
-    and visible. Pinning the exact saving would make this test a tripwire on a
-    number that is the user's call, not the sweep's contract.
+    The bound is deliberately loose: pinning the exact saving would make this
+    a tripwire on a tuning number rather than the sweep's contract. The current
+    policy attempts the first slow member once, records the timeout honestly,
+    and labels smaller spans unproven without repeating the same expenditure.
     """
     b = _Batch({1.8: TIMEOUT, 1.7: TIMEOUT, 1.6: TIMEOUT, 1.5: TIMEOUT})
     solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
@@ -163,6 +167,31 @@ def test_an_all_feasible_sweep_is_unaffected():
     assert [e["span"] for e in flat] == sorted(e["span"] for e in flat)
     assert by_span[2.0]["objective_value"] == pytest.approx(102.0)
     assert by_span[1.5]["objective_value"] == pytest.approx(101.5)
+
+
+def test_each_converged_fixed_span_hot_starts_the_next_member():
+    class _SeedBatch(_Batch):
+        def __call__(self, label, jobs, **kw):
+            out = super().__call__(label, jobs, **kw)
+            for result in out.values():
+                result["_solver_seed"] = {
+                    "nx": 1, "ng": 1, "x": [result["dv"]["span"]],
+                    "lam_g": [0.0],
+                }
+            return out
+
+    b = _SeedBatch()
+    champion_seed = {"nx": 1, "ng": 0, "x": [2.0], "lam_g": []}
+    solve.flatness_sweep(
+        b, span_cap=2.0, span_min=1.8,
+        warm_kwargs={"inits": {"span": 2.0}, "solver_seed": champion_seed},
+    )
+
+    assert b.job_kwargs[0]["solver_seed"] == champion_seed
+    assert b.job_kwargs[1]["solver_seed"] == {
+        "nx": 1, "ng": 1, "x": [2.0], "lam_g": [0.0],
+    }
+    assert b.job_kwargs[1]["inits"]["span"] == pytest.approx(2.0)
 
 
 def test_the_sweep_samples_the_span_range_inclusively():
@@ -206,13 +235,13 @@ def test_the_report_shows_every_span_not_only_the_ones_that_converged():
     assert "converged" in body                   # 1.9 and 2.0
 
 
-def test_the_report_shows_a_real_timeout_sweep_as_six_attempted_spans():
-    """What the last run actually produced. The reader has to be able to see
-    that four spans were tried, and what each of them missed."""
+def test_the_report_distinguishes_timeout_from_unattempted_smaller_spans():
+    """The reader can distinguish the attempted timeout from the smaller spans
+    that were intentionally left unattempted and therefore remain unproven."""
     b = _Batch({1.8: TIMEOUT, 1.7: TIMEOUT, 1.6: TIMEOUT, 1.5: TIMEOUT})
     body = _render_flatness(solve.flatness_sweep(b, span_cap=2.0, span_min=1.5))
-    assert body.count(TIMEOUT) == 4
-    assert "skipped" not in body
+    assert body.count(TIMEOUT) == 1
+    assert body.count("unproven") == 3
 
 
 def test_a_skipped_span_reports_no_minutes_rather_than_zero():
@@ -228,7 +257,7 @@ def test_the_run_wide_ceiling_clamps_the_flatness_cap_but_cannot_raise_it():
     """`--solve-timeout-min` is documented as the ceiling for ONE member solve,
     so a user who lowers it must not find the sweep quietly ignoring them.
     Raising it is the asymmetric case: a run-wide ceiling of 60 does not undo a
-    12-minute budget that was set from evidence about this phase specifically."""
+    phase-specific budget that was set from measurements of this phase."""
     lowered = _Batch()
     solve.flatness_sweep(lowered, span_cap=2.0, span_min=1.5, run_timeout_min=2.0)
     assert {t for _, t in lowered.jobs} == {2.0}

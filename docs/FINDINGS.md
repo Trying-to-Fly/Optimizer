@@ -2787,3 +2787,163 @@ over `docs/` and `src/` returned nothing before this entry.
 The answer happens to endorse the default. That is the outcome to be most
 careful with: an unexamined default that turns out to be right is
 indistinguishable, from the inside, from one that was never examined.
+
+## 30. Share the aerodynamic graph, not the Hessian approximation (2026-08-07)
+
+Section 29 established that L-BFGS is the wrong memory trade here: it saved 28%
+but failed to converge in 30 minutes. The four inline LiftingLine calls still
+duplicated the same geometry, NeuralFoil, and derivative implementation at the
+cruise point and the three static-margin samples. CasADi can encapsulate that
+model as one `Function`; the four calls then remain exact symbolic evaluations,
+while IPOPT builds the function's derivative graphs once.
+
+Paired on Windows, same model and exact-Hessian settings, with three IPOPT
+iterations so setup cost is measured identically (`docs/studies/casadi_graph_sharing.json`):
+
+| | four inline graphs | one shared function |
+|---|---:|---:|
+| wall clock | 680.74 s | **61.17 s** |
+| peak working set | 4.85 GB | **3.162 GB** |
+| status / iterations | truncated / 3 | truncated / 3 |
+
+That is 11.13x faster for the graph-heavy short solve and 34.8% less peak RAM.
+Unlike section 29's experiment, it changes neither the Hessian approximation
+nor any equation. The full exact-Hessian solve then converged in 690.97 s at
+3.162 GB. Its result matches section 29's independently recorded inline Linux
+solve to at least nine significant digits: objective 119.7809664732 min, mass
+1.841103929 kg, drag 0.8342164482 N, speed 9.499999890 m/s, and static margin
+0.0799999900.
+
+The hard-coded 14.5 GB fallback stays conservative until the same measurement
+has been repeated on Linux and macOS; recorded run peaks will continue to drive
+the budget automatically. The implementation decision is nevertheless closed:
+keep IPOPT's exact Hessian for convergence, and stop asking CasADi to construct
+four copies of the function it differentiates.
+
+### 30.1 CSE and non-inlining: more memory headroom, mixed wall-clock result
+
+The shared function is now marked `never_inline`, so a future CasADi heuristic
+cannot silently turn the four call sites back into four graphs. Common-
+subexpression elimination inside that function is exact as well. On the paired
+three-iteration setup benchmark it improved 61.17 s / 3.162 GB to **55.85 s /
+2.522 GB**. Against the original inline graph that is 12.19x faster and 48.0%
+less peak memory.
+
+The full converged result is more nuanced and is recorded rather than rounded
+into a win: **735.96 s / 2.569 GB**, 106 iterations, versus 690.97 s / 3.162 GB
+without CSE. Thus CSE bought another 18.8% of memory headroom while this single
+full run took 6.5% longer, despite the setup-heavy run being faster. Both landed
+on the same result to numerical precision. Keep it for the deterministic graph
+and OOM-resilience improvement; do not cite it as a demonstrated full-run speed
+improvement until a repeated paired benchmark separates runtime variance from
+a real evaluation penalty.
+
+Two robustness changes cost no model evaluations: the measured exact-Hessian
+choice is now an explicit IPOPT option instead of an inherited default, and
+successful members record `return_status`, `iter_count`, and `converged` just as
+failed and deliberately truncated members already did. Future solver regressions
+can therefore be seen in ordinary run artifacts rather than reconstructed by a
+special monkeypatch.
+
+### 30.2 Map the operating points as one serial batch
+
+Sharing the function removed four copies of its implementation, but the outer
+NLP still contained four scalar call nodes. CasADi's serial `Function.map(4)`
+expresses the cruise point and three static-margin samples as one batched call.
+It does not create threads and therefore does not trade lower latency for more
+RAM or CPU contention.
+
+A synthetic 20-variable function, used only to isolate outer-graph overhead,
+dropped from 19 to 8 graph nodes; its Jacobian dropped from 198 to 179 nodes.
+This is a construction-level result, not a claim of the same percentage in a
+full solve. The full NLP remains dominated by the lifting-line implementation
+and IPOPT factorization, so the next real run should record the end-to-end delta
+through the existing `iter_count`, wall-time, and peak-memory instrumentation.
+
+## 31. A cumulative frame count is not an iteration count (2026-08-07)
+
+The live window reached frame 338 and looked like one optimizer had still not
+converged. The checkpoints showed the opposite: nominal converged in 22
+iterations, `perturbed_0` converged in 36 to an objective only 5.46e-12 away,
+and `perturbed_1` then consumed the full 30-minute cap before stopping at 266
+iterations. Frame 338 was already `mass_bump` iteration 9. The viewer now labels
+the cumulative total separately from phase, member, member-local iteration and
+member-local elapsed time.
+
+The two successful starts also matched in every design variable: the worst was
+`t_taper`, differing by 1.20e-7 of its declared range. On serial runs, two
+successful starts inside 1e-8 relative objective and 1e-5 of every declared DV
+range are now strict consensus; requested later cold starts are recorded and
+skipped. The rule fails closed on any failure, NaN, missing/different box, or
+larger discrepancy. Parallel runs retain the one-batch schedule because the
+remaining starts cost wall time only when they are serial.
+
+## 32. Re-solves now reuse the complete optimizer state (2026-08-07)
+
+The shared CasADi graph made each iteration cheaper, but the full run was still
+paying for nearby sensitivity problems as if each were unrelated. The active
+run reached more than 2,000 cumulative frames because the counter covered over
+twenty full NLP members, not because one solve had reached 2,000 iterations.
+Failed or timed-out optional members alone consumed about **135 minutes**.
+
+Successful solves now retain IPOPT's complete primal vector and constraint-dual
+vector in the private checkpoint record. A compatible nearby re-solve restores
+both and enables IPOPT's warm-start settings. Shape checks are exact and fail
+closed: a topology change or added fixed-span equality that changes either NLP
+dimension rejects the dual seed and falls back to the physical design/state
+guess. The first fixed-span member therefore uses the champion's primal values;
+subsequent fixed-span members have matching shapes and reuse the complete point.
+Independent multistarts deliberately remain cold so they still test attraction
+from different initial conditions.
+
+The serial schedule also changed so the +20 g screen bump runs after the best
+successful primary start and reuses that solution, even when only one or two
+multistarts were requested. Discrete studies, winglet alternatives, the final
+re-solve battery and flatness sweep all receive champion-derived state guesses;
+compatible members additionally receive the complete primal/dual seed.
+
+Runtime ceilings now reflect the phase rather than inheriting the primary
+solve's 30-minute allowance:
+
+| member type | ceiling | behavior at timeout |
+|---|---:|---|
+| optional alternative / sensitivity | 12 min | record the failed member |
+| flatness point | 10 min | record it as timed out; leave smaller points unproven |
+
+This does not call an unattempted span infeasible. It stops repeating an equal
+budget below the first timed-out span and makes that missing evidence explicit
+in the report. The 10-minute flatness cap remains above the historical slowest
+successful flatness member (6.0 min); after graph sharing, the latest four
+successful members took 1.7-3.2 minutes. This policy reduces worst-case time
+without adding model evaluations or weakening the equations.
+
+## 33. "Legal" now includes final numeric stability (2026-08-07)
+
+The completed `20260807T174248` run exposed a false-positive trust path. Its NLP
+converged at 9.742 m/s with static margin 0.080, but the numeric speed sweep
+selected 9.5 m/s as the best "legal" point and only then evaluated stability.
+That point returned SM 0.057 against the mission's 0.08 floor, with a negative
+local stability slope. The fine LiftingLine mesh and independent VLM returned
+approximately 0.053. Nevertheless the artifact recorded
+`candidates_source=legal`, no reported-point violations, and
+`design_trustworthy=true`, because that last field meant only that drag was mesh
+converged.
+
+Static margin is now part of the same named airworthiness-rule set as gust
+margin, propeller advance ratio and control throw. Each candidate must satisfy
+the full margin window and keep the local stability slope nonnegative before it
+can become the reported legal operating point. Evaluations are cached and tried
+in objective order; the sweep stops at the first fully legal candidate instead
+of evaluating five additional LiftingLine points at every speed. Thus a normal
+run pays only for candidates that could actually win, while a run with no stable
+point necessarily checks every plausible candidate before saying so.
+
+The final trust verdict is now broader than the early objective-mesh gate. It
+fails closed when the numeric re-evaluation fails, no legal operating point
+exists, stall fails, the reported static margin lies outside its window, the
+local margin changes sign, or the objective is mesh-dependent. The earlier
+selection-time result remains separately recorded as
+`objective_mesh_trustworthy`. A failed final verdict is the first note in
+`run.json` and a red banner immediately below the report status; the artifact
+remains useful diagnostically but no longer presents itself as a flight or
+construction recommendation.

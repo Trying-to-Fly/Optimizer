@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..liveframe import frame_paths, read_frame, read_view, write_view
+from ..liveframe import frame_paths, header_text, read_frame, read_view, write_view
 from . import render3d
 
 #: What the view picker shows once the camera has been orbited off every preset.
@@ -388,7 +388,11 @@ class LiveViewWindow(QWidget):
                 self.directory.parent.name if self.directory.name == "frames"
                 else self.directory.name
             )
-        self.status.setText(f"frame {index} of {total}   ·   {where}")
+        frame = self.view.frame
+        progress = header_text(frame) if frame else "waiting for a member"
+        self.status.setText(
+            f"total frame {index}/{total}   ·   {progress}   ·   {where}"
+        )
 
     # --- controls -------------------------------------------------------
 

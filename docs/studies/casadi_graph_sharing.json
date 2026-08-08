@@ -1,0 +1,67 @@
+{
+  "date": "2026-08-07",
+  "platform": "Windows",
+  "aircraft": "vtail_sample",
+  "mission": "endurance_sample",
+  "solver": "IPOPT exact Hessian",
+  "paired_three_iteration_benchmark": {
+    "inline_four_graphs": {
+      "seconds": 680.74,
+      "peak_working_set_gb": 4.85,
+      "status": "Maximum_Iterations_Exceeded"
+    },
+    "one_shared_function": {
+      "seconds": 61.17,
+      "peak_working_set_gb": 3.162,
+      "status": "Maximum_Iterations_Exceeded"
+    },
+    "one_shared_function_with_cse": {
+      "seconds": 55.85,
+      "peak_working_set_gb": 2.522,
+      "status": "Maximum_Iterations_Exceeded"
+    },
+    "cse_speedup_vs_inline": 12.19,
+    "cse_peak_reduction_percent_vs_inline": 48.0
+  },
+  "shared_function_full_solve": {
+    "seconds": 690.97,
+    "peak_working_set_gb": 3.162,
+    "converged": true,
+    "objective_value": 119.78096647315537,
+    "auw_kg": 1.8411039290600228,
+    "drag_n": 0.8342164482125454,
+    "V_ms": 9.499999890012196,
+    "static_margin": 0.07999999000278904
+  },
+  "shared_function_cse_full_solve": {
+    "seconds": 735.96,
+    "peak_working_set_gb": 2.569,
+    "converged": true,
+    "return_status": "Solve_Succeeded",
+    "iter_count": 106,
+    "objective_value": 119.78096647358628,
+    "auw_kg": 1.841103928311311,
+    "drag_n": 0.834216448213582,
+    "V_ms": 9.499999890012196,
+    "static_margin": 0.07999999000358278,
+    "wall_time_change_vs_shared_without_cse_percent": 6.5,
+    "peak_reduction_vs_shared_without_cse_percent": 18.8
+  },
+  "serial_map_microbenchmark": {
+    "scope": "synthetic 20-variable outer graph; not a full-solve timing",
+    "scalar_call_nodes": 19,
+    "mapped_call_nodes": 8,
+    "scalar_jacobian_nodes": 198,
+    "mapped_jacobian_nodes": 179,
+    "extra_threads": 0
+  },
+  "recorded_inline_full_solve_reference": {
+    "source": "docs/studies/hessian_stage5.json",
+    "platform": "Linux",
+    "objective_value": 119.7809664735822,
+    "auw_kg": 1.8411039283129793,
+    "drag_n": 0.8342164482136241,
+    "V_ms": 9.499999890012196,
+    "static_margin": 0.07999999000357708
+  }
+}

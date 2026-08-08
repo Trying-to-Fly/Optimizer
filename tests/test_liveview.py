@@ -279,6 +279,9 @@ def test_the_model_stays_clear_of_the_stats_block(qt_app):
     image = _render(frame)
     painter = QPainter(image)
     stats_w, stats_h = render3d.stats_block_size(painter, frame)
+    model = render3d.model_rect(
+        painter, QRectF(0, 0, *SIZE), frame, has_colorbar=True
+    )
     painter.end()
 
     # The colorbar legitimately reaches down the right-hand side, so the claim
@@ -286,7 +289,15 @@ def test_the_model_stays_clear_of_the_stats_block(qt_app):
     panel_pixels = [
         (x, y)
         for y in range(int(image.height() - stats_h * 0.78), image.height())
-        for x in range(int(stats_w))
+        # A headless build machine may expose no system fonts, in which case
+        # Qt's missing-glyph metrics can make the nominal text block wider than
+        # the image. QImage.pixel() outside the image returns an error colour
+        # that is highly saturated, which used to look like thousands of model
+        # pixels behind the stats even though every reported x was off-canvas.
+        # Restrict the check to the rectangle in which model ink is allowed.
+        # This also excludes the legitimate colorbar when missing-glyph metrics
+        # make the nominal stats width span the whole headless image.
+        for x in range(min(int(model.right()) + 1, int(stats_w)))
         # anything strongly saturated in that corner would be a panel
         if QColor(image.pixel(x, y)).saturation() > 120
     ]
@@ -441,6 +452,29 @@ def test_the_window_follows_the_newest_frame_and_ignores_partials(qt_app, tmp_pa
     window.rescan()
     assert window.view.frame["kind"] == "candidate"
     assert window.slider.value() == 1
+    window.close()
+
+
+def test_status_separates_total_frames_from_the_current_member_iteration(
+    qt_app, tmp_path
+):
+    """The real regression: total frame 338 was only mass-bump iteration 9."""
+    from planeopt.gui.liveview import LiveViewWindow
+
+    live = tmp_path / "_live" / "job"
+    frame = _frame(
+        kind="iterate", label="multistart", key="mass_bump",
+        member_index=[4, 4], iter=9, t_member_s=138.2,
+    )
+    _write(live, "f000337__multistart__mass_bump__i0009.json.gz", frame)
+
+    window = LiveViewWindow()
+    window.watch(live, live=True)
+    status = window.status.text()
+    assert "total frame 1/1" in status
+    assert "multistart [4/4] mass_bump" in status
+    assert "iter 9" in status
+    assert "t+138 s" in status
     window.close()
 
 
@@ -745,7 +779,12 @@ def test_a_recoloured_iterate_says_so_under_the_stats(qt_app):
     plain = _frame(kind="iterate")
     marked = _frame(kind="iterate", recoloured=True)
 
-    painter = QPainter(QImage(*SIZE, QImage.Format_RGB32))
+    # Keep the paint device alive for the painter's whole lifetime. Passing a
+    # temporary QImage leaves QPainter holding a dangling C++ pointer as soon as
+    # Python releases the temporary; Qt may appear to tolerate it or abort the
+    # process with an access violation depending on allocator timing.
+    metrics_image = QImage(*SIZE, QImage.Format_RGB32)
+    painter = QPainter(metrics_image)
     _, plain_h = render3d.stats_block_size(painter, plain)
     _, marked_h = render3d.stats_block_size(painter, marked)
     painter.end()

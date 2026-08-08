@@ -351,16 +351,15 @@ def test_sm_read_at_names_both_speeds_when_they_differ():
     assert "static-margin window" in read_at["why"]
 
 
-def test_sm_read_at_explains_an_out_of_range_headline_the_design_actually_meets():
-    """The 2026-08-06 vtail_rcv2 case: SM 0.0629 reported out of range at the
-    sweep's 9.5 m/s, while the design meets 0.08 at the 9.709 m/s it was solved
-    for. Without the note a reader cannot tell that from an unstable aeroplane.
-    """
+def test_sm_read_at_rejects_an_impossible_legal_but_unstable_headline():
+    """After stability joined the filter, `legal` beside a failed margin is an
+    internal inconsistency rather than a different legitimate operating point."""
     champ = {"V_ms": 9.709, "static_margin": 0.07999999}
     _, note = solve.sm_read_at(champ, {"V_ms": 9.5}, {"sm_in_range": False}, SM_RANGE)
     assert note is not None
     assert "9.500 m/s" in note and "9.709 m/s" in note
-    assert "sm_read_at" in note
+    assert "internal selection inconsistency" in note
+    assert "final trust gate must reject it" in note
 
 
 def test_sm_read_at_treats_a_bound_hit_to_solver_tolerance_as_in_range():
@@ -414,8 +413,8 @@ def test_the_reassuring_note_refuses_to_read_as_an_all_clear():
         candidates_source="feasible_fallback",
     )
 
-    assert "meets the window at the speed it was solved for" in note
-    assert "THIS IS NOT AN ALL-CLEAR" in note
+    assert "NLP met the window" in note
+    assert "not an all-clear" in note
     assert "ILLEGAL" in note
 
 

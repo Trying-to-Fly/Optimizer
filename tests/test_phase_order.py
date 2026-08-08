@@ -133,3 +133,48 @@ def test_the_shadow_price_is_re_measured_on_the_final_design(
         "the shadow price is still the multistart champion's — the +20 g bump "
         "must be re-solved against the final design"
     )
+
+
+def test_optional_members_are_seeded_and_use_phase_specific_budgets(
+    sample_aircraft, sample_mission, tmp_path, phase_log, monkeypatch
+):
+    """A sensitivity member is not another cold, 30-minute primary solve."""
+    monkeypatch.setattr(sample_aircraft, "winglet", False, raising=False)
+    dispatched: list[tuple[str, list[tuple], dict]] = []
+    fake = solve._solve_many
+
+    def spy(aircraft, mission, jobs, parallel, label=None, **kw):
+        dispatched.append((label, jobs, kw))
+        return fake(aircraft, mission, jobs, parallel, label=label, **kw)
+
+    monkeypatch.setattr(solve, "_solve_many", spy)
+    _run(sample_aircraft, sample_mission, tmp_path, phase_log)
+
+    optional = [
+        call for call in dispatched
+        if call[0].startswith("study ") or call[0] == "re-solve battery"
+    ]
+    assert optional
+    assert all(
+        call_kw["timeout_min"] == solve.OPTIONAL_MEMBER_TIMEOUT_MIN
+        for _, _, call_kw in optional
+    )
+    assert all(
+        job_kw.get("inits", {}).get("span") == pytest.approx(2.0)
+        for _, jobs, _ in optional for _, job_kw in jobs
+    )
+
+    flatness = [jobs for label, jobs, _ in dispatched if label == "flatness sweep"]
+    assert flatness
+    assert all(
+        job_kw["timeout_min"] == solve.FLATNESS_TIMEOUT_MIN
+        for jobs in flatness for _, job_kw in jobs
+    )
+
+    bump = [
+        job_kw for label, jobs, _ in dispatched if label == "multistart"
+        for key, job_kw in jobs if key == "mass_bump"
+    ]
+    assert bump
+    assert bump[-1]["timeout_min"] == solve.OPTIONAL_MEMBER_TIMEOUT_MIN
+    assert bump[-1]["inits"]["span"] == pytest.approx(2.0)

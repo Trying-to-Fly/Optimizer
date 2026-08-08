@@ -90,6 +90,44 @@ def test_a_mesh_dependent_objective_is_rejected(monkeypatch):
     assert check["in_loop"]["D_n"] < 0 < check["fine"]["D_n"]
 
 
+@pytest.mark.parametrize(
+    ("mesh_ok", "constraints", "reeval_error", "expected_reason"),
+    [
+        (False, {"stall_ok": True, "sm_in_range": True, "sm_sign_consistent": True}, None,
+         "mesh-dependent"),
+        (True, {"stall_ok": True, "sm_in_range": False, "sm_sign_consistent": True}, None,
+         "misses the static-margin window"),
+        (True, {"stall_ok": True, "sm_in_range": True, "sm_sign_consistent": False}, None,
+         "changes sign"),
+        (True, {}, "trim failed", "re-evaluation failed"),
+    ],
+)
+def test_final_design_trust_fails_closed_on_each_required_check(
+    mesh_ok, constraints, reeval_error, expected_reason
+):
+    trusted, failures = solve.final_design_trust(
+        mesh_ok, constraints, reeval_error,
+    )
+    assert trusted is False
+    assert any(expected_reason in reason for reason in failures)
+
+
+def test_final_design_trust_requires_both_stability_checks_to_pass():
+    assert solve.final_design_trust(
+        True, {"stall_ok": True, "sm_in_range": True, "sm_sign_consistent": True},
+        None,
+    ) == (True, [])
+
+
+def test_final_design_trust_rejects_a_feasible_fallback():
+    trusted, failures = solve.final_design_trust(
+        True, {"stall_ok": True, "sm_in_range": True, "sm_sign_consistent": True},
+        None, candidates_source="feasible_fallback",
+    )
+    assert trusted is False
+    assert any("no airworthy operating point" in reason for reason in failures)
+
+
 _FULL_RESULT = {
     "V_ms": 9.5, "alpha_deg": 5.0, "deflection_deg": -2.0, "x_cg_m": 0.4,
     "dv": {"span": 2.0},

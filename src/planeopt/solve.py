@@ -636,11 +636,11 @@ def sm_read_at(
 ) -> tuple[dict | None, str | None]:
     """Name the operating point each static margin was read at, when they differ.
 
-    The sweep's airworthiness filter carries the wind floor, the gust margin,
-    the advance-ratio cap and the throw limit — but NOT the static-margin
-    window, which the NLP enforces as a constraint row. So the sweep may
-    legitimately select a different speed from the one the optimizer chose, and
-    then report ITS static margin as the headline number.
+    The sweep's airworthiness filter carries the wind floor, gust margin,
+    advance-ratio cap, throw limit, static-margin window and local-sign check.
+    It may therefore select a different speed from the NLP optimum, but the
+    selected point must satisfy the same stability requirement before it can be
+    called legal.
 
     That stayed invisible for eleven runs because the NLP's own optimum sat on
     `v_min`, which is exactly where the sweep's peak is too — same speed, same
@@ -651,11 +651,8 @@ def sm_read_at(
     optimized for. A reader has no way to tell that from an unstable aeroplane,
     which is the whole reason this exists.
 
-    Returns `(sm_read_at, note)`, either of which may be None. REPORTING ONLY —
-    it does not change which point is selected, because "the best airworthy
-    point" and "the point the NLP converged to" are both legitimate answers and
-    silently swapping one for the other is how a headline stops meaning what it
-    says.
+    Returns `(sm_read_at, note)`, either of which may be None. REPORTING ONLY;
+    point selection is owned by `run`'s shared airworthiness rules.
     """
     v_nlp, v_re = champion.get("V_ms"), best.get("V_ms")
     if v_nlp is None or v_re is None or abs(v_nlp - v_re) <= 1e-3:
@@ -678,10 +675,10 @@ def sm_read_at(
             "design it converged to; these are two different operating points and "
             "neither is a flyable answer until the aircraft is fixed"
             if fell_back else
-            "the sweep picks the best AIRWORTHY point and its filter does "
-            "not carry the static-margin window, so these are two different "
-            "operating points; `static_margin_nlp` is the one the design was "
-            "optimized for"
+            "the sweep picks the best AIRWORTHY point after applying the full "
+            "static-margin window and local-sign checks, while the NLP reports "
+            "the point it optimized; both are legal but they are different "
+            "operating points"
         ),
     }
     note = None
@@ -695,17 +692,15 @@ def sm_read_at(
     if (not constraints.get("sm_in_range", True) and sm_nlp is not None
             and lo - tol <= sm_nlp <= hi + tol):
         note = (
-            f"Static margin is reported OUT of range at the re-evaluation's own "
-            f"best speed ({v_re:.3f} m/s), but the optimized design meets the "
-            f"window at the speed it was solved for ({v_nlp:.3f} m/s, SM "
-            f"{sm_nlp:.5f}). The sweep's airworthiness filter does not carry the "
-            f"SM window — see `constraints.sm_read_at`."
+            f"Static margin is OUT of range at the re-evaluation's reported "
+            f"speed ({v_re:.3f} m/s), although the NLP met the window at "
+            f"{v_nlp:.3f} m/s (SM {sm_nlp:.5f}). "
             + (
-                " THIS IS NOT AN ALL-CLEAR: no point in the sweep was airworthy "
-                "at all, so the speed this margin is read at is an ILLEGAL "
-                "operating point and the comparison says nothing about whether "
-                "the aeroplane can be flown."
-                if fell_back else ""
+                "NO point in the sweep passed every airworthiness rule, so this "
+                "is the least-bad ILLEGAL fallback, not an all-clear."
+                if fell_back else
+                "This contradicts candidates_source=legal and is an internal "
+                "selection inconsistency; the final trust gate must reject it."
             )
         )
     return read_at, note
@@ -801,8 +796,101 @@ def no_survivors_error(keys: list[str], results: list[dict]) -> RuntimeError:
     )
 
 
+#: A third cold start is evidence only when the first two found materially
+#: different designs. These are intentionally much tighter than engineering
+#: tolerances: consensus is a compute shortcut, not permission to merge nearby
+#: optima. DV error is normalized by each variable's declared box.
+MULTISTART_CONSENSUS_OBJECTIVE_RTOL = 1e-8
+MULTISTART_CONSENSUS_DV_RANGE_RTOL = 1e-5
+
+
+def multistart_consensus(first: dict, second: dict) -> tuple[bool, dict]:
+    """Whether two converged starts are numerically the same optimum.
+
+    Fail closed. A missing result field, undeclared design-variable bound, NaN,
+    failed solve, or even a different set of variables means the remaining
+    starts run. The diagnostics are artifact-ready so a skipped start always
+    carries the exact numerical reason it was considered redundant.
+    """
+    diagnostics = {
+        "objective_relative_error": None,
+        "worst_dv": None,
+        "worst_dv_range_fraction": None,
+        "objective_tolerance": MULTISTART_CONSENSUS_OBJECTIVE_RTOL,
+        "dv_range_tolerance": MULTISTART_CONSENSUS_DV_RANGE_RTOL,
+    }
+    if "failed" in first or "failed" in second:
+        return False, diagnostics | {"reason": "a probe start failed"}
+    try:
+        objective_a = float(first["objective_value"])
+        objective_b = float(second["objective_value"])
+        objective_error = abs(objective_a - objective_b) / max(
+            1.0, abs(objective_a), abs(objective_b)
+        )
+        dv_a, dv_b = first["dv"], second["dv"]
+        bounds_first = first["dv_bounds"]
+        bounds_second = second["dv_bounds"]
+        if set(dv_a) != set(dv_b):
+            raise ValueError("different design-variable sets")
+        worst_name, worst_error = None, 0.0
+        for name in dv_a:
+            bound_a = bounds_first[name]
+            bound_b = bounds_second[name]
+            if len(bound_a) != 2 or len(bound_b) != 2:
+                raise ValueError(f"{name} has no finite declared box")
+            lo, hi = float(bound_a[0]), float(bound_a[1])
+            other_lo, other_hi = float(bound_b[0]), float(bound_b[1])
+            a, b = float(dv_a[name]), float(dv_b[name])
+            width = hi - lo
+            if not all(
+                np.isfinite(v) for v in (lo, hi, other_lo, other_hi, a, b)
+            ) or width <= 0:
+                raise ValueError(f"{name} has no finite declared box")
+            if (lo, hi) != (other_lo, other_hi):
+                raise ValueError(f"{name} has different declared boxes")
+            error = abs(a - b) / width
+            if error > worst_error:
+                worst_name, worst_error = name, error
+        if not np.isfinite(objective_error):
+            raise ValueError("non-finite objective")
+    except (KeyError, TypeError, ValueError) as exc:
+        return False, diagnostics | {"reason": str(exc)}
+
+    diagnostics |= {
+        "objective_relative_error": objective_error,
+        "worst_dv": worst_name,
+        "worst_dv_range_fraction": worst_error,
+    }
+    agreed = (
+        objective_error <= MULTISTART_CONSENSUS_OBJECTIVE_RTOL
+        and worst_error <= MULTISTART_CONSENSUS_DV_RANGE_RTOL
+    )
+    return agreed, diagnostics | {
+        "reason": "strict consensus" if agreed else "solutions differ"
+    }
+
+
+def _hot_start_kwargs(result: dict) -> dict:
+    """Primal fallback plus exact solver seed for a nearby re-solve."""
+    inits = dict(result.get("dv") or {})
+    for source, target in (
+        ("V_ms", "V"),
+        ("alpha_deg", "alpha_deg"),
+        ("deflection_deg", "deflection_deg"),
+    ):
+        if source in result:
+            inits[target] = result[source]
+    if result.get("rpm") is not None:
+        inits["prop_rev_s"] = float(result["rpm"]) / 60.0
+    out = {"inits": inits}
+    if result.get("_solver_seed") is not None:
+        out["solver_seed"] = result["_solver_seed"]
+    return out
+
+
 def airworthiness_price(
-    feasible: list[dict], best: dict, rules: dict, v_min_ms: float, sign: int
+    feasible: list[dict], best: dict, rules: dict, v_min_ms: float, sign: int,
+    points_for_rule=None,
 ) -> dict | None:
     """What the AIRWORTHINESS filters cost the headline number, or None.
 
@@ -845,9 +933,13 @@ def airworthiness_price(
         # Per rule, every speed it removed — the count is the difference between
         # "one awkward point dropped out" and "this filter chose the answer".
         "excluded_by_rule": {
-            n: [s["V_ms"] for s in at_or_above if not ok(s)]
+            n: [s["V_ms"] for s in points if not ok(s)]
             for n, ok in rules.items()
-            if any(not ok(s) for s in at_or_above)
+            for points in [
+                points_for_rule(n, at_or_above)
+                if points_for_rule is not None else at_or_above
+            ]
+            if any(not ok(s) for s in points)
         },
     }
 
@@ -942,6 +1034,38 @@ def sm_sign_flip(sm: dict) -> dict | None:
         if p.get("sm_local") is not None and p["sm_local"] < 0
     ]
     return min(negative, key=lambda p: p["sm_local"]) if negative else None
+
+
+def final_design_trust(
+    objective_mesh_trustworthy: bool,
+    constraints: dict,
+    reeval_error: str | None = None,
+    candidates_source: str = "legal",
+) -> tuple[bool, list[str]]:
+    """Final run-level trust verdict, including numeric stability closure.
+
+    The selection-time mesh gate answers one narrow question: whether drag and
+    therefore the objective belong to the aircraft rather than the panel count.
+    It cannot be the final design verdict. The completed 2026-08-07 run passed
+    that gate while its reported point had SM=0.057 against a 0.08 floor and a
+    negative local stability slope. Fail closed when the numeric champion
+    re-evaluation is missing or fails either stability requirement.
+    """
+    failures = []
+    if not objective_mesh_trustworthy:
+        failures.append("objective drag is mesh-dependent")
+    if reeval_error is not None:
+        failures.append(f"champion numeric re-evaluation failed: {reeval_error}")
+    else:
+        if candidates_source != "legal":
+            failures.append("no airworthy operating point exists in the final sweep")
+        if constraints.get("stall_ok") is not True:
+            failures.append("final stall-speed requirement failed")
+        if constraints.get("sm_in_range") is not True:
+            failures.append("reported operating point misses the static-margin window")
+        if constraints.get("sm_sign_consistent") is not True:
+            failures.append("static margin changes sign inside its evaluation window")
+    return not failures, failures
 
 
 def _is_trim_failure(e: BaseException) -> bool:
@@ -1058,11 +1182,43 @@ def run(
     # predicates the filter applies. A rule that could be priced in one place
     # and applied in another is how a filter comes to choose an answer without
     # the artifact being able to say which one did.
+    # Static margin varies with the trimmed operating point on this model. The
+    # completed 2026-08-07 run selected 9.5 m/s as "legal" and only afterward
+    # discovered SM=0.057 against a 0.08 floor. Cache the numeric evaluation per
+    # speed so selection, diagnostics and the final constraint table all use the
+    # same result without repeating any LiftingLine work.
+    sm_by_speed: dict[float, dict] = {}
+
+    def _static_margin_at(s: dict) -> dict:
+        key = float(s["V_ms"])
+        if key not in sm_by_speed:
+            reading = aero.static_margin(
+                airplane, key, x_cg, airplane.c_ref,
+                alpha0=s["alpha_deg"], bodies=bodies,
+            )
+            reading["sm_sign_consistent"] = sm_sign_flip(reading) is None
+            sm_by_speed[key] = reading
+            # Keep the sweep auditable: a point filtered by stability should
+            # carry the numbers that caused its exclusion in run.json.
+            s["static_margin"] = float(reading["static_margin"])
+            s["sm_sign_consistent"] = bool(reading["sm_sign_consistent"])
+        return sm_by_speed[key]
+
+    sm_lo, sm_hi = mission.static_margin_range
     airworthiness_rules = {
         "gust_margin": lambda s: s["CL"] <= 0.7 * stall["cl_max_3d"] + 1e-6,
         "advance_ratio": lambda s: s["J"] <= j_cap + 1e-6,
         "trim_throw": lambda s: (
             defl_cap is None or abs(s["deflection_deg"]) <= defl_cap + 1e-3
+        ),
+        "static_margin_min": lambda s: (
+            _static_margin_at(s)["static_margin"] >= sm_lo - SM_ACTIVE_TOL
+        ),
+        "static_margin_max": lambda s: (
+            _static_margin_at(s)["static_margin"] <= sm_hi + SM_ACTIVE_TOL
+        ),
+        "static_margin_sign": lambda s: bool(
+            _static_margin_at(s)["sm_sign_consistent"]
         ),
     }
     #: The same rules, in a form that can be QUOTED. A note saying a point
@@ -1076,13 +1232,51 @@ def run(
         "trim_throw": (
             "trim deflection", lambda s: abs(s["deflection_deg"]), defl_cap, " deg",
         ),
+        "static_margin_min": (
+            "static margin", lambda s: _static_margin_at(s)["static_margin"],
+            sm_lo, "",
+        ),
+        "static_margin_max": (
+            "static margin", lambda s: _static_margin_at(s)["static_margin"],
+            sm_hi, "",
+        ),
+        "static_margin_sign": (
+            "minimum local static margin",
+            lambda s: min(
+                p["sm_local"]
+                for p in _static_margin_at(s).get("sm_local_slopes", [])
+            ),
+            0.0, "",
+        ),
     }
 
-    def _legal_but_for_v_min(s: dict) -> bool:
-        return all(ok(s) for ok in airworthiness_rules.values())
+    cheap_rule_names = ("gust_margin", "advance_ratio", "trim_throw")
+    stability_rule_names = (
+        "static_margin_min", "static_margin_max", "static_margin_sign",
+    )
 
-    airworthy = [s for s in feasible if _legal_but_for_v_min(s)]
-    legal = [s for s in airworthy if s["V_ms"] >= mission.v_min_ms - 1e-9]
+    def _passes(names, s: dict) -> bool:
+        return all(airworthiness_rules[name](s) for name in names)
+
+    sign = 1 if objective.direction == "maximize" else -1
+    cheap_airworthy = [s for s in feasible if _passes(cheap_rule_names, s)]
+    cheap_legal = [
+        s for s in cheap_airworthy if s["V_ms"] >= mission.v_min_ms - 1e-9
+    ]
+
+    def _best_stable(points: list[dict]) -> dict | None:
+        # Evaluate in objective order and stop as soon as a fully legal point is
+        # found. Static margin costs five numeric LiftingLine calls per speed;
+        # checking every sweep point merely to prove that worse points are also
+        # stable adds minutes without changing selection.
+        ordered = sorted(
+            points,
+            key=lambda s: sign * s.get("objective_value", -np.inf),
+            reverse=True,
+        )
+        return next((s for s in ordered if _passes(stability_rule_names, s)), None)
+
+    best_legal = _best_stable(cheap_legal)
     # THE FALLBACK CHANGES WHAT "BEST" MEANS, so the artifact has to carry which
     # one it got. With no legal point anywhere in the sweep this reports the
     # least-bad ILLEGAL one, and until 2026-08-06 it did so in silence: the
@@ -1092,8 +1286,8 @@ def run(
     # beside a cap the artifact never printed (FINDINGS §28). `airworthiness_price`
     # cannot catch this — it asks which rule excluded a BETTER point, and here
     # the rules excluded every point, so there is no better one to name.
-    candidates_source = "legal" if legal else "feasible_fallback"
-    candidates = legal if legal else feasible
+    candidates_source = "legal" if best_legal is not None else "feasible_fallback"
+    candidates = [best_legal] if best_legal is not None else feasible
     if not candidates:
         # Every point failed to trim or to close the propulsion chain. Report the
         # distinct causes: bare "max() iterable argument is empty" tells the user
@@ -1110,13 +1304,10 @@ def run(
             f"no feasible operating point anywhere in the {len(sweep)}-point speed "
             f"sweep, so there is nothing to report. Causes: {detail}"
         )
-    sign = 1 if objective.direction == "maximize" else -1
     best = max(candidates, key=lambda s: sign * s.get("objective_value", -np.inf))
     # evaluate dCm/dCL at the trim alpha — LiftingLine's derivative is
     # alpha-dependent, so a fixed reference alpha disagrees with the NLP
-    sm = aero.static_margin(
-        airplane, best["V_ms"], x_cg, airplane.c_ref, alpha0=best["alpha_deg"], bodies=bodies
-    )
+    sm = _static_margin_at(best)
 
     # --- what the headline number is actually limited BY ---------------------
     # A reported optimum sitting on `v_min` is not the same claim as one sitting
@@ -1126,11 +1317,25 @@ def run(
     # Nothing was wrong — but "the best this aeroplane can do" and "the best it
     # may do at or above 9.5 m/s" are different sentences, and only the second
     # was true. Priced here so the requirement can be argued with.
-    vmin_price = v_min_price(airworthy, best, mission.v_min_ms, sign)
+    unconstrained_airworthy = _best_stable(cheap_airworthy)
+    vmin_price = v_min_price(
+        [unconstrained_airworthy] if unconstrained_airworthy is not None else [],
+        best, mission.v_min_ms, sign,
+    )
     # ... and the same question asked of the filters that run BEFORE `airworthy`
     # exists, which is where the first rcv2 evaluation lost its headline.
+    def _price_points(name: str, default: list[dict]) -> list[dict]:
+        if name not in stability_rule_names:
+            return default
+        # Only claim exclusions for stability points actually evaluated during
+        # ordered selection (plus the objective peak, evaluated inside
+        # `airworthiness_price`). The cache is consulted lazily, after that peak
+        # check, so diagnostics never force a full static-margin sweep.
+        return [s for s in default if float(s["V_ms"]) in sm_by_speed]
+
     air_price = airworthiness_price(
-        feasible, best, airworthiness_rules, mission.v_min_ms, sign
+        feasible, best, airworthiness_rules, mission.v_min_ms, sign,
+        points_for_rule=_price_points,
     )
     # ... and when NOTHING was legal, the far louder statement `air_price` is
     # structurally unable to make.
@@ -1154,7 +1359,7 @@ def run(
     # a known limit that nothing announces is indistinguishable from a clean
     # result to everyone downstream of it.
     worst_unstable = sm_sign_flip(sm)
-    sm_sign_consistent = worst_unstable is None
+    sm_sign_consistent = bool(sm["sm_sign_consistent"])
 
     result = RunResult(
         aircraft=aircraft.name,
@@ -1411,6 +1616,53 @@ WARM_START_OPTIONS = {
     "ipopt.mu_init": 1e-4,
 }
 
+# Explicit because FINDINGS section 29 measured the alternative: limited-memory
+# saved RAM but failed to converge after 871 iterations and 30 minutes. An
+# AeroSandbox or IPOPT default change must not silently reopen that decision.
+EXACT_HESSIAN_OPTIONS = {"ipopt.hessian_approximation": "exact"}
+
+
+def _apply_solver_seed(opti, seed: dict | None) -> bool:
+    """Restore a complete IPOPT primal/constraint-dual point when compatible.
+
+    A discrete candidate may change the NLP shape. Such a seed is not partially
+    applied: both dimensions must match exactly or the new problem starts from
+    its ordinary declared guesses. This makes hot-starting an acceleration, not
+    a source of misaligned multipliers.
+    """
+    if not seed:
+        return False
+    try:
+        x = np.asarray(seed["x"], dtype=float).reshape(-1, 1)
+        lam_g = np.asarray(seed["lam_g"], dtype=float).reshape(-1, 1)
+        nx, ng = int(opti.x.numel()), int(opti.g.numel())
+        if (
+            int(seed["nx"]) != nx or int(seed["ng"]) != ng
+            or x.size != nx or lam_g.size != ng
+            or not np.all(np.isfinite(x)) or not np.all(np.isfinite(lam_g))
+        ):
+            return False
+        opti.set_initial(opti.x, x)
+        opti.set_initial(opti.lam_g, lam_g)
+        return True
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        return False
+
+
+def _capture_solver_seed(opti, value) -> dict | None:
+    """The small, serialisable part of an IPOPT solution needed to hot-start."""
+    try:
+        x = np.asarray(value(opti.x), dtype=float).ravel()
+        lam_g = np.asarray(value(opti.lam_g), dtype=float).ravel()
+        if not np.all(np.isfinite(x)) or not np.all(np.isfinite(lam_g)):
+            return None
+        return {
+            "nx": int(x.size), "ng": int(lam_g.size),
+            "x": x.tolist(), "lam_g": lam_g.tolist(),
+        }
+    except (TypeError, ValueError, RuntimeError):
+        return None
+
 
 #: What IPOPT's own iteration log is read for, and what those numbers are called
 #: in the frame. All of it comes from `opti.debug.stats()` INSIDE the callback,
@@ -1494,6 +1746,69 @@ def _live_frame_callback(opti, frames, dv: dict, state: dict):
     return callback
 
 
+def _shared_lifting_line(opti, airplane, V, x_cg, pitch_control: str):
+    """Build LiftingLine once and return an exact symbolic point evaluator.
+
+    CasADi treats the Function as an atomic graph node and builds its derivative
+    functions once. Vector inputs are evaluated through ``Function.map`` so
+    cruise and the three static-margin points also enter the outer NLP as one
+    batched graph call rather than four scalar calls. The map is serial: it
+    reduces graph construction and derivative bookkeeping without creating
+    threads or increasing peak memory.
+    """
+    import aerosandbox as asb
+    import casadi as cas
+
+    alpha = cas.MX.sym("ll_alpha")
+    deflection = cas.MX.sym("ll_deflection")
+    deflected = airplane.with_control_deflections({pitch_control: deflection})
+    raw = asb.LiftingLine(
+        airplane=deflected,
+        op_point=asb.OperatingPoint(velocity=V, alpha=alpha),
+        xyz_ref=[x_cg, 0, 0],
+        vortex_core_radius=aero.LL_VORTEX_CORE_RADIUS,
+    ).run()
+    keys = ("L", "D", "CL", "Cm")
+    function = cas.Function(
+        "shared_lifting_line",
+        [opti.x, alpha, deflection],
+        [raw[key] for key in keys],
+        {"cse": True, "never_inline": True},
+    )
+
+    maps = {}
+
+    def at(alpha_deg, deflection_deg=0.0) -> dict:
+        n_alpha = int(getattr(alpha_deg, "numel", lambda: 1)())
+        n_deflection = int(getattr(deflection_deg, "numel", lambda: 1)())
+        n = max(n_alpha, n_deflection)
+        if n == 1:
+            values = function(opti.x, alpha_deg, deflection_deg)
+        else:
+            if n_alpha not in (1, n) or n_deflection not in (1, n):
+                raise ValueError(
+                    "alpha and deflection batches must have equal lengths"
+                )
+            alpha_batch = (
+                cas.repmat(alpha_deg, 1, n)
+                if n_alpha == 1
+                else cas.reshape(alpha_deg, 1, n)
+            )
+            deflection_batch = (
+                cas.repmat(deflection_deg, 1, n)
+                if n_deflection == 1
+                else cas.reshape(deflection_deg, 1, n)
+            )
+            mapped = maps.get(n)
+            if mapped is None:
+                mapped = function.map(n, "serial")
+                maps[n] = mapped
+            values = mapped(cas.repmat(opti.x, 1, n), alpha_batch, deflection_batch)
+        return dict(zip(keys, values))
+
+    return at
+
+
 def _solve_nlp(
     aircraft,
     mission,
@@ -1505,6 +1820,7 @@ def _solve_nlp(
     timeout_min: float = SOLVE_TIMEOUT_MIN,
     max_iter: int = SOLVE_MAX_ITER,
     warm_start: bool = False,
+    solver_seed: dict | None = None,
     frames=None,
 ) -> dict:
     """One NLP solve. Returns the champion design + state, all numeric.
@@ -1518,6 +1834,7 @@ def _solve_nlp(
     `_live_frame_callback` for what that costs and why it is safe.
     """
     import aerosandbox as asb
+    import casadi as cas
 
     objective = OBJECTIVES[mission.objective]
     pt = aircraft.powertrain()
@@ -1548,9 +1865,18 @@ def _solve_nlp(
     V = opti.variable(
         init_guess=(inits or {}).get("V", 11.0), lower_bound=v_lo, upper_bound=v_hi
     )
-    alpha = opti.variable(init_guess=4.0, lower_bound=a_lo, upper_bound=a_hi)
-    defl = opti.variable(init_guess=0.0, lower_bound=d_lo, upper_bound=d_hi)
-    n = opti.variable(init_guess=65.0, lower_bound=n_lo, upper_bound=n_hi)
+    alpha = opti.variable(
+        init_guess=(inits or {}).get("alpha_deg", 4.0),
+        lower_bound=a_lo, upper_bound=a_hi,
+    )
+    defl = opti.variable(
+        init_guess=(inits or {}).get("deflection_deg", 0.0),
+        lower_bound=d_lo, upper_bound=d_hi,
+    )
+    n = opti.variable(
+        init_guess=(inits or {}).get("prop_rev_s", 65.0),
+        lower_bound=n_lo, upper_bound=n_hi,
+    )
 
     for k, val in (fixed or {}).items():
         opti.subject_to(dv[k] == val)
@@ -1564,17 +1890,21 @@ def _solve_nlp(
 
     # cruise point: trimmed (explicit deflection of the aircraft-declared pitch
     # surface — "ruddervator", "elevator", ... — Cm about produced CG)
+    # These four operating points use one encapsulated CasADi graph. Keeping
+    # four copies inline made CasADi build four copies of the LiftingLine and
+    # NeuralFoil derivative graphs for IPOPT; the exact Hessian of those copies
+    # is the dominant memory cost (FINDINGS section 29). Function calls remain
+    # exact symbolic evaluations, but share one implementation and its cached
+    # derivative functions.
     pitch_control = getattr(aircraft, "pitch_control_name", "ruddervator")
-    plane_defl = airplane.with_control_deflections({pitch_control: defl})
-    aero_run = asb.LiftingLine(
-        airplane=plane_defl,
-        op_point=asb.OperatingPoint(velocity=V, alpha=alpha),
-        xyz_ref=[x_cg, 0, 0],
-        # NOT the AeroSandbox default — see aero.LL_VORTEX_CORE_RADIUS. At 1e-8
-        # this model returns negative drag on a strongly canted winglet, and the
-        # optimizer finds it.
-        vortex_core_radius=aero.LL_VORTEX_CORE_RADIUS,
-    ).run()
+    lifting_line_at = _shared_lifting_line(
+        opti, airplane, V, x_cg, pitch_control
+    )
+    offs = aero.SM_ALPHA_OFFSETS
+    point_alphas = cas.horzcat(alpha, *[alpha + offset for offset in offs])
+    point_deflections = cas.horzcat(defl, cas.DM.zeros(1, len(offs)))
+    aero_points = lifting_line_at(point_alphas, point_deflections)
+    aero_run = {key: values[0] for key, values in aero_points.items()}
     q = 0.5 * 1.225 * V**2
     s_ref = airplane.s_ref
     drag = aero_run["D"] + q * s_ref * aero.body_cd0(bodies, V, s_ref)
@@ -1590,18 +1920,9 @@ def _solve_nlp(
     # Munk fuselage destabilizing term converted to CL-space via the lift slope.
     # The estimator itself lives in aero, so the numeric re-evaluation below
     # measures the same quantity this constraint holds (aero.SM_ALPHA_OFFSETS).
-    offs = aero.SM_ALPHA_OFFSETS
-    sm_runs = [
-        asb.LiftingLine(
-            airplane=airplane,
-            op_point=asb.OperatingPoint(velocity=V, alpha=alpha + o),
-            xyz_ref=[x_cg, 0, 0],
-            vortex_core_radius=aero.LL_VORTEX_CORE_RADIUS,
-        ).run()
-        for o in offs
-    ]
     sm = aero.static_margin_from_polar(
-        [r["CL"] for r in sm_runs], [r["Cm"] for r in sm_runs],
+        [aero_points["CL"][i + 1] for i in range(len(offs))],
+        [aero_points["Cm"][i + 1] for i in range(len(offs))],
         list(offs), bodies, s_ref, airplane.c_ref,
     )
     opti.subject_to(sm >= mission.static_margin_range[0])
@@ -1691,6 +2012,14 @@ def _solve_nlp(
     # Jacobian.
     labels.stop()
 
+    hot_start_used = _apply_solver_seed(opti, solver_seed)
+    if solver_seed is not None and not hot_start_used:
+        log.info(
+            "solver seed does not match this NLP shape (%d variables, %d "
+            "constraints); using declared primal guesses",
+            int(opti.x.numel()), int(opti.g.numel()),
+        )
+
     #: Was the iteration ceiling lowered on purpose? A run at the default 1000
     #: that exhausts it has genuinely failed; one at 3 has done exactly what was
     #: asked. The two want opposite treatment and only this tells them apart.
@@ -1729,8 +2058,11 @@ def _solve_nlp(
             "clmax_ab_used": clmax_ab,
         }
 
-    options = {"ipopt.max_wall_time": 60.0 * timeout_min}
-    if warm_start:
+    options = {
+        **EXACT_HESSIAN_OPTIONS,
+        "ipopt.max_wall_time": 60.0 * timeout_min,
+    }
+    if warm_start or hot_start_used:
         options |= WARM_START_OPTIONS
     callback = None
     if frames is not None:
@@ -1788,7 +2120,21 @@ def _solve_nlp(
                 }
                 return out
         raise failure from None
-    return _pack(sol)
+    out = _pack(sol)
+    # IPOPT already computed these. Keeping them on successes as well as
+    # failures makes iteration-count and solver-status regressions visible in
+    # normal run artifacts without another instrumented experiment.
+    stats = opti.stats() or {}
+    out |= {
+        "return_status": str(stats.get("return_status", "Solve_Succeeded")),
+        "iter_count": stats.get("iter_count"),
+        "converged": True,
+        "hot_start_used": hot_start_used,
+    }
+    seed = _capture_solver_seed(opti, sol)
+    if seed is not None:
+        out["_solver_seed"] = seed
+    return out
 
 
 def _solve_worker(conn, aircraft, mission, kw, live=None):  # pragma: no cover — child process
@@ -2137,14 +2483,22 @@ def _solve_many(
 #: the solver certified holds no aircraft. Read by the report and by anyone
 #: asking why a span has no objective value.
 SKIPPED_STATUS = "Skipped_Below_Infeasible_Span"
+SKIPPED_AFTER_TIMEOUT_STATUS = "Skipped_Below_Timed_Out_Span"
 PROVEN_INFEASIBLE_STATUS = "Infeasible_Problem_Detected"
+
+#: Optional alternatives and sensitivity points must not each inherit the
+#: primary solve's 30-minute entitlement. The 2026-08-07 full run spent 135
+#: minutes in members that ultimately timed out; every optional member that did
+#: converge in that run landed inside 9.1 minutes. Twelve keeps measured margin
+#: without allowing one unselected alternative to own half an hour.
+OPTIONAL_MEMBER_TIMEOUT_MIN = 12.0
 
 #: Wall-clock ceiling for ONE FLATNESS MEMBER, minutes — well below
 #: `SOLVE_TIMEOUT_MIN`, because a span perturbation that is going to converge on
-#: this model converges quickly. Every converged flatness member on record, both
-#: runs and both chord caps, took **4.6 to 6.0 minutes** (6 of them); the ones
-#: that fail run to whatever ceiling they are given, 87-88 iterations without
-#: closing. 20 minutes is over 3x the slowest flatness convergence.
+#: this model converges quickly. Before graph sharing, every converged flatness
+#: member took **4.6 to 6.0 minutes**; the 2026-08-07 shared-graph run converged
+#: four more in 1.7 to 3.2 minutes. Members that fail run to whatever ceiling
+#: they are given without closing. Ten minutes retains measured margin.
 #:
 #: And more clock is measured, three separate times, to buy nothing on a member
 #: that is not converging: pusher at 25 vs 60 minutes reached the same `inf_pr`
@@ -2161,18 +2515,11 @@ PROVEN_INFEASIBLE_STATUS = "Infeasible_Problem_Detected"
 #: that does not sink this cap is that a tail-topology swap is a different
 #: problem from a span perturbation — not that slow convergence never happens.
 #:
-#: The exposure that remains: a genuinely slow flatness member would be recorded
-#: as `Maximum_WallTime_Exceeded` and its span silently lost.
-#:
-#: **20.0, not 12.0 — user decision, 2026-07-31.** 12 was 2x the slowest flatness
-#: convergence ever seen (6.0 min), which sounds like margin until you notice
-#: that the one solve known to converge past it took 21.5 minutes. The exposure
-#: is asymmetric: a wrongly-timed-out member silently drops a span from the curve
-#: the sweep exists to draw, while the cost of being generous is bounded and
-#: visible — roughly 16 min per run at the two members that currently fail. The
-#: evidence for "slow members do not converge" stays exactly as strong as it was;
-#: this buys the margin to find out where it stops being true.
-FLATNESS_TIMEOUT_MIN = 20.0
+#: The exposure remains explicit: a genuinely slow flatness member is recorded
+#: as timed out, never as infeasible. After that first timeout, smaller spans are
+#: recorded as unproven rather than consuming the same budget repeatedly. This
+#: is an expenditure rule, not a mathematical inference about feasibility.
+FLATNESS_TIMEOUT_MIN = 10.0
 
 
 #: How far BELOW the incumbent span the sweep reaches, as a fraction of it.
@@ -2187,6 +2534,7 @@ def flatness_sweep(
     run_timeout_min: float = SOLVE_TIMEOUT_MIN,
     incumbent_span: float | None = None,
     span_floor: float | None = None,
+    warm_kwargs: dict | None = None,
 ) -> list[dict]:
     """Re-optimize everything else at each of `n` fixed spans around the optimum.
 
@@ -2222,10 +2570,11 @@ def flatness_sweep(
     sweeping up from the bottom licenses nothing at all: 1.5 m being infeasible
     says nothing about 1.6 m.
 
-    **Only on a PROOF**, because `Infeasible_Problem_Detected` is the solver
-    certifying that there is no aircraft there, whereas a timeout certifies
-    nothing — cascading a timeout would silently discard spans that are merely
-    slow, which is the same mistake in the other direction.
+    **Only infer infeasibility on a PROOF**, because
+    `Infeasible_Problem_Detected` is the solver certifying that there is no
+    aircraft there, whereas a timeout certifies nothing. A timeout does stop
+    further equal-budget attempts below it, but those entries are explicitly
+    labelled unproven rather than infeasible.
 
     **And bounded**, because on THIS model that proof has never arrived. Gating
     the cascade on the status alone (as of 2026-07-30) did nothing whatsoever:
@@ -2268,6 +2617,8 @@ def flatness_sweep(
     spans = sorted((float(s) for s in np.linspace(span_min, span_cap, n)), reverse=True)
     fr: dict[float, dict] = {}
     floor: float | None = None
+    timed_out_at: float | None = None
+    next_warm = dict(warm_kwargs or {})
     for span in spans:
         if floor is not None:
             fr[span] = {
@@ -2278,13 +2629,43 @@ def flatness_sweep(
             log.info("  flatness sweep: %.2f m skipped (below the infeasible %.2f m)",
                      span, floor)
             continue
+        if timed_out_at is not None:
+            fr[span] = {
+                "failed": f"skipped: {timed_out_at:.2f} m timed out, so smaller "
+                "spans are unproven rather than worth another identical budget",
+                "return_status": SKIPPED_AFTER_TIMEOUT_STATUS,
+            }
+            log.info(
+                "  flatness sweep: %.2f m skipped after %.2f m timed out",
+                span, timed_out_at,
+            )
+            continue
         fr[span] = batch("flatness sweep", [
-            (span, {"fixed": {"span": span}, "timeout_min": member_timeout_min})
+            (span, {
+                **next_warm,
+                "fixed": {"span": span},
+                "timeout_min": member_timeout_min,
+            })
         ])[span]
         if fr[span].get("return_status") == PROVEN_INFEASIBLE_STATUS:
             floor = span
-            log.info("  flatness sweep: %.2f m proved infeasible — smaller spans "
-                     "will be skipped", span)
+            log.info(
+                "  flatness sweep: %.2f m proved infeasible; smaller spans "
+                "will be skipped",
+                span,
+            )
+        elif fr[span].get("return_status") == "Maximum_WallTime_Exceeded":
+            timed_out_at = span
+            log.info(
+                "  flatness sweep: %.2f m timed out; smaller spans will be "
+                "recorded as unproven without another member budget",
+                span,
+            )
+        elif "failed" not in fr[span]:
+            # The first fixed-span problem has one extra equality relative to
+            # the champion and rejects its dual seed. Subsequent spans have the
+            # same shape and can reuse the complete fixed-span point.
+            next_warm = _hot_start_kwargs(fr[span])
 
     return [
         {"span": s, "objective_value": None, **_failed_entry(fr[s])}
@@ -2420,10 +2801,17 @@ def optimize(
         t_phase = time.monotonic()
         phase_members[label] = phase_members.get(label, 0) + len(jobs)
         try:
+            options = {
+                "timeout_min": solve_timeout_min,
+                "max_iter": max_iter,
+                "cache": cache,
+                "pause_file": pause_file,
+                "live": live,
+                **kw,
+            }
             return _solve_many(
                 aircraft, mission, jobs, parallel, label=label,
-                timeout_min=solve_timeout_min, max_iter=max_iter, cache=cache,
-                pause_file=pause_file, live=live, **kw
+                **options,
             )
         finally:
             phase_minutes[label] = round(
@@ -2434,7 +2822,7 @@ def optimize(
     # The nominal start is warmed; the PERTURBED starts are deliberately left
     # cold, so multistart still answers "does this converge from elsewhere?".
     # A warm start that also seeded them would agree with itself by construction.
-    jobs = [("nominal", dict(warm))]
+    start_jobs = [("nominal", dict(warm))]
     for i in range(multistart - 1):
         inits = {
             "span": float(1.8 * rng.uniform(0.88, 1.12)),
@@ -2445,14 +2833,70 @@ def optimize(
         if getattr(aircraft, "winglet", False):
             inits["wl_len"] = float(0.12 * rng.uniform(0.5, 1.8))
             inits["wl_cant"] = float(rng.uniform(60.0, 85.0))
-        jobs.append((f"perturbed_{i}", {"inits": inits}))
-    # the +20 g shadow-price bump is independent of the champion, so it rides
-    # the same batch; its delta is computed afterwards
-    jobs.append(("mass_bump", {"extra_mass_kg": 0.020}))
-    first = batch("multistart", jobs)
+        start_jobs.append((f"perturbed_{i}", {"inits": inits}))
+    # The +20 g shadow-price bump is a nearby re-solve. On a serial run it is
+    # dispatched only after the independent starts, so it can reuse the best
+    # complete primal/dual point. A parallel run keeps the historical combined
+    # batch because waiting would add wall time there.
+    bump_timeout = min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min)
+    bump_job = (
+        "mass_bump",
+        {"extra_mass_kg": 0.020, "timeout_min": bump_timeout},
+    )
+    consensus = None
+    skipped_starts: list[str] = []
+    if parallel == 1:
+        # On a serial platform, first ask the minimum useful multistart question.
+        # If two independently seeded solves reach the same numerical design,
+        # another cold start is redundant evidence. Parallel platforms keep the
+        # historical one-batch schedule: those starts are already running side
+        # by side, so staging them would lengthen rather than shorten the run.
+        probe_jobs = start_jobs[:2]
+        first = batch("multistart", probe_jobs)
+        remaining = start_jobs[2:]
+        agreed = False
+        if remaining:
+            agreed, consensus = multistart_consensus(
+                first[probe_jobs[0][0]], first[probe_jobs[1][0]]
+            )
+        if agreed:
+            skipped_starts = [key for key, _ in remaining]
+            log.info(
+                "multistart: %s agree to strict numerical tolerance; skipping "
+                "%s as redundant",
+                " and ".join(key for key, _ in probe_jobs),
+                ", ".join(skipped_starts),
+            )
+        elif remaining:
+            first.update(batch("multistart", remaining))
+
+        successful_starts = [
+            first[key] for key, _ in start_jobs
+            if key not in skipped_starts and "failed" not in first[key]
+        ]
+        if successful_starts:
+            probe_sign = (
+                1 if OBJECTIVES[mission.objective].direction == "maximize" else -1
+            )
+            seed_result = max(
+                successful_starts,
+                key=lambda result: probe_sign * result["objective_value"],
+            )
+            bump_job = (
+                "mass_bump",
+                {
+                    **_hot_start_kwargs(seed_result),
+                    "extra_mass_kg": 0.020,
+                    "timeout_min": bump_timeout,
+                },
+            )
+        first.update(batch("multistart", [bump_job]))
+    else:
+        first = batch("multistart", [*start_jobs, bump_job])
+
     starts, results = [], []
-    for key, _ in jobs:
-        if key == "mass_bump":
+    for key, _ in start_jobs:
+        if key in skipped_starts:
             continue
         r = first[key]
         results.append(r)
@@ -2527,10 +2971,12 @@ def optimize(
         # solve depends only on its own attr value, not on the champion), so
         # they may run concurrently; adoption below is order-identical to the
         # sequential greedy (winner = argmax over baseline + candidates)
+        candidate_warm = _hot_start_kwargs(champion)
         res = batch(
-            f"study {attr}", [(c, dict(warm)) for c in cands],
+            f"study {attr}", [(c, dict(candidate_warm)) for c in cands],
             prep=lambda c, a=attr: setattr(aircraft, a, c),
             restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
+            timeout_min=min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min),
         )
         for cand in cands:
             r_c = res[cand]
@@ -2593,10 +3039,37 @@ def optimize(
             aircraft.winglet = True
             aircraft.tip_dihedral_max_deg = prev_cant
 
-        wr = batch(
-            "winglet study", [("off", {}), ("continuous_cant", {})],
-            prep=_wl_prep, restore=_wl_restore,
-        )
+        winglet_timeout = min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min)
+        if parallel == 1:
+            # `off` changes the graph shape relative to the winglet champion and
+            # therefore rejects its dual seed, but still uses its physical
+            # primal point. `continuous_cant` has the same winglet-free shape as
+            # `off`, so it can reuse the complete primal/dual solution.
+            off_result = batch(
+                "winglet study",
+                [("off", _hot_start_kwargs(champion))],
+                prep=_wl_prep, restore=_wl_restore,
+                timeout_min=winglet_timeout,
+            )["off"]
+            cant_seed = off_result if "failed" not in off_result else champion
+            cant_result = batch(
+                "winglet study",
+                [("continuous_cant", _hot_start_kwargs(cant_seed))],
+                prep=_wl_prep, restore=_wl_restore,
+                timeout_min=winglet_timeout,
+            )["continuous_cant"]
+            wr = {"off": off_result, "continuous_cant": cant_result}
+        else:
+            candidate_warm = _hot_start_kwargs(champion)
+            wr = batch(
+                "winglet study",
+                [
+                    ("off", dict(candidate_warm)),
+                    ("continuous_cant", dict(candidate_warm)),
+                ],
+                prep=_wl_prep, restore=_wl_restore,
+                timeout_min=winglet_timeout,
+            )
 
         r_off = wr["off"]
         if "failed" in r_off:
@@ -2666,10 +3139,12 @@ def optimize(
         cands = [c for c in candidates if c != baseline]
         if not cands:
             continue
+        candidate_warm = _hot_start_kwargs(champion)
         res = batch(
-            f"priced {attr}", [(c, dict(warm)) for c in cands],
+            f"priced {attr}", [(c, dict(candidate_warm)) for c in cands],
             prep=lambda c, a=attr: setattr(aircraft, a, c),
             restore=lambda a=attr, b=baseline: setattr(aircraft, a, b),
+            timeout_min=min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min),
         )
         entries = {}
         for cand in cands:
@@ -2725,9 +3200,14 @@ def optimize(
     design_trustworthy, gate_check = objective_is_mesh_trustworthy(aircraft, champion)
     if gate_check is not None:
         gate_diagnostics = {"objective_mesh_check": gate_check,
+                            "objective_mesh_trustworthy": design_trustworthy,
                             "design_trustworthy": design_trustworthy}
     else:
-        gate_diagnostics = {"design_trustworthy": True, "objective_mesh_check": None}
+        gate_diagnostics = {
+            "design_trustworthy": True,
+            "objective_mesh_trustworthy": True,
+            "objective_mesh_check": None,
+        }
     if not design_trustworthy:
         log.warning(
             "CHAMPION OBJECTIVE IS MESH-DEPENDENT (%.5f N in-loop vs %.5f N at %d "
@@ -2759,6 +3239,7 @@ def optimize(
             batch, span_cap, run_timeout_min=solve_timeout_min,
             incumbent_span=champion["dv"].get("span"),
             span_floor=span_box[0],
+            warm_kwargs=_hot_start_kwargs(champion),
         )
 
     # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization.
@@ -2771,17 +3252,21 @@ def optimize(
     #: gate skips characterization it drops the four perturbations and keeps
     #: this one: a run that cannot say how sensitive the design is can still say
     #: what a gram costs it, and `shadow_per_g` below has no other source.
+    battery_warm = _hot_start_kwargs(champion)
     battery_jobs = [
-        ("printed_mass_x1.10", {"printed_scale": 1.10}),
-        ("printed_mass_x0.90", {"printed_scale": 0.90}),
-        ("chain_eta_x0.90", {"eta_scale": 0.90}),
-        ("chain_eta_x1.10", {"eta_scale": 1.10}),
-        ("mass_bump", {"extra_mass_kg": 0.020}),
+        ("printed_mass_x1.10", {**battery_warm, "printed_scale": 1.10}),
+        ("printed_mass_x0.90", {**battery_warm, "printed_scale": 0.90}),
+        ("chain_eta_x0.90", {**battery_warm, "eta_scale": 0.90}),
+        ("chain_eta_x1.10", {**battery_warm, "eta_scale": 1.10}),
+        ("mass_bump", {**battery_warm, "extra_mass_kg": 0.020}),
     ]
     if not design_trustworthy:
         battery_jobs = [j for j in battery_jobs if j[0] == "mass_bump"]
     battery = {}
-    battery_results = batch("re-solve battery", battery_jobs)
+    battery_results = batch(
+        "re-solve battery", battery_jobs,
+        timeout_min=min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min),
+    )
     for label, r in battery_results.items():
         if label == "mass_bump":
             continue
@@ -2887,12 +3372,9 @@ def optimize(
             result.constraints["static_margin"] - champion["static_margin"]
         )
         # WHICH OPERATING POINT the two numbers were read at, whenever they are
-        # not the same one. The sweep's airworthiness filter carries the wind
-        # floor, the gust margin, the advance-ratio cap and the throw limit —
-        # but NOT the static-margin window, which the NLP enforces as a
-        # constraint row. So the sweep may legitimately select a faster or
-        # slower point than the optimizer did, and then report ITS static
-        # margin as the headline.
+        # not the same one. The sweep now applies the static-margin window and
+        # local-sign check as airworthiness rules, so a different reported speed
+        # is still legal rather than merely the unconstrained objective peak.
         #
         # That stayed invisible for eleven runs because the NLP's own optimum
         # sat on `v_min`, which is exactly where the sweep's peak is too, so
@@ -2921,6 +3403,20 @@ def optimize(
             "design vector and study results below are the optimizer's, "
             "un-cross-checked. Treat them as provisional."
         )
+
+    final_trust, trust_failures = final_design_trust(
+        design_trustworthy, result.constraints, reeval_error,
+        result.diagnostics.get("candidates_source", "feasible_fallback"),
+    )
+    result.diagnostics["design_trustworthy"] = final_trust
+    result.diagnostics["design_trust_failures"] = trust_failures
+    if not final_trust:
+        result.notes.insert(0, (
+            "DESIGN NOT TRUSTWORTHY FOR FLIGHT OR CONSTRUCTION: "
+            + "; ".join(trust_failures)
+            + ". The optimization result remains useful diagnostically, but its "
+            "headline objective is not an airworthy design recommendation."
+        ))
 
     # Is the champion's drag a property of the aircraft or of the panel count?
     # Two lifting-line runs at one operating point against a battery measured in
@@ -3105,17 +3601,28 @@ def optimize(
         }
 
     result.performance["optimization"] = {
-        "champion": champion,
+        "champion": {
+            key: value for key, value in champion.items()
+            if not key.startswith("_")
+        },
         "resolve_battery": battery,
         "discrete_studies": discrete_studies or None,
         "priced_options": priced or None,
         "winglet_study": winglet_study,
         "tripped_polars": tripped,
         "multistart": [
-            {"start": s, **({k: v for k, v in r.items() if k != "clmax_3d_used"})}
+            {
+                "start": s,
+                **{
+                    k: v for k, v in r.items()
+                    if k != "clmax_3d_used" and not k.startswith("_")
+                },
+            }
             for s, r in zip(starts, results)
         ],
         "multistart_objective_spread": spread,
+        "multistart_consensus": consensus,
+        "multistart_skipped": skipped_starts or None,
         "shadow_price_obj_per_gram": shadow_per_g,
         "shadow_price_source": shadow_price_source,
         "flatness_span": flat,
@@ -3130,6 +3637,13 @@ def optimize(
         "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar "
         "stress/deflection sizing, ballast cap, battery-position balance."
     )
+    if skipped_starts:
+        result.notes.append(
+            "Adaptive multistart: nominal and perturbed_0 converged to strict "
+            "numerical consensus, so " + ", ".join(skipped_starts)
+            + " was skipped as redundant. Exact tolerances and observed errors "
+            "are recorded under performance.optimization.multistart_consensus."
+        )
     if bump_failed and shadow_per_g is not None:
         result.notes.append(
             f"THE SHADOW PRICE IS NOT THIS DESIGN'S: the +20 g bump on the "

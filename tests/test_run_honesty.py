@@ -542,6 +542,49 @@ def test_a_legal_point_reports_no_violations():
     assert solve.rule_violations(_tp(12.5, 44.71, -3.0), RCV2_RULES, RCV2_LIMITS) == []
 
 
+@pytest.mark.slow
+def test_the_final_sweep_cannot_select_an_unstable_headline_point(
+    sample_aircraft, sample_mission, tmp_path, monkeypatch
+):
+    """End-to-end reproduction of the completed 2026-08-07 run.
+
+    The old sweep chose its best objective first and evaluated static margin
+    afterward, producing `candidates_source=legal` beside `sm_in_range=false`.
+    Here 10.5 m/s is deliberately the better objective but fails stability;
+    11.0 m/s is the best point the report is entitled to call airworthy.
+    """
+    from dataclasses import replace
+
+    original = solve.OBJECTIVES[sample_mission.objective]
+    monkeypatch.setitem(
+        solve.OBJECTIVES, sample_mission.objective,
+        replace(original, evaluator=lambda V, *_: 100.0 - float(V)),
+    )
+
+    def static_margin_at(_plane, V, x_cg, c_ref, **_kwargs):
+        margin = 0.05 if V < 10.75 else 0.10
+        return {
+            "static_margin": margin,
+            "x_np_m": x_cg + margin * c_ref,
+            "sm_local_slopes": [
+                {"alpha": 4.0, "sm_local": margin},
+                {"alpha": 6.0, "sm_local": margin},
+            ],
+        }
+
+    monkeypatch.setattr(solve.aero, "static_margin", static_margin_at)
+    result, _ = solve.run(
+        sample_aircraft, sample_mission, runs_root=tmp_path,
+        v_sweep=(10.5, 11.5, 0.5),
+    )
+
+    assert result.performance["best"]["V_ms"] == pytest.approx(11.0)
+    assert result.constraints["sm_in_range"] is True
+    assert result.constraints["sm_sign_consistent"] is True
+    price = result.diagnostics["airworthiness_price"]
+    assert "static_margin_min" in price["peak_excluded_by"]
+
+
 def test_a_rule_with_no_way_to_quote_it_degrades_to_silence():
     """A predicate added without a matching limit entry must not raise KeyError
     inside a finished run — the diagnostic is the last thing that should be able

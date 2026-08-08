@@ -226,6 +226,26 @@ def _entry(**over):
     } | over
 
 
+def test_the_report_puts_a_failed_final_trust_verdict_above_the_results():
+    from types import SimpleNamespace
+
+    from planeopt.report import html
+
+    body = html.render(SimpleNamespace(
+        aircraft="x", mission="m", objective="endurance", status="complete",
+        created="c", geometry={}, masses={}, notes=[], performance={},
+        constraints={}, diagnostics={
+            "design_trustworthy": False,
+            "design_trust_failures": [
+                "reported operating point misses the static-margin window"
+            ],
+        },
+    ))
+    banner = body.index("DESIGN NOT TRUSTWORTHY FOR FLIGHT OR CONSTRUCTION")
+    assert banner < body.index("<h2>Constraints")
+    assert "misses the static-margin window" in body[banner:banner + 500]
+
+
 def test_the_report_shows_both_methods_side_by_side():
     """Both numbers, or the comparison is not a comparison."""
     import re

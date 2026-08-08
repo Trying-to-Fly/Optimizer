@@ -573,8 +573,21 @@ def _windows_peak_gb() -> float | None:
 
         c = Counters()
         c.cb = ctypes.sizeof(Counters)
-        handle = ctypes.windll.kernel32.GetCurrentProcess()
-        if not ctypes.windll.psapi.GetProcessMemoryInfo(handle, ctypes.byref(c), c.cb):
+        kernel32 = ctypes.windll.kernel32
+        psapi = ctypes.windll.psapi
+        # ctypes otherwise assumes every undeclared Windows function returns and
+        # accepts 32-bit ints. HANDLE is pointer-sized, so that default truncates
+        # it on 64-bit Python and GetProcessMemoryInfo simply fails, making every
+        # Windows solve report a 0 GB peak.
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        psapi.GetProcessMemoryInfo.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(Counters),
+            ctypes.c_ulong,
+        ]
+        psapi.GetProcessMemoryInfo.restype = ctypes.c_int
+        handle = kernel32.GetCurrentProcess()
+        if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(c), c.cb):
             return None
         return c.PeakWorkingSetSize / GB
     except Exception as e:  # noqa: BLE001 — a RAM probe must never break a solve
