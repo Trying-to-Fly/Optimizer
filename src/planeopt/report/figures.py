@@ -75,34 +75,101 @@ def _front_outline(wing):
     return ys, zs
 
 
+#: Figure furniture, in inches. Explicit because the axes are placed by hand:
+#: both views are TRUE SCALE, and a wing is far wider than it is deep, so the
+#: height each one needs is a property of the aeroplane rather than a constant.
+_FIG_W_IN = 9.0
+_PAD_LEFT_IN = 0.75      # y label + tick labels
+_PAD_RIGHT_IN = 0.25
+_PAD_TOP_IN = 0.40       # the top view's title
+_PAD_GAP_IN = 0.60       # gap between the views + the front view's title
+_PAD_BOTTOM_IN = 0.55    # x label + tick labels
+
+#: The front view's floor, in inches.
+#:
+#: Its data is a few centimetres of dihedral across two metres of span — about
+#: 1.5% — so a box at true aspect is a sliver roughly 30 px tall, and the two y
+#: tick labels it prints do not fit in it. They OVERLAPPED, which is how this
+#: was found. The floor keeps the box readable; `adjustable="datalim"` then
+#: widens the z limits to match it, so the extra room appears as margin above
+#: and below the aeroplane and the dihedral angle stays true.
+_FRONT_MIN_H_IN = 1.15
+
+#: The top view's clamp, for aircraft this figure has never seen. A very short
+#: span with a deep chord would otherwise ask for a metre-tall figure.
+_TOP_MIN_H_IN, _TOP_MAX_H_IN = 1.0, 4.5
+
+
 def planform_compare(planes: dict, out_dir: Path, fname="planform_compare.png") -> None:
     """Overlay top-view planforms + front-view dihedral for named airplanes.
 
     planes: {label: asb.Airplane}. The report's 'what actually changed' figure.
+
+    Both views are drawn to TRUE SCALE, which is the whole point of the figure —
+    a planform stretched to fill a box is a picture of a different wing. What
+    that costs is that the figure's proportions are the aeroplane's, so the axes
+    are placed explicitly from the data extents rather than by `tight_layout`.
+    Sizing them any other way puts the mismatch somewhere: as blank paper when
+    the box is too tall, or as collided tick labels when it is too short. Both
+    were present before this was worked out.
     """
-    fig, (ax_top, ax_front) = plt.subplots(
-        2, 1, figsize=(9, 6.5), height_ratios=[3, 1], sharex=True
-    )
-    colors = plt.cm.tab10.colors
-    for i, (label, plane) in enumerate(planes.items()):
+    outlines = []
+    for label, plane in planes.items():
         wing = plane.wings[0]
-        ys, les, tes = _wing_outline(wing)
+        outlines.append((label, _wing_outline(wing), _front_outline(wing)))
+
+    span = max(
+        (max(o[1][0]) - min(o[1][0]) for o in outlines if o[1][0]), default=1.0
+    ) or 1.0
+    chord_extent = max(
+        (max(o[1][2]) - min(o[1][1]) for o in outlines if o[1][1]), default=0.1
+    )
+    dihedral_extent = max(
+        (max(o[2][1]) - min(o[2][1]) for o in outlines if o[2][1]), default=0.0
+    )
+
+    box_w = _FIG_W_IN - _PAD_LEFT_IN - _PAD_RIGHT_IN
+    top_h = min(_TOP_MAX_H_IN, max(_TOP_MIN_H_IN, box_w * chord_extent / span))
+    front_h = max(_FRONT_MIN_H_IN, box_w * dihedral_extent / span)
+    fig_h = _PAD_TOP_IN + top_h + _PAD_GAP_IN + front_h + _PAD_BOTTOM_IN
+
+    fig = plt.figure(figsize=(_FIG_W_IN, fig_h))
+    ax_top = fig.add_axes((
+        _PAD_LEFT_IN / _FIG_W_IN,
+        (_PAD_BOTTOM_IN + front_h + _PAD_GAP_IN) / fig_h,
+        box_w / _FIG_W_IN,
+        top_h / fig_h,
+    ))
+    ax_front = fig.add_axes((
+        _PAD_LEFT_IN / _FIG_W_IN,
+        _PAD_BOTTOM_IN / fig_h,
+        box_w / _FIG_W_IN,
+        front_h / fig_h,
+    ))
+
+    colors = plt.cm.tab10.colors
+    for i, (label, (ys, les, tes), (yf, zf)) in enumerate(outlines):
         c = colors[i % 10]
         ax_top.plot(ys, les, "-", color=c, lw=1.6, label=label)
         ax_top.plot(ys, tes, "-", color=c, lw=1.6)
         ax_top.plot([ys[0]] * 2, [les[0], tes[0]], "-", color=c, lw=1.6)
         ax_top.plot([ys[-1]] * 2, [les[-1], tes[-1]], "-", color=c, lw=1.6)
-        yf, zf = _front_outline(wing)
         ax_front.plot(yf, zf, "-", color=c, lw=1.6)
+
     ax_top.invert_yaxis()  # x aft-positive: draw LE up
     ax_top.set(ylabel="x (m)", title="Wing planform (top view)")
     ax_top.legend(fontsize=8)
-    ax_top.set_aspect("equal")
     ax_front.set(xlabel="y (m)", ylabel="z (m)", title="Dihedral (front view)")
-    ax_front.set_aspect("equal")
+    # `datalim`, not the default `box`: the box is already the right size, and
+    # letting matplotlib shrink it to satisfy the aspect is what produced the
+    # blank band above the planform. Widening the limits instead keeps true
+    # scale AND the allocated box.
     for a in (ax_top, ax_front):
+        a.set_aspect("equal", adjustable="datalim")
         a.grid(alpha=0.3)
-    fig.tight_layout()
+    # Four ticks at most: with a wing this flat, the default locator offers more
+    # z values than the axis has room to print.
+    ax_front.yaxis.set_major_locator(plt.MaxNLocator(4))
     fig.savefig(out_dir / fname, dpi=110)
     plt.close(fig)
 
