@@ -146,3 +146,33 @@ def test_an_evaluation_reserves_no_live_directory(qt_app, workspace):
 
     assert dialog.job().live_dir is None
     assert not (workspace.runs_dir / "_live").exists()
+
+
+@pytest.mark.parametrize("typed", ["../../escaped", "endurance 3m/s wind", "a/b/c"])
+def test_every_path_a_job_names_stays_inside_the_workspace(qt_app, workspace, typed):
+    """The mission name is free text and reaches FOUR paths — the module, the
+    checkpoint directory, the pause sentinel and the live frames. `../../escaped`
+    put the checkpoints and the sentinel outside the runs directory entirely."""
+    dialog = NewRunDialog(workspace)
+    dialog.name.setText(typed)
+    dialog.mode_optimize.setChecked(True)
+    job = dialog.job()
+
+    root = workspace.root.resolve()
+    for field in ("mission", "checkpoint_dir", "pause_file", "live_dir"):
+        value = getattr(job, field)
+        assert value is not None, field
+        assert root in value.resolve().parents, f"{field} escaped to {value}"
+
+
+def test_an_ordinary_name_still_lands_where_it_always_did(qt_app, workspace):
+    """Sanitising must not move the checkpoint folder for names that were
+    already safe — a resume looks for the folder its first run wrote."""
+    dialog = NewRunDialog(workspace)
+    dialog.name.setText("endurance_sample")
+    dialog.mode_optimize.setChecked(True)
+    job = dialog.job()
+
+    assert job.mission == workspace.missions_dir / "endurance_sample.py"
+    assert job.checkpoint_dir == workspace.runs_dir / "_checkpoints" / "endurance_sample"
+    assert job.pause_file == workspace.runs_dir / "_checkpoints" / "endurance_sample.PAUSE"

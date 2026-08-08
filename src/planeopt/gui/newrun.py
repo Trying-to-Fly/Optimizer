@@ -60,7 +60,11 @@ def _reserve_live_dir(runs_dir: Path, mission_name: str, aircraft_name: str) -> 
     # Local time, deliberately: these names are read by a human beside a machine,
     # not compared across time zones — same convention as a run directory.
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")  # noqa: DTZ005
-    base = f"{stamp}-{mission_name}-{aircraft_name}"
+    # Sanitised HERE too, not only by the caller: this builds one path component
+    # out of two names, so a `/` in either would silently make it three.
+    base = "-".join((
+        stamp, missionfile.module_name(mission_name), missionfile.module_name(aircraft_name),
+    ))
     parent = runs_dir / "_live"
     for attempt in range(1, 1000):
         candidate = parent / (base if attempt == 1 else f"{base}-{attempt}")
@@ -443,6 +447,13 @@ class NewRunDialog(QDialog):
         # as a path as well as a label. Both call sites must agree, or `accept`
         # checks one file for the overwrite prompt and `job` writes another.
         path = missionfile.save(mission, missionfile.path_for(self._missions_dir, mission))
+        # ONE sanitised stem for every path this job names. The mission name is
+        # free text and it reaches four of them — the module, the checkpoint
+        # directory, the pause sentinel and the live frames — so a name like
+        # `../../escaped` put the checkpoints and the sentinel outside the runs
+        # directory entirely. Derived from the same helper the module path uses,
+        # so a resume still finds the folder its first run wrote.
+        stem = missionfile.module_name(mission.name)
         return Job(
             mission=path,
             aircraft=aircraft,
@@ -456,11 +467,11 @@ class NewRunDialog(QDialog):
             # alternative is a Pause button that is greyed out exactly when
             # someone finally wants it, four hours into a battery.
             checkpoint_dir=(
-                self._runs_dir / "_checkpoints" / mission.name
+                self._runs_dir / "_checkpoints" / stem
                 if self.mode_optimize.isChecked() else None
             ),
             pause_file=(
-                self._runs_dir / "_checkpoints" / f"{mission.name}.PAUSE"
+                self._runs_dir / "_checkpoints" / f"{stem}.PAUSE"
                 if self.mode_optimize.isChecked() else None
             ),
             # Same reasoning as the checkpoint block above: unasked, because it
@@ -485,7 +496,7 @@ class NewRunDialog(QDialog):
             # `RunQueue.resume` re-queues this same Job and `queuestore`
             # round-trips the path.
             live_dir=(
-                _reserve_live_dir(self._runs_dir, mission.name, aircraft.name)
+                _reserve_live_dir(self._runs_dir, stem, aircraft.name)
                 if self.mode_optimize.isChecked() else None
             ),
             timelapse_view=self.timelapse_view.currentData(),
