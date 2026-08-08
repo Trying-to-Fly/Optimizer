@@ -9,10 +9,68 @@ means the GUI drives exactly the code path the CLI does.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
+
+#: A live-frame directory reserved for ONE job looks like
+#: `<stamp>-<mission>-<aircraft>`. Anything else in `runs/_live/` is a shared
+#: directory from before that reservation existed — see `reserve_live_dir`.
+_RESERVED_LIVE_DIR = re.compile(r"^\d{8}T\d{6}(-|$)")
+
+
+def reserve_live_dir(runs_dir: Path, mission_name: str, aircraft_name: str) -> Path:
+    """An EMPTY live-frame directory that belongs to exactly one job.
+
+    Named `<stamp>-<mission>-<aircraft>` after `assemble.write_run_dir`'s own
+    slug, so `runs/_live/` reads like `runs/` does.
+
+    It is CREATED here rather than merely named, and that is what makes it
+    unique: the stamp has one-second resolution, so two jobs queued in the same
+    second would otherwise collide — which is the very bug this exists to close.
+    `mkdir(exist_ok=False)` is the reservation, and the numeric suffix is the
+    loser's fallback. Creating it early costs nothing: `FrameWriter` and
+    `liveframe.write_view` both mkdir it anyway, and `liveframe.relocate` removes
+    it when the run finishes.
+
+    Lives here rather than in `newrun` because the dialog is no longer the only
+    caller: a job restored from the queue file may carry a pre-reservation path,
+    and `RunQueue.resume` has to be able to give it a fresh one. `queuestore` is
+    Qt-free and could not have imported it from a dialog module.
+    """
+    # Local time, deliberately: these names are read by a human beside a machine,
+    # not compared across time zones — same convention as a run directory.
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")  # noqa: DTZ005
+    base = f"{stamp}-{mission_name}-{aircraft_name}"
+    parent = runs_dir / "_live"
+    for attempt in range(1, 1000):
+        candidate = parent / (base if attempt == 1 else f"{base}-{attempt}")
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            continue
+        return candidate
+    # A thousand live directories in one second is not a state worth a branch;
+    # fall back to the plain name rather than refusing to queue the run. Frames
+    # are a view of a solve and must never be what stops one.
+    return parent / base
+
+
+def is_reserved_live_dir(path: Path | None) -> bool:
+    """Was this directory reserved for one job, or is it the shared old kind?
+
+    `runs/_live/rcv2_endurance` is the pre-2026-08-08 naming: one directory per
+    MISSION, shared by every run of it. `FrameWriter` starts one past the
+    highest sequence already on disk, so resuming into one adopts whatever a
+    cancelled run left there — the defect `reserve_live_dir` closed at the
+    dialog. A job persisted BEFORE that fix still carries the shared path, and
+    the queue file round-trips it faithfully, so the fix has to be applied on
+    the way back in as well.
+    """
+    return path is not None and bool(_RESERVED_LIVE_DIR.match(Path(path).name))
 
 
 class JobState(str, Enum):

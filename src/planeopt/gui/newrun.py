@@ -8,7 +8,6 @@ otherwise would be lying about what it can guarantee.
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtGui import QIcon
@@ -36,43 +35,13 @@ from . import missionfile
 from planeopt import memory
 
 from . import render3d
-from .jobs import Job
+from .jobs import Job, reserve_live_dir
 from .workspace import Workspace
 
 
 FIELD_WIDTH = 150  # every value field the same width, so the column reads as a column
 
 
-def _reserve_live_dir(runs_dir: Path, mission_name: str, aircraft_name: str) -> Path:
-    """An EMPTY live-frame directory that belongs to exactly one job.
-
-    Named `<stamp>-<mission>-<aircraft>` after `assemble.write_run_dir`'s own
-    slug, so `runs/_live/` reads like `runs/` does.
-
-    It is CREATED here rather than merely named, and that is what makes it
-    unique: the stamp has one-second resolution, so two jobs queued in the same
-    second would otherwise collide — which is the very bug this exists to close.
-    `mkdir(exist_ok=False)` is the reservation, and the numeric suffix is the
-    loser's fallback. Creating it early costs nothing: `FrameWriter` and
-    `liveframe.write_view` both mkdir it anyway, and `liveframe.relocate` removes
-    it when the run finishes.
-    """
-    # Local time, deliberately: these names are read by a human beside a machine,
-    # not compared across time zones — same convention as a run directory.
-    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")  # noqa: DTZ005
-    base = f"{stamp}-{mission_name}-{aircraft_name}"
-    parent = runs_dir / "_live"
-    for attempt in range(1, 1000):
-        candidate = parent / (base if attempt == 1 else f"{base}-{attempt}")
-        try:
-            candidate.mkdir(parents=True, exist_ok=False)
-        except FileExistsError:
-            continue
-        return candidate
-    # A thousand live directories in one second is not a state worth a branch;
-    # fall back to the plain name rather than refusing to queue the run. Frames
-    # are a view of a solve and must never be what stops one.
-    return parent / base
 #: Must equal planeopt.solve.SOLVE_TIMEOUT_MIN — see the spin box below for why
 #: it is copied rather than imported. tests/test_gui.py holds them together.
 SOLVE_TIMEOUT_MIN_DEFAULT = 30
@@ -482,7 +451,7 @@ class NewRunDialog(QDialog):
             # `RunQueue.resume` re-queues this same Job and `queuestore`
             # round-trips the path.
             live_dir=(
-                _reserve_live_dir(self._runs_dir, mission.name, aircraft.name)
+                reserve_live_dir(self._runs_dir, mission.name, aircraft.name)
                 if self.mode_optimize.isChecked() else None
             ),
             timelapse_view=self.timelapse_view.currentData(),

@@ -593,7 +593,12 @@ def test_a_paused_job_survives_closing_the_app(tmp_path):
 
     job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt",
                pause_file=tmp_path / "ckpt" / "m.PAUSE",
-               live_dir=tmp_path / "_live" / "m",
+               # A RESERVED directory, which is what the dialog has produced
+               # since 2026-08-08. This used to say `_live/m` — the shared
+               # per-mission name — and that shape is now deliberately dropped
+               # on load, because resuming into it adopts frames another run
+               # left there. See the legacy test below.
+               live_dir=tmp_path / "_live" / "20260808T091655-m-fixture",
                multistart=5, flatness=False, solve_timeout_min=45.0,
                memory_budget_gb=20.0)
     job.state = jobs.JobState.PAUSED
@@ -610,6 +615,51 @@ def test_a_paused_job_survives_closing_the_app(tmp_path):
     # --multistart would produce one artifact from two configurations
     assert (restored.multistart, restored.flatness) == (5, False)
     assert (restored.solve_timeout_min, restored.memory_budget_gb) == (45.0, 20.0)
+
+
+def test_a_shared_live_dir_from_an_old_queue_file_is_not_carried_forward(tmp_path):
+    """The frame-adoption defect, arriving through PERSISTED state.
+
+    `runs/_live/<mission>` was shared by every run of that mission until
+    2026-08-08. `FrameWriter` starts one past the highest sequence on disk, so a
+    run resuming into one appends to whatever a cancelled run left there and
+    relocates the lot into its own `frames/` — where the stranger's frames sort
+    FIRST and the timelapse opens on an aeroplane it never flew.
+
+    Reserving per job fixed that at the DIALOG. The queue file round-trips
+    `live_dir` faithfully, which is correct for a real pause and is exactly what
+    reopens the hole for a job written before the fix. This machine had three
+    such entries, one pointing at a directory holding 1,683 orphaned frames.
+    """
+    from planeopt.gui import queuestore
+
+    for shared in ("m", "endurance_sample", "rcv2_endurance"):
+        job = _job(tmp_path, live_dir=tmp_path / "_live" / shared)
+        job.state = jobs.JobState.PAUSED
+        queuestore.save(tmp_path, [job])
+        restored, = queuestore.load(tmp_path)
+        assert restored.live_dir is None, f"{shared!r} was carried forward"
+    # and loading must not have created anything: opening the app is not a
+    # reason to make directories for jobs nobody has resumed
+    assert not (tmp_path / "_live").exists()
+
+
+def test_resuming_a_job_without_a_live_dir_reserves_one(tmp_path):
+    """The other half: dropping the path must not silently cost the live view."""
+    from planeopt.gui.runner import RunQueue
+
+    job = _job(tmp_path, live_dir=None)
+    job.state = jobs.JobState.PAUSED
+    queue = RunQueue.__new__(RunQueue)
+    queue.jobs = [job]
+    queue.queue_changed = _Signal()
+    queue.job_started = _Signal()
+    queue._start_next = lambda: None
+    assert queue.resume(job) is True
+    assert job.live_dir is not None
+    assert job.live_dir.is_dir()
+    assert job.live_dir.parent == job.runs_dir / "_live"
+    assert jobs.is_reserved_live_dir(job.live_dir)
 
 
 def test_nothing_starts_on_its_own_at_launch(tmp_path):
