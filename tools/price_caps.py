@@ -58,6 +58,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -94,6 +95,12 @@ MEMBERS: dict[str, dict] = {
         # exactly what `solve.optimize`'s `_wl_prep` does for this member
         "set": {"winglet": False, "tip_dihedral_max_deg": 88.0},
     },
+    #: Not a lost member — the +20 g bump the battery rides in its own multistart
+    #: batch. It is here because `solve.screen_discrete` needs the run's OWN
+    #: shadow price in minutes per gram, and without it the prop screen is
+    #: systematically biased toward big propellers (a 14 in disc arrives
+    #: weightless — the defect that held the diameter cap at 11 in until
+    #: 2026-07-30). Reproducing the battery's greedy chain therefore starts here.
     "mass_bump": {"kw": {"extra_mass_kg": 0.020}},
     # `flatness_<span>` is accepted dynamically — the sweep's spans depend on the
     # champion's span, which is not known until the nominal member converges.
@@ -145,6 +152,19 @@ RELAXATIONS: dict[str, dict] = {
     # payload?", and a yes points at pod size rather than at the parts list.
     "airframe_only": {"set": {"equipment_fit": "airframe_only"}},
     **POD_LENGTH_RELAXATIONS,
+    #: NOT a relaxation — the GREEDY STATE. A battery's studies run in declared
+    #: order, each with the previous studies' adopted values, so by the time
+    #: `tail_type` is judged the aeroplane already carries the prop the prop
+    #: study adopted. Every cell in this study carries the declared incumbent
+    #: (`ancf_11x6`) instead, which is the same label on a different aeroplane
+    #: and was the study's last open caveat.
+    #:
+    #: `ancf_12x10` is not a guess: `screen` ranks it first of 65 candidates at
+    #: the champion's own operating point and its own shadow price, and it is
+    #: what the 2.0 m sample battery adopted. Running the members under it is
+    #: what turns "these converge" into "these converge where the battery ran
+    #: them".
+    "prop_12x10": {"set": {"prop_choice": "ancf_12x10"}},
 }
 
 
@@ -166,12 +186,41 @@ def member_spec(name: str, aircraft=None) -> dict:
     raise SystemExit(f"unknown member {name!r}")
 
 
-def relax_spec(name: str) -> dict:
+def _one_relax_spec(name: str) -> dict:
     if name in RELAXATIONS:
         return RELAXATIONS[name]
     if name.startswith("sm_floor_"):
         return {"sm_floor": float(name.removeprefix("sm_floor_"))}
     raise SystemExit(f"unknown relaxation {name!r}")
+
+
+def relax_spec(name: str) -> dict:
+    """One relaxation, or several composed with `+`.
+
+    Composition exists because the corners this study set out to price are only
+    reachable in the GREEDY state — `dihedral_polyhedral2` and
+    `printed_mass_x1.10` converge in under three minutes at the declared
+    incumbent prop and have no design at all under the adopted one (§5c). So
+    pricing a lever against them means applying `prop_12x10` AND the lever,
+    which a single-relaxation cell cannot express:
+
+        --relax prop_12x10+sm_floor_0.05
+
+    Order matters and is left-to-right, so a later term wins a key an earlier
+    one also sets. Nothing composes that way today; it is defined rather than
+    left to dict ordering because the day it does happen, silently taking one of
+    the two would be a cell whose label does not describe what it solved.
+    """
+    merged: dict = {}
+    for part in name.split("+"):
+        spec = _one_relax_spec(part)
+        merged["set"] = {**merged.get("set", {}), **spec.get("set", {})}
+        for k, v in spec.items():
+            if k != "set":
+                merged[k] = v
+    if not merged["set"]:
+        del merged["set"]
+    return merged
 
 
 # --- the record ------------------------------------------------------------
@@ -266,6 +315,13 @@ def run_cell(args) -> dict:
             "failed": r.get("failed"),
             "violations": r.get("violations"),
             "convergence": r.get("convergence"),
+            # `solve` measures this and `_FAILURE_FIELDS` carries it; a
+            # hand-picked key list here dropped it, so the detector built for
+            # exactly this study reported nothing on this study's own cells.
+            # Defaulted rather than conditional: absent and zero must not be
+            # the same thing, because absent means "measured before the
+            # detector existed" and zero means "measured, and it stayed awake".
+            "suspended_minutes": r.get("suspended_minutes", 0.0),
         })
     else:
         # A `--max-iter 3` smoke solve RETURNS a point rather than raising
@@ -283,6 +339,19 @@ def run_cell(args) -> dict:
             "static_margin": r["static_margin"],
             "auw_kg": r["auw_kg"],
             "V_ms": r["V_ms"],
+            # `screen_discrete` re-solves the powertrain at the incumbent's
+            # (V, thrust), so a record without `drag_n` cannot be screened
+            # against — and the omission only shows up as a KeyError hours
+            # later, once the solving is done and the cell is unrepeatable
+            # without paying for it again. Which is exactly what happened.
+            # Also on the converged path: `solve_minutes` is what every lever
+            # in this study is compared on, and a member that slept through
+            # half of its own timing makes the wrong lever look slow.
+            "suspended_minutes": r.get("suspended_minutes", 0.0),
+            "drag_n": r["drag_n"],
+            "J": r.get("J"),
+            "rpm": r.get("rpm"),
+            "P_elec_w": r.get("P_elec_w"),
             "deflection_deg": r["deflection_deg"],
             "dv": r["dv"],
             "active_bounds": r.get("active_bounds"),
@@ -563,6 +632,135 @@ def reevaluate(nominal: dict, args) -> None:
 
 # --- reporting -------------------------------------------------------------
 
+def screen(args) -> None:
+    """Reproduce the battery's greedy first step: which prop it would adopt.
+
+    A study member in a battery does NOT carry the configuration it declares —
+    the studies run greedily, each with the previous studies' adopted values. So
+    a `tail_conventional` cell measured here against the incumbent prop and a
+    `tail_conventional` member in a battery are the same label on two different
+    aeroplanes, and that gap is the one caveat this study could not close by
+    argument.
+
+    Closing it is cheap because `solve.screen_discrete` holds the airframe fixed
+    and re-solves only the powertrain — seconds per candidate, no NLP at all.
+    What it needs is the run's OWN shadow price in objective units per gram,
+    which is why `mass_bump` is a member: without it the screen is biased toward
+    big propellers, the defect that held the diameter cap at 11 in until
+    2026-07-30.
+
+    This is a SHORTLISTER and never a verdict — the same caveat `screen_discrete`
+    carries, and this study measured its size directly: the 20 g shadow price
+    predicts +13.6 min for the 192 g payload step and the truth is +7.9.
+    """
+    sys.path.insert(0, str(REPO / "src"))
+    from planeopt import solve as S
+    from planeopt.cli import load_aircraft, load_mission
+
+    cells = load_cells()
+    champ = cells.get("nominal|none")
+    bump = cells.get("mass_bump|none")
+    if champ is None or champ.get("status") != "converged":
+        raise SystemExit("no converged `nominal|none` cell to screen at — run it first")
+    shadow = None
+    if bump is not None and bump.get("status") == "converged":
+        shadow = (bump["objective_value"] - champ["objective_value"]) / 20.0
+    else:
+        print("WARNING: no converged `mass_bump|none` cell, so the screen runs "
+              "with NO shadow price and is biased toward big propellers "
+              "(solve.screen_discrete). Run that member for a real ranking.")
+
+    aircraft, _ = load_aircraft(REPO / "aircraft" / args.aircraft)
+    mission, _ = load_mission(REPO / "missions" / args.mission)
+    cands = [c for c in aircraft.discrete_options["prop_choice"]
+             if c != aircraft.prop_choice]
+    top_n = (getattr(aircraft, "discrete_screen", None) or {}).get("prop_choice", 4)
+    result = S.screen_discrete(
+        aircraft, mission, "prop_choice", cands, champ, top_n, shadow,
+    )
+    print(f"\nincumbent {aircraft.prop_choice}, {len(cands)} candidates, "
+          f"shadow price {shadow if shadow is None else round(shadow, 5)} per gram")
+    print(f"shortlist: {', '.join(result['shortlist'])}\n")
+    for r in result["ranking"][:10]:
+        print(f"  {r['candidate']:24s} {r['screened_objective']:8.3f}")
+    if result["unreachable"]:
+        print(f"\n{len(result['unreachable'])} candidate(s) unreachable at this "
+              f"operating point")
+    append_cell({
+        "member": "nominal", "relax": "none:prop_screen", "status": "screened",
+        "shortlist": result["shortlist"],
+        "ranking": result["ranking"][:10],
+        "shadow_price_obj_per_gram": shadow,
+        "incumbent": aircraft.prop_choice,
+        "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+
+
+#: A constraint label is `file.py:LINE opti.subject_to(...)`, and the LINE moves
+#: whenever anything above it in the file moves — the ordering-row revert alone
+#: shifted `equipment.py`'s packing row from 362 to 344. Tallying by label would
+#: therefore split one row across commits and report two half-strength findings
+#: where there is one strong one. The constraint TEXT is what is stable, so that
+#: is the key; the file name rides along because two files could in principle
+#: write the same expression.
+_LABEL = re.compile(r"^(?P<file>[\w./-]+):(?P<line>\d+)\s+(?P<text>.*)$", re.S)
+
+
+def miss_key(what: str) -> tuple[str, str]:
+    m = _LABEL.match(what.strip())
+    if not m:
+        return ("?", what.strip()[:70])
+    return (m["file"], " ".join(m["text"].split())[:70])
+
+
+def misses(args) -> None:
+    """Which CONSTRAINT blocks each failing cell, and which one blocks most.
+
+    A converged/failed table is a scoreboard; this is the explanation. The
+    study's standing prediction (§8) is that `usable_nose / motor["length"] >= 1`
+    is the row that actually blocks this aeroplane — it was the closest miss in
+    four independent corners while none of the four caps HANDOFF names as the
+    remedy touches it. A tally either carries that or kills it.
+    """
+    cells = load_cells()
+    failed = [r for r in cells.values()
+              if r.get("status") == "failed" and r.get("violations")]
+    if not failed:
+        raise SystemExit("no failed cells with recorded violations yet")
+
+    rows = []
+    for r in sorted(failed, key=lambda r: (r["member"], r["relax"])):
+        v = r["violations"][0]
+        f, text = miss_key(v["what"])
+        rows.append((r["member"], r["relax"], r.get("iter_count"), v["by"],
+                     f, text, stuck_or_cutoff(r)))
+
+    w_m = max(len(x[0]) for x in rows) + 2
+    w_r = max(len(x[1]) for x in rows) + 2
+    print("closest miss per failing cell\n")
+    print("member".ljust(w_m) + "lever".ljust(w_r) + "iters   by         row")
+    for m, rx, it, by, f, text, verdict in rows:
+        mark = "" if verdict == "stuck" else f"   [{verdict.upper()} — not evidence]"
+        print(f"{m.ljust(w_m)}{rx.ljust(w_r)}{str(it or '-'):>5}  "
+              f"{by:.2e}  {f}: {text}{mark}")
+
+    # ONLY stuck cells are counted. A cut-off cell's "closest miss" is a
+    # snapshot of an iterate still descending — it says where the solve had got
+    # to, not what stopped it — and this study has already been bitten once by
+    # exactly that: the cells the machine slept through reported misses of
+    # 2.6e-01 on a row that, measured awake, does not block them at all.
+    counted = [r for r in rows if r[6] == "stuck"]
+    skipped = len(rows) - len(counted)
+    tally: dict[tuple[str, str], list[float]] = {}
+    for _, _, _, by, f, text, _ in counted:
+        tally.setdefault((f, text), []).append(by)
+    print(f"\nrows ranked by how many cells they block "
+          f"({len(counted)} stuck cells counted"
+          f"{f'; {skipped} cut-off cell(s) excluded' if skipped else ''})")
+    for (f, text), bys in sorted(tally.items(), key=lambda kv: -len(kv[1])):
+        print(f"  {len(bys):2d} cell(s)  worst {max(bys):.2e}   {f}: {text}")
+
+
 def report(args) -> None:
     cells = load_cells()
     if not cells:
@@ -580,25 +778,43 @@ def report(args) -> None:
         raise SystemExit(f"nothing measured yet — {CELLS} is empty or absent{hint}")
     members = sorted({r["member"] for r in cells.values()})
     relaxes = sorted({r["relax"] for r in cells.values()})
-    width = max(len(m) for m in members) + 2
+
+    def render(rec: dict | None) -> str:
+        if rec is None:
+            return "-"
+        if rec.get("status") == "converged":
+            return f"{rec['objective_value']:.2f} ({rec.get('solve_minutes')}m)"
+        if rec.get("status") == "truncated":
+            return f"TRUNCATED@{rec.get('iter_count')}"
+        if rec.get("status") == "reevaluated":
+            return str(rec.get("candidates_source"))
+        # `Maximum_WallTime_Exceeded` on its own is the least informative true
+        # statement this tool can make: it is what a genuine corner and a
+        # sleeping machine both report. The iteration count and the minutes
+        # actually spent separate them, and the trace's own verdict names which
+        # one it thinks it is.
+        status = rec.get("return_status") or rec.get("status") or "?"
+        short = "WallTime" if status == "Maximum_WallTime_Exceeded" else status[:12]
+        verdict = stuck_or_cutoff(rec)
+        return (f"{short} {rec.get('iter_count')}it/{rec.get('solve_minutes')}m"
+                f"{'' if verdict == 'unknown' else ' ' + verdict}")
+
+    grid = {(m, rx): render(cells.get(f"{m}|{rx}")) for m in members for rx in relaxes}
+    # Sized to the widest thing actually in the table, so a cell can never run
+    # into its neighbour and read as one word.
+    width = max(len(m) for m in [*members, "member"]) + 2
+    col = max(len(v) for v in [*grid.values(), *relaxes]) + 2
+
     print("objective (min) if converged, else the solver's verdict\n")
-    print("member".ljust(width) + "".join(r.ljust(22) for r in relaxes))
+    print("a FAILED cell reports iterations and minutes, because the status "
+          "alone cannot\ntell a corner from a cut-off: this study's one real "
+          "corner burned 415 iterations\nand its whole 30-minute budget, while "
+          "the cells the machine SLEPT through gave up\nat 15-75 iterations "
+          "and reported the identical `Maximum_WallTime_Exceeded`.\n")
+    print("member".ljust(width) + "".join(r.ljust(col) for r in relaxes))
     for m in members:
-        row = m.ljust(width)
-        for rx in relaxes:
-            rec = cells.get(f"{m}|{rx}")
-            if rec is None:
-                cell = "-"
-            elif rec.get("status") == "converged":
-                cell = f"{rec['objective_value']:.2f} ({rec.get('solve_minutes')}m)"
-            elif rec.get("status") == "truncated":
-                cell = f"TRUNCATED@{rec.get('iter_count')}"
-            elif rec.get("status") == "reevaluated":
-                cell = str(rec.get("candidates_source"))
-            else:
-                cell = (rec.get("return_status") or rec.get("status") or "?")[:20]
-            row += cell.ljust(22)
-        print(row)
+        print(m.ljust(width) + "".join(grid[(m, rx)].ljust(col) for rx in relaxes))
+
     _print_provenance(cells)
 
 
@@ -670,12 +886,28 @@ def main() -> None:
     r = sub.add_parser("report", help="print the matrix measured so far")
     common(r)
 
+    ms = sub.add_parser(
+        "misses",
+        help="which constraint blocks each failing cell, and which blocks most",
+    )
+    common(ms)
+
+    sc = sub.add_parser(
+        "screen",
+        help="which prop the battery's greedy chain would adopt (no NLP)",
+    )
+    common(sc)
+
     args = ap.parse_args()
     os.chdir(REPO)
     if args.cmd == "cell":
         run_cell(args)
     elif args.cmd == "drive":
         drive(args)
+    elif args.cmd == "screen":
+        screen(args)
+    elif args.cmd == "misses":
+        misses(args)
     else:
         report(args)
 

@@ -44,6 +44,46 @@ SOLVE_TIMEOUT_MIN = 30.0
 #: Iteration ceiling for one member solve (IPOPT's own `max_iter`).
 SOLVE_MAX_ITER = 1000
 
+#: Below this, a clock gap is not reported as sleep (minutes).
+#:
+#: `suspended_minutes` compares CLOCK_REALTIME against a monotonic clock, and
+#: the one thing that can move them apart WITHOUT the process being suspended is
+#: a realtime step — ntpd correcting the system clock. ntpd slews rather than
+#: steps for small errors, so a floor of 20 seconds keeps a routine correction
+#: from printing as "the machine slept" while leaving any real idle-sleep window
+#: (tens of seconds at the very least) far above it. The number is always
+#: RECORDED; the floor only governs whether it is narrated.
+SUSPENSION_FLOOR_MIN = 20.0 / 60.0
+
+
+def suspended_minutes(wall_s: float, awake_s: float) -> float:
+    """How long a process was suspended during an interval, in minutes.
+
+    A wall-clock guard cannot tell "this solve ran for 30 minutes" from "this
+    laptop was shut for 25 of them" — and `ipopt.max_wall_time` is a wall clock
+    on purpose, because what it protects against is a solve that starts
+    swapping. So a member that spans an idle-sleep window is killed for time it
+    never got to use, and recorded with the same `Maximum_WallTime_Exceeded` an
+    over-constrained corner produces. Measured 2026-08-07
+    (docs/studies/RCV2_CAP_PRICING.md §4): four cells died that way and three of
+    them converge in 2-9 minutes once the machine is kept awake. The fourth is a
+    genuine corner. Same status, opposite meaning, and nothing separated them.
+
+    The detector needs no platform API, because the two clocks Python already
+    exposes disagree in exactly the useful way:
+
+        time.time()       CLOCK_REALTIME  — keeps running while asleep
+        time.monotonic()  mach_absolute_time() on macOS, CLOCK_MONOTONIC on
+                          Linux — NEITHER advances while the system is asleep
+
+    so the difference over the same interval IS the suspension.
+
+    Clamped at zero: the two clocks drift, and a member reporting that it slept
+    for minus a third of a minute would discredit the number in the cases that
+    matter.
+    """
+    return max(0.0, wall_s - awake_s) / 60.0
+
 #: How far the NLP's objective and the numeric re-evaluation of the SAME design
 #: vector may sit apart before the run says so, as a fraction of the objective.
 #:
@@ -198,7 +238,8 @@ class SolveFailure(RuntimeError):
     run artifact could not tell them apart.
     """
 
-    def __init__(self, opti, exc: BaseException, labels: dict[int, str] | None = None):
+    def __init__(self, opti, exc: BaseException, labels: dict[int, str] | None = None,
+                 *, suspended_min: float = 0.0):
         try:
             stats = opti.debug.stats()
         except Exception:  # pragma: no cover — stats missing before the first iterate
@@ -208,9 +249,23 @@ class SolveFailure(RuntimeError):
         self.detail = str(exc)
         self.violations = _worst_violations(opti, labels or {})
         self.convergence = _convergence_trace(stats)
+        #: Keyword-only with a default, so the four existing three-positional
+        #: call sites keep working — a fix that broke the diagnostics it joins
+        #: would be a poor trade.
+        self.suspended_minutes = suspended_min
         iters = "" if self.iter_count is None else f" after {self.iter_count} iterations"
         worst = f"; closest miss {self.violations[0]['what']}" if self.violations else ""
-        super().__init__(f"{self.return_status}{iters}{worst}")
+        # Said in the MESSAGE, not just recorded, because the message is the log
+        # line and the first thing a reader sees — and a wall-clock verdict
+        # earned while the process was asleep is not evidence of anything about
+        # the aeroplane.
+        slept = (
+            f" — but the process was SUSPENDED for {suspended_min:.1f} of those "
+            "minutes (the machine slept), so this is a verdict about the clock, "
+            "not about the design"
+            if suspended_min > SUSPENSION_FLOOR_MIN else ""
+        )
+        super().__init__(f"{self.return_status}{iters}{worst}{slept}")
 
 
 def _convergence_trace(stats: dict, tail: int = 25) -> dict:
@@ -637,6 +692,10 @@ def _failure_record(exc: BaseException) -> dict:
     if isinstance(exc, SolveFailure):
         rec["return_status"] = exc.return_status
         rec["iter_count"] = exc.iter_count
+        # Only when there is something to say: a zero on every converged run's
+        # neighbours is noise, and a reader scanning for it would stop looking.
+        if exc.suspended_minutes > 0:
+            rec["suspended_minutes"] = exc.suspended_minutes
         if exc.violations:
             rec["violations"] = exc.violations
         if exc.convergence:
@@ -653,7 +712,7 @@ def _failure_record(exc: BaseException) -> dict:
 #: used to drop everything but the message.
 _FAILURE_FIELDS = (
     "failed", "return_status", "iter_count", "violations", "convergence", "detail",
-    "solve_minutes",
+    "solve_minutes", "suspended_minutes",
 )
 
 
@@ -1769,6 +1828,10 @@ def _solve_nlp(
             opti, frames, dv,
             {"V_ms": V, "alpha_deg": alpha, "deflection_deg": defl, "prop_rev_s": n},
         )
+    # Both clocks, bracketing ONLY the solve — the interval IPOPT's own guard
+    # covers. Bracketing the graph build as well would charge construction time
+    # to suspension and make every member look like it had slept.
+    t_wall, t_awake = time.time(), time.monotonic()
     try:
         sol = opti.solve(
             verbose=False,
@@ -1784,7 +1847,12 @@ def _solve_nlp(
             options=options,
         )
     except RuntimeError as e:
-        failure = SolveFailure(opti, e, labels.as_dict())
+        failure = SolveFailure(
+            opti, e, labels.as_dict(),
+            suspended_min=suspended_minutes(
+                time.time() - t_wall, time.monotonic() - t_awake
+            ),
+        )
         # A DELIBERATELY truncated solve is not a failed one. `--max-iter 3`
         # exists to run the whole pipeline cheaply (FINDINGS §24.2), and every
         # member of such a run ends on `Maximum_Iterations_Exceeded` by
@@ -1819,7 +1887,16 @@ def _solve_nlp(
                 }
                 return out
         raise failure from None
-    return _pack(sol)
+    # A CONVERGED member can span a sleep too, and then its solve_minutes is
+    # inflated by time it did not spend solving. That is milder than the failure
+    # case — the answer is still right — but every "converged in 2.9 minutes" in
+    # a study is a comparison, and one member that quietly slept through 12 of
+    # its 14 minutes makes the wrong lever look slow.
+    out = _pack(sol)
+    out["suspended_minutes"] = suspended_minutes(
+        time.time() - t_wall, time.monotonic() - t_awake
+    )
+    return out
 
 
 def _solve_worker(conn, aircraft, mission, kw, live=None):  # pragma: no cover — child process

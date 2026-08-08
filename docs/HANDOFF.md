@@ -1,22 +1,105 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-07, eighteenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-08, eighteenth session)
 
-> ## LEAVE THE LID OPEN FOR ANY UNATTENDED RUN ON THE WSL BOX (measured 2026-08-08)
+> ## LEAVE THE LID OPEN FOR ANY UNATTENDED RUN, ON EITHER MACHINE
 >
 > IPOPT's `max_wall_time` is a WALL clock, so a suspended process is charged for
-> its suspension and dies reporting `Maximum_WallTime_Exceeded` — a member that
-> was asleep is indistinguishable in the artifact from a starved corner. The
-> other device lost nine cells to exactly this on macOS, where `caffeinate -i`
-> is the fix.
+> its suspension and dies reporting `Maximum_WallTime_Exceeded`. The other device
+> lost four cells to exactly this on macOS — three of which converge in 2-9
+> minutes once kept awake — and `caffeinate -i` is necessary but NOT sufficient
+> there, because it does not block clamshell sleep.
 >
-> **This box does it too, and there is no `caffeinate` here.** Measured by
-> closing the lid: two `uptime` readings imply boot times 26½ minutes apart,
-> which is only possible if the VM's clock stopped (wall 3 h 31 m against uptime
-> 3 h 05 m). An earlier version of `RCV2_CAP_PRICING.md` §4 claimed WSL does not
-> suspend; it was wrong and is corrected there.
+> **This box does it too, and there is no `caffeinate` here.** Measured
+> 2026-08-08 by closing the lid: two `uptime` readings imply boot times 26½
+> minutes apart, which is only possible if the VM's clock stopped (wall 3 h 31 m
+> against uptime 3 h 05 m). Under WSL2 the entire VM freezes, so
+> `CLOCK_MONOTONIC` and `CLOCK_BOOTTIME` both stop — unlike ordinary Linux, where
+> the latter counts suspension.
+>
+> **The run now DETECTS this but cannot prevent it.** `solve.suspended_minutes`
+> (`397d4db`) is that same clock comparison, so a member that slept says so past
+> a 20-second floor and `run.json` records the number. The member still dies.
 >
 > The `20260807T061330` battery escaped it — all six of its losses burned their
 > full budgets at 205-317 iterations — but that is because the machine happened
 > to stay awake, not because the platform prevents it.
+
+## NEW (Mac side of the eighteenth session, 2026-08-07/08): the caps are priced, and none of the four is the answer
+
+**`docs/studies/RCV2_CAP_PRICING.md` is complete**, including stage D — the
+question the study was built for and the one `c37ee07` recorded as UNMEASURED:
+not "what does a cap cost" but "what unsticks a member that fails". 40 cells,
+`docs/studies/rcv2_cap_pricing/cells.jsonl`.
+
+> ### THE DECISION, AND IT IS NOT ONE OF HANDOFF'S FOUR CAPS
+>
+> On the champion AND on both genuine corners, the ranking is the same:
+>
+> | lever | on `nominal` | on the two corners |
+> |---|---|---|
+> | **drop the optional payload** (−192 g) | **+7.907 min** | best on both |
+> | **span cap 2.0 → 2.2 m** | **+5.170 min** | second on both |
+> | `fineness_max` 8 → 9 | +1.077 | unsticks both, FASTEST, but a model-validity bound (`c37ee07`) |
+> | SM floor 0.08 → 0.05 | +0.851 | **worst lever measured** — last on one corner, NO DESIGN on the other |
+> | boat-tail 1.8 → 1.5 | +0.452, saturated | no design on one corner |
+> | `c_root` 0.275 → 0.300 | **no design** | a 3-minute fix on one corner |
+>
+> **The two levers worth real minutes are the payload and the span cap, and both
+> are yours rather than the model's.** The static-margin window — the one this
+> HANDOFF has framed as the stability remedy — is the worst lever measured
+> anywhere in the study.
+
+**Three results that contradict something previously written here, including by
+me earlier in the same study:**
+
+- **A cap that frees one member is the cap with no design behind it on another.**
+  `c_root_0.300` fails on `nominal` (415 iterations, full budget) and fixes
+  `dihedral_polyhedral2` in 3 minutes. "Raise cap X" is not well-formed at this
+  operating point.
+- **`fineness_max` unsticks BOTH corners**, against `c37ee07`'s reasoning that
+  neither pod-length lever should be expected to — that reasoning holds on a
+  design that solves (the motor row stays binding to 0.2 µm) and does not carry
+  to one that does not.
+- **The closest-miss row does not predict which lever frees a corner.**
+  `printed_mass_x1.10` misses on lift equilibrium and is freed by a pod-length
+  lever. With all 12 corner cells in, `price_caps.py misses` ranks lift
+  equilibrium first (4 stuck cells) and `usable_nose` second (3) — so the
+  "four independent corners name the motor row" reading, which this study
+  itself pushed, is weaker than it looked.
+
+**A converged rcv2 champion is airworthy**, confirmed on both machines
+independently (`candidates_source: legal`; this study twice, the WSL battery
+once). FINDINGS §28's illegal champion was the 3-iteration truncation.
+
+### Two source fixes, both found by running rather than reading
+
+- **`solve.py` now measures SUSPENSION.** `ipopt.max_wall_time` is a wall clock
+  and charges a member for time the process spent asleep, so a napping laptop
+  and an infeasible corner produced the identical `Maximum_WallTime_Exceeded`.
+  Four cells of this study died that way; re-measured awake, three converge in
+  2-9 minutes. `time.time()` runs through sleep and `time.monotonic()` does not,
+  on both macOS and Linux, so the difference IS the suspension — no platform
+  API. Reported in the failure message past a 20-second floor (an ntpd step must
+  not read as "the machine slept") and carried in `_FAILURE_FIELDS`.
+- **Nine `test_gui.py` tests went red on any machine without the `gui` extra**,
+  where every sibling skips. Routed through one `importorskip` helper. Watched
+  both ways: 0 failed / 484 passed / 22 skipped without the extra, 42 of 42
+  passing in that file with it.
+
+> **`caffeinate -i` is necessary and NOT sufficient on a laptop.** It blocks idle
+> sleep and does nothing about **clamshell sleep** — a closed lid slept the
+> machine on battery and cost this study four cells, twice. Lid open, on AC, for
+> anything unattended. (The WSL box has the same hazard and no `caffeinate` at
+> all — see the banner at the top of this file, measured 2026-08-08.)
+
+### What is open
+
+| | |
+|---|---|
+| the span floor | between 1.82 and 1.88 m, not bisected |
+| the 2026-08-07 battery's other losses | `winglet_off`, `winglet_continuous_cant`, perturbed multistarts — expressible since `cbd43e2`, unpriced |
+| `FUSELAGE_DRAG_PLAN` tiers 2-3 | worth more than that plan estimated: `fineness_max` is the best non-build lever and it is a model-validity bound, so raising it is a request for a better drag model |
+| flatness relaxations | never run against the stuck spans; deprioritised since the design sits on the 2.0 m cap |
+
 
 ## NEW this session (eighteenth, 2026-08-07): the rcv2 battery converged, and the fuselage is pinned between two declared limits
 
