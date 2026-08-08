@@ -10,11 +10,14 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
+import logging
 import re
 import shutil
 from pathlib import Path
 
 from ..types import RunResult
+
+log = logging.getLogger("planeopt")
 
 
 def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -> Path:
@@ -40,9 +43,35 @@ def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -
 
 
 def load(run_dir: Path) -> RunResult:
+    """A run artifact, read back.
+
+    Fields this version does not know about are DROPPED, with a line saying so,
+    rather than raising. `RunResult(**data)` refuses an unexpected keyword, so a
+    run.json written by a newer planeopt could not be read at all by an older
+    one — `planeopt report`, `brief`, `build` and `--warm-start` all died on a
+    TypeError naming the new field. That is the wrong way round for a project
+    whose runs move between two machines that are not upgraded together, and
+    `manufacturing` already states the principle in the other direction: every
+    artifact this project has written must stay readable.
+
+    Missing fields are already fine — everything but the five identity strings
+    has a default.
+    """
     data = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     data["constraints"] = data.get("constraints") or {}
-    return RunResult(**data)
+    known = {f.name for f in dataclasses.fields(RunResult)}
+    unknown = sorted(set(data) - known)
+    if unknown:
+        # Named, not silent: the reader is entitled to know that the artifact
+        # says more about this run than this build of the code can show.
+        log.warning(
+            "%s was written by a planeopt that records %s; this build does not "
+            "read %s and has ignored %s",
+            run_dir.name, ", ".join(unknown),
+            "them" if len(unknown) > 1 else "it",
+            "them" if len(unknown) > 1 else "it",
+        )
+    return RunResult(**{k: v for k, v in data.items() if k in known})
 
 
 def champion_config(result: RunResult) -> dict:
