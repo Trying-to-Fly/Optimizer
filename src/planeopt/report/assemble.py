@@ -20,19 +20,30 @@ from ..types import RunResult
 log = logging.getLogger("planeopt")
 
 
+def write_run_json(result: RunResult, run_dir: Path) -> None:
+    """The machine-readable truth, on its own.
+
+    Split out of `write_run_dir` so a caller that learns something AFTER the
+    directory exists — `solve.run` records which presentation steps failed —
+    can put it in the artifact rather than only in a log line.
+
+    encoding is explicit everywhere artifacts are written: Python falls back to
+    the locale encoding otherwise, and the reports carry non-Latin-1 characters
+    (eta, Delta, arrows) that cp1252 cannot represent — on Windows that is a
+    crash at the very end of a multi-hour run.
+    """
+    (run_dir / "run.json").write_text(
+        json.dumps(dataclasses.asdict(result), indent=2, default=str), encoding="utf-8"
+    )
+
+
 def write_run_dir(result: RunResult, runs_root: Path, input_files: list[Path]) -> Path:
     stamp = result.created.replace(":", "").replace("-", "")  # 20260723T140501
     slug = re.sub(r"[^A-Za-z0-9_-]+", "-", f"{result.mission}-{result.aircraft}").strip("-")
     run_dir = runs_root / f"{stamp}-{slug}"
     (run_dir / "figures").mkdir(parents=True, exist_ok=False)
 
-    # encoding is explicit everywhere artifacts are written: Python falls back to
-    # the locale encoding otherwise, and the reports carry non-Latin-1 characters
-    # (eta, Delta, arrows) that cp1252 cannot represent — on Windows that is a
-    # crash at the very end of a multi-hour run.
-    (run_dir / "run.json").write_text(
-        json.dumps(dataclasses.asdict(result), indent=2, default=str), encoding="utf-8"
-    )
+    write_run_json(result, run_dir)
 
     inputs_dir = run_dir / "inputs"
     inputs_dir.mkdir()

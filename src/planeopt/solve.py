@@ -1425,12 +1425,43 @@ def run(
 
     run_dir = assemble.write_run_dir(result, runs_root, input_files or [])
     log.info("writing artifacts to %s", run_dir)
-    figures.power_curves(sweep, mission, objective, run_dir / "figures")
-    figures.stall_spanwise(stall, run_dir / "figures")
+
+    # EVERY step below is presentation, and none of them may be what loses the
+    # analysis above. `optimize` calls this function to re-evaluate its champion
+    # after hours of solving, and a raise anywhere here propagates into its
+    # `except Exception` — which discards the whole re-evaluation and writes a
+    # RunResult holding only the design vector.
+    #
+    # That is not hypothetical. On 2026-08-08 the `20260808T145905` battery
+    # solved for 342 minutes and lost its entire numeric re-evaluation —
+    # `performance.best` null, sweep empty, `constraints` {} — to
+    # `TemplateAssertionError: No filter named 'num'`, because the Jinja
+    # template is read from DISK at render time while the running process holds
+    # the `report.html` module it imported hours earlier. Any edit to a template
+    # mid-run reproduces it, and so would a full disk or a font-cache rebuild.
+    #
+    # `optimize`'s own tail already guards its two presentation steps for
+    # exactly this reason (`05aaebc`: "rendering the HTML must never be what
+    # loses a completed optimization"). This is the same rule applied one level
+    # down, where the cost is higher.
+    def _artifact(label: str, fn, *args) -> None:
+        try:
+            fn(*args)
+        except Exception as e:  # noqa: BLE001
+            log.warning("%s could not be written (run.json is intact): %s: %s",
+                        label, type(e).__name__, e)
+            result.diagnostics.setdefault("artifacts_failed", {})[label] = (
+                f"{type(e).__name__}: {e}"
+            )
+
+    _artifact("figures/power_curves", figures.power_curves,
+              sweep, mission, objective, run_dir / "figures")
+    _artifact("figures/stall_spanwise", figures.stall_spanwise, stall, run_dir / "figures")
     planes = {"current": airplane}
     if dv is not None:
         planes = {"baseline (defaults)": aircraft.geometry(None), "optimized": airplane}
-    figures.planform_compare(planes, run_dir / "figures")
+    _artifact("figures/planform_compare", figures.planform_compare,
+              planes, run_dir / "figures")
     # viz twin: attach the fuselage loft(s) for the 3D artifacts only — the aero
     # airplane stays wings-only (LL would double-count fuselage drag, section 7)
     viz_plane = airplane
@@ -1443,16 +1474,22 @@ def run(
                 name=airplane.name, wings=airplane.wings, fuselages=lofts,
                 s_ref=airplane.s_ref, c_ref=airplane.c_ref, b_ref=airplane.b_ref,
             )
-    figures.three_view(viz_plane, run_dir / "figures")
-    figures.interactive_3d(viz_plane, run_dir)
+    _artifact("figures/three_view", figures.three_view, viz_plane, run_dir / "figures")
+    _artifact("interactive_3d.html", figures.interactive_3d, viz_plane, run_dir)
     # Buildable geometry: the loft definition and the placed 3D curves. A report
     # tells you whether the design is good; these tell you how to cut it, and
     # they come from the same airplane object that was analysed.
-    geometry_export.write(airplane, run_dir)
+    _artifact("geometry/", geometry_export.write, airplane, run_dir)
     # Build document: the same geometry again, but answering "what do I cut and
     # what must I hit" — spars, hinges, edge polylines and the CG window.
-    manufacturing.write(result, airplane, aircraft, run_dir)
-    (run_dir / "report.html").write_text(report_html.render(result, run_dir), encoding="utf-8")
+    _artifact("manufacturing/", manufacturing.write, result, airplane, aircraft, run_dir)
+    _artifact("report.html", lambda: (run_dir / "report.html").write_text(
+        report_html.render(result, run_dir), encoding="utf-8"))
+    if result.diagnostics.get("artifacts_failed"):
+        # Re-write run.json so the failures are IN the artifact and not only in a
+        # log line nobody keeps — the same reason every other guard here records
+        # rather than prints.
+        assemble.write_run_json(result, run_dir)
     return result, run_dir
 
 
