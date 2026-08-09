@@ -2627,18 +2627,25 @@ OPTIONAL_MEMBER_TIMEOUT_MIN = 12.0
 #: recorded as unproven rather than consuming the same budget repeatedly. This
 #: is an expenditure rule, not a mathematical inference about feasibility.
 #:
-#: **20.0, not 10.0 — user decision, reaffirmed 2026-08-10.** The original
-#: 2026-07-31 decision: 12 was 2x the slowest flatness convergence then on
-#: record (6.0 min), which sounds like margin until you notice the one solve
-#: known to converge past it took 21.5 minutes. Graph sharing since brought
-#: converged members down to 1.7-3.2 minutes, and the timeout cascade above
-#: means a wrongly-timed-out member no longer silently drops every smaller
-#: span's budget — it costs one member's ceiling, once. That bounded, visible
-#: cost is the price of finding out where "slow members do not converge" stops
-#: being true, and RCV2_CAP_PRICING §4 (15 vs 60 min on the first infeasible
-#: span: four times the clock, no certificate, dual blow-up) says raising it
-#: FURTHER buys nothing.
-FLATNESS_TIMEOUT_MIN = 20.0
+#: **10.0 as a TRIAL — user decision, 2026-08-10, superseding the 2026-07-31
+#: decision to hold 20.** The 20 stood on two legs: the one solve known to
+#: converge past 12 minutes took 21.5, and a wrongly-timed-out member silently
+#: dropped its span from the curve. Both legs have moved. Graph sharing brought
+#: converged flatness members to 1.7-3.2 minutes (the pre-sharing record was
+#: 6.0, and 21.5 belonged to a tail-topology swap, a different problem), and a
+#: timeout no longer loses anything silently — the member is recorded as timed
+#: out, smaller spans as unproven, and a sleep-spanning timeout does not
+#: cascade at all. The worst case is now visible evidence, not a silent hole,
+#: which is what makes a cheaper cap testable at all.
+#:
+#: THE EXIT CONDITION, so the trial ends on evidence rather than mood: a
+#: timed-out flatness member whose convergence trace reads "still converging
+#: when the clock stopped" is the signal that 10 is too tight — raise it back
+#: toward 20 on that member's span. A trace reading "stuck, not slow" instead
+#: CONFIRMS the cap: RCV2_CAP_PRICING §4 measured 15 vs 60 minutes on the
+#: first infeasible span and four times the clock bought no certificate, just
+#: a dual blow-up.
+FLATNESS_TIMEOUT_MIN = 10.0
 
 
 #: How far BELOW the incumbent span the sweep reaches, as a fraction of it.

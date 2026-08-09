@@ -137,10 +137,11 @@ uv run planeopt optimize missions/endurance_sample.py -a aircraft/vtail_sample
 Serial optimization reuses each converged champion's complete IPOPT
 primal/constraint-dual point for nearby studies and sensitivity re-solves.
 Independent multistarts remain cold by design. Optional alternatives have a
-12-minute member ceiling; flatness members have a 20-minute ceiling, and after
-the first timeout smaller spans are reported as **unproven** without repeatedly
-spending the same budget. A timeout that spanned a machine-sleep window does
-not trigger that skip — the member never got its clock. These are runtime policies, not feasibility claims.
+12-minute member ceiling; flatness members have a 10-minute ceiling (a trial —
+see `FLATNESS_TIMEOUT_MIN` for the decision record and its exit condition), and
+after the first timeout smaller spans are reported as **unproven** without
+repeatedly spending the same budget. A timeout that spanned a machine-sleep
+window does not trigger that skip — the member never got its clock. These are runtime policies, not feasibility claims.
 
 The final numeric speed sweep applies the static-margin window and local
 stability-sign check before calling an operating point airworthy. The run-level

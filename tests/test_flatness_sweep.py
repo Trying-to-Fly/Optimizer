@@ -93,13 +93,14 @@ def test_a_member_is_capped_well_below_the_champion_s_budget():
     b = _Batch()
     solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
     assert {t for _, t in b.jobs} == {solve.FLATNESS_TIMEOUT_MIN}
-    # 6.0 min is the slowest FLATNESS member that has ever converged (n = 6,
-    # both runs, both chord caps). Not "the slowest solve on the model" — that
-    # is tail_type=conventional at 21.5 min, and an earlier version of this
-    # assertion was built on a survey that missed it (FINDINGS 15.4). The cap
-    # was raised to 20 min on that count (user decision, 2026-07-31): the
-    # margin is now against the slowest solve KNOWN to converge on this model,
-    # not merely against the slowest flatness member.
+    # 6.0 min is the slowest FLATNESS member that ever converged BEFORE graph
+    # sharing (n = 6, both runs, both chord caps); the four since took 1.7-3.2
+    # min. Not "the slowest solve on the model" — that is tail_type=conventional
+    # at 21.5 min, a different problem from a span perturbation. The cap sat at
+    # 20 on that count (user decision, 2026-07-31) while a wrong timeout meant a
+    # silently lost span; now that a timeout is recorded and bounded by the
+    # cascade, 10 is on trial (user decision, 2026-08-10) — the decision record
+    # and its exit condition live at `FLATNESS_TIMEOUT_MIN`.
     SLOWEST_CONVERGED_FLATNESS_MIN = 6.0
     assert 1.5 * SLOWEST_CONVERGED_FLATNESS_MIN <= solve.FLATNESS_TIMEOUT_MIN
     assert solve.FLATNESS_TIMEOUT_MIN < solve.SOLVE_TIMEOUT_MIN

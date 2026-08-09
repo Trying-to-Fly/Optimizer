@@ -1,4 +1,4 @@
-# HANDOFF — Plane Optimizer (updated 2026-08-08, eighteenth session)
+# HANDOFF — Plane Optimizer (updated 2026-08-10, nineteenth session)
 
 > ## LEAVE THE LID OPEN FOR ANY UNATTENDED RUN, ON EITHER MACHINE
 >
@@ -22,6 +22,65 @@
 > The `20260807T061330` battery escaped it — all six of its losses burned their
 > full budgets at 205-317 iterations — but that is because the machine happened
 > to stay awake, not because the platform prevents it.
+
+## NEW this session (nineteenth, 2026-08-10): this branch is codex + main, merged and reconciled
+
+**This branch (`casadi-speed-stability`) is the external `codex/casadi-speed-stability`
+contribution (author Ethan984-Master, one commit, `5301f37`) with all of main
+merged into it (`9e4e153`), kept OFF main deliberately.** The codex side is
+FINDINGS §30-33: the shared CasADi lifting-line Function (12.19x setup, 48%
+less peak RAM, equivalent to nine significant digits), IPOPT primal/dual
+hot-starts for nearby re-solves, serial multistart consensus, static margin
+as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
+
+### What came over FROM MAIN in the merge, so nobody re-derives it here
+
+- **Sleep detection** (`397d4db`, `eb2877f`): `solve.suspended_minutes` +
+  `SUSPENSION_FLOOR_MIN`; recorded on failed AND converged members, narrated by
+  `SolveFailure` past a 20-second floor. See the lid warning above — WSL2 and
+  macOS both do this.
+- **The RCV2 cap-pricing study, complete** (`docs/studies/RCV2_CAP_PRICING.md`,
+  40 cells in `cells.jsonl`, `tools/price_caps.py` grown +345 lines): payload
+  and span cap are the levers worth minutes; the SM floor is the worst lever
+  measured. Includes the `6466d0c` retraction — 15 vs 60 min on the first
+  infeasible span bought no certificate, only a dual blow-up.
+- **`tools/bughunt/verify_shared_ll.py`** (`746fb5d`): built on main FOR the
+  codex change before it was reviewed. Ran against the merged implementation:
+  worst error 1.9e-15, EQUIVALENT, and the SM rows correctly take zero
+  deflection — the +0.175 leak it prices is absent.
+- **`tools/bughunt/audit_run.py`** and `multistart_inits()` made public
+  (`cbd43e2`): instruments can now replay a battery's exact `perturbed_N`.
+- **The overnight app-surface sweep** (`1488dfe`, `61aebc8` and the commits
+  between): mission-name-as-path validation on every entry path, run.json
+  forward-compat, frame adoption by run id (twice — it came back through the
+  queue file), timelapse tail truncation, detail-pane crashes and sideways
+  scroll, report figure fixes (blank planform paper, negative-lead text, None
+  rows, figure-vs-write ordering), friendlier CLI typo errors.
+- **The PySide6 skip fix** (`0ae8862`): GUI tests skip, not fail, on an install
+  without the `gui` extra.
+
+### Reconciliations the merge itself had to make (commit `9e4e153`)
+
+- A converged member now records BOTH main's `suspended_minutes` AND the codex
+  branch's `return_status`/`iter_count`/`converged`/`_solver_seed`.
+- The codex timeout cascade (first flatness timeout → smaller spans recorded
+  unproven) is now **sleep-gated**: a timeout whose member slept past
+  `SUSPENSION_FLOOR_MIN` does not cascade, because that member never received
+  its budget. Test: `test_a_timeout_spanning_a_sleep_window_does_not_cascade`.
+- Adaptive multistart keeps the codex schedule but draws its perturbed starts
+  from main's `multistart_inits()`.
+
+### FLATNESS_TIMEOUT_MIN: 10 on TRIAL (user decision 2026-08-10, was 20 from 2026-07-31)
+
+The codex branch had silently lowered the 20-minute cap (a recorded user
+decision) to 10. The merge first restored 20; Mo then chose to TRIAL 10, on the
+grounds that the two facts under the old decision moved: converged flatness
+members take 1.7-3.2 minutes after graph sharing, and a wrong timeout is now
+visible bounded evidence instead of a silently lost span. **The exit condition
+is written at `FLATNESS_TIMEOUT_MIN` in `solve.py`**: a timed-out flatness
+member whose convergence trace reads "still converging when the clock stopped"
+means 10 is too tight — raise it back toward 20. "Stuck, not slow" confirms
+the cap. Watch for that trace verdict in the next real batteries.
 
 ## NEW (Mac side of the eighteenth session, 2026-08-07/08): the caps are priced, and none of the four is the answer
 
