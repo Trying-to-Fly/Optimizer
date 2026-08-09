@@ -139,6 +139,31 @@ def test_a_TIMEOUT_stops_spending_but_does_not_claim_infeasibility():
         assert "unproven" in by_span[span]["failed"]
 
 
+def test_a_timeout_spanning_a_sleep_window_does_not_cascade():
+    """A member killed by `max_wall_time` while the machine was asleep never
+    received its budget (RCV2_CAP_PRICING §4: cells that died that way converge
+    in 2-9 minutes awake). Its status is the same string as a genuine timeout,
+    so the cascade must read `suspended_minutes` to tell them apart — and fail
+    toward spending: skipping wrongly drops the tail of the curve, while
+    running costs one bounded member budget."""
+
+    class _SleptBatch(_Batch):
+        def __call__(self, label, jobs, **kw):
+            out = super().__call__(label, jobs, **kw)
+            for key, kw_job in jobs:
+                if round(kw_job["fixed"]["span"], 4) == 1.8:
+                    out[key]["suspended_minutes"] = 12.0
+            return out
+
+    b = _SleptBatch({1.8: TIMEOUT})
+    flat = solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
+    # 1.8 slept through its clock, so 1.7, 1.6 and 1.5 are still attempted
+    assert b.asked == pytest.approx([2.0, 1.9, 1.8, 1.7, 1.6, 1.5])
+    by_span = {round(e["span"], 4): e for e in flat}
+    assert by_span[1.8]["return_status"] == TIMEOUT
+    assert all(by_span[s]["objective_value"] is not None for s in (1.7, 1.6, 1.5))
+
+
 def test_the_real_2026_07_31_sweep_costs_less_than_it_did():
     """The regression, in the units that matter: four spans timed out at 32.7
     min each for 130.6 minutes and zero skips. Nothing about the ANSWER changes

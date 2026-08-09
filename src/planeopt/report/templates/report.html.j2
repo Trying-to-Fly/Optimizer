@@ -35,6 +35,12 @@
      weight, for the same reason `.pinned` exists: twenty bold red cells would
      read as twenty failures when they are the builder's ordinary to-do list. */
   .caveat { color: #a06a00; }
+  /* A dict-valued constraint renders as its own small table rather than as a
+     Python repr. Borderless and inset so it reads as detail belonging to the
+     row above it, not as a second table competing with it. */
+  table.nested { margin: 0; font-size: .9em; }
+  table.nested th, table.nested td { border: 0; padding: .1rem .6rem .1rem 0; }
+  table.nested th { font-weight: 600; opacity: .75; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -85,7 +91,7 @@ The values below remain diagnostic results, not an airworthy design recommendati
 <table>
 <tr><th>design variable</th><th>champion</th><th>declared box</th></tr>
 {% set boxes = opt["champion"].get("dv_bounds") or {} %}
-{% for k, v in opt["champion"]["dv"].items() %}<tr><td>{{ k }}</td><td>{{ "%.4f"|format(v) }}</td>
+{% for k, v in opt["champion"]["dv"].items() %}<tr><td>{{ k }}</td><td>{{ v|num("%.4f") }}</td>
 {% if pinned.get(k) %}
 <td class="pinned">{{ "%.4g"|format(boxes.get(k, [None, None])[0] if boxes.get(k) else 0) }}
 &hellip; {{ "%.4g"|format(boxes.get(k, [None, None])[1] if boxes.get(k) else 0) }}
@@ -155,7 +161,7 @@ member budget.</p>
 {% if v.get("failed") %}<td colspan="5" class="bad">{{ v["failed"] }}</td>
 {% else %}<td>{{ "%.1f"|format(v["objective_value"]) }}</td><td>{{ "%+.1f"|format(v["delta"]) }}</td>
 <td>{{ "%.2f"|format(v["span"]) }}</td><td>{{ "%.3f"|format(v["static_margin"]) }}</td>
-<td>{{ "%.0f"|format(v["ballast_kg"]*1000) }}</td>{% endif %}</tr>
+<td>{{ (v["ballast_kg"]*1000)|num("%.0f") }}</td>{% endif %}</tr>
 {% endfor %}
 </table>
 {% endif %}
@@ -407,7 +413,11 @@ margin as an average over the window, and do not set the CG from it alone.</p>
 {# %.3f rounds a small residual to a flat "0.000", which is exactly the wrong
    thing to say about a gap between two nearly-equal numbers — switch to
    scientific notation below 0.01 so the magnitude survives. #}
-<td>{% if v is sameas true %}<span class="ok">pass</span>{% elif v is sameas false %}<span class="bad">FAIL</span>{% elif v is number %}{% if v != 0 and (v|abs) < 0.01 %}{{ "%.2e"|format(v) }}{% else %}{{ "%.3f"|format(v) }}{% endif %}{% else %}{{ v }}{% endif %}</td></tr>
+<td>{% if v is sameas true %}<span class="ok">pass</span>{% elif v is sameas false %}<span class="bad">FAIL</span>{% elif v is number %}{% if v != 0 and (v|abs) < 0.01 %}{{ v|num("%.2e") }}{% else %}{{ v|num }}{% endif %}
+{#- A mapping here used to fall through to `{{ v }}`, i.e. a Python repr with
+    its quotes and braces. `sm_read_at` is one, and it is the first thing to
+    read when the two static margins disagree. -#}
+{% elif v is mapping %}<table class="nested">{% for key, text in v|pairs %}<tr><th>{{ key }}</th><td>{{ text }}</td></tr>{% endfor %}</table>{% else %}{{ v }}{% endif %}</td></tr>
 {% endfor %}
 </table>
 
@@ -464,7 +474,7 @@ wing loading {{ "%.1f"|format(r.masses["wing_loading_g_dm2"]) }} g/dm²</p>
 <table>
 <tr><th>component</th><th>g</th><th>station (mm)</th></tr>
 {# artifacts written before 2026-08-05 carry a bare mass here, not a mapping #}
-{% for k, v in r.masses["components"].items() %}<tr><td>{{ k }}</td><td>{{ "%.0f"|format((v["mass_kg"] if v is mapping else v)*1000) }}</td><td>{{ "%.0f"|format(v["station_mm"]) if v is mapping and v["station_mm"] is not none else "—" }}</td></tr>{% endfor %}
+{% for k, v in r.masses["components"].items() %}<tr><td>{{ k }}</td><td>{{ ((v["mass_kg"] if v is mapping else v)*1000)|num("%.0f") }}</td><td>{{ "%.0f"|format(v["station_mm"]) if v is mapping and v["station_mm"] is not none else "—" }}</td></tr>{% endfor %}
 </table>
 {% endif %}
 {% for surf, bd in (r.masses.get("printed_breakdown") or {}).items() %}

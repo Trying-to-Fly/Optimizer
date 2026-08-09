@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .jobs import Job, JobState
+from .jobs import Job, JobState, is_reserved_live_dir
 
 #: Lives beside `_checkpoints`, `_logs` and `_diagnostics` under the runs
 #: directory — the same convention, and gitignored for the same reason.
@@ -113,6 +113,15 @@ def load(runs_dir: Path) -> list[Job]:
             job = Job(**fields)
         except TypeError:
             continue
+        # A queue file written before live directories were reserved per job
+        # names the SHARED `runs/_live/<mission>`, and resuming into one adopts
+        # whatever frames a cancelled run left behind — the timelapse then opens
+        # on an aeroplane this run never flew. Dropped rather than rewritten
+        # here: `queuestore` must not create directories as a side effect of
+        # opening the app, so `RunQueue.resume` reserves one at the moment the
+        # run actually starts.
+        if not is_reserved_live_dir(job.live_dir):
+            job.live_dir = None
         job.state = JobState.PAUSED
         jobs.append(job)
     return jobs

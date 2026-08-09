@@ -35,11 +35,14 @@ from . import missionfile
 from planeopt import memory
 
 from . import render3d
-from .jobs import Job
+from .jobs import Job, reserve_live_dir
 from .workspace import Workspace
 
 
 FIELD_WIDTH = 150  # every value field the same width, so the column reads as a column
+
+
+
 #: Must equal planeopt.solve.SOLVE_TIMEOUT_MIN — see the spin box below for why
 #: it is copied rather than imported. tests/test_gui.py holds them together.
 SOLVE_TIMEOUT_MIN_DEFAULT = 30
@@ -387,7 +390,7 @@ class NewRunDialog(QDialog):
         # Starting from an existing mission pre-fills its name, so queueing would
         # quietly rewrite the file it was loaded from. Only ask when the content
         # would actually change — re-running an unedited mission is not a hazard.
-        target = self._missions_dir / f"{self.mission().name}.py"
+        target = missionfile.path_for(self._missions_dir, self.mission())
         if target.exists() and target.read_text(encoding="utf-8") != missionfile.render(self.mission()):
             answer = QMessageBox.question(
                 self,
@@ -405,10 +408,21 @@ class NewRunDialog(QDialog):
     def job(self) -> Job:
         """Write the mission module, then describe the run to queue."""
         mission = self.mission()
-        path = missionfile.save(mission, self._missions_dir / f"{mission.name}.py")
+        aircraft = Path(self.aircraft.currentData())
+        # `path_for`, not an f-string: the name is free text and was being used
+        # as a path as well as a label. Both call sites must agree, or `accept`
+        # checks one file for the overwrite prompt and `job` writes another.
+        path = missionfile.save(mission, missionfile.path_for(self._missions_dir, mission))
+        # ONE sanitised stem for every path this job names. The mission name is
+        # free text and it reaches four of them — the module, the checkpoint
+        # directory, the pause sentinel and the live frames — so a name like
+        # `../../escaped` put the checkpoints and the sentinel outside the runs
+        # directory entirely. Derived from the same helper the module path uses,
+        # so a resume still finds the folder its first run wrote.
+        stem = missionfile.module_name(mission.name)
         return Job(
             mission=path,
-            aircraft=Path(self.aircraft.currentData()),
+            aircraft=aircraft,
             runs_dir=self._runs_dir,
             optimize=self.mode_optimize.isChecked(),
             multistart=self.multistart.value(),
@@ -419,11 +433,11 @@ class NewRunDialog(QDialog):
             # alternative is a Pause button that is greyed out exactly when
             # someone finally wants it, four hours into a battery.
             checkpoint_dir=(
-                self._runs_dir / "_checkpoints" / mission.name
+                self._runs_dir / "_checkpoints" / stem
                 if self.mode_optimize.isChecked() else None
             ),
             pause_file=(
-                self._runs_dir / "_checkpoints" / f"{mission.name}.PAUSE"
+                self._runs_dir / "_checkpoints" / f"{stem}.PAUSE"
                 if self.mode_optimize.isChecked() else None
             ),
             # Same reasoning as the checkpoint block above: unasked, because it
@@ -432,8 +446,23 @@ class NewRunDialog(QDialog):
             # wanted to watch is the one that has nothing to watch. An
             # EVALUATION gets none — nothing iterates, and the existing
             # interactive_3d.html already shows that design.
+            #
+            # STAMPED, unlike the checkpoint directory beside it, and the
+            # asymmetry is the point. Checkpoints are keyed on a model
+            # fingerprint (`planeopt.fingerprint`), so sharing one folder across
+            # runs is safe and lets a re-queued job reuse hours of solves.
+            # Frames have no such guard: `liveframe.FrameWriter` appends from one
+            # past the highest sequence already on disk, which is what makes a
+            # pause/resume continue rather than overwrite. A run that is
+            # cancelled or fails never reaches `liveframe.relocate`, so ITS
+            # frames stay in the folder — and the next run on the same mission
+            # adopted them, showed them in the live view, and relocated them into
+            # its own `frames/`, where a timelapse replayed another aeroplane
+            # under this run's name. Per-job here, reused on resume because
+            # `RunQueue.resume` re-queues this same Job and `queuestore`
+            # round-trips the path.
             live_dir=(
-                self._runs_dir / "_live" / mission.name
+                reserve_live_dir(self._runs_dir, stem, aircraft.name)
                 if self.mode_optimize.isChecked() else None
             ),
             timelapse_view=self.timelapse_view.currentData(),

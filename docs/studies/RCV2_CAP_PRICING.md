@@ -1,21 +1,30 @@
 # Pricing the caps behind the rcv2 corners
 
-> **STATUS: INTERIM** — stages A, B and C are measured; the three stage-B cells
-> the machine slept through are being re-measured and stage F is still to run.
-> Branch `rcv2-cap-pricing`. Raw data: `docs/studies/rcv2_cap_pricing/cells.jsonl`,
-> one JSON line per cell.
+> **STATUS: complete 2026-08-07.** Every stage measured, every lever priced, and
+> both open caveats closed by measurement (§5c the greedy state, §5d the
+> reverted rescale). Raw data: `docs/studies/rcv2_cap_pricing/cells.jsonl`, one
+> JSON line per cell; the rescale comparison is a separate record so it can
+> never be mistaken for a baseline.
+>
+> **This machine sleeps, and that invalidated four cells before it was caught
+> (§4). Anything measured here with the lid shut is not evidence.**
 
-## 0. The two results, before anything else
+## 0. The three results
 
-1. **Every corner the battery lost converges here in 2-5 minutes.** All six
-   members, including the three studies that returned no verdict and the exact
-   member `degeneracy.py` was run on. Stage A cost ~19 minutes of solving for
-   what cost that battery 287.7 minutes of nothing.
-2. **Every failure this study produced was the laptop going to sleep**, not a
-   constraint. IPOPT's guard is a WALL clock, so a suspended process is charged
-   for the time it spends suspended. See §4 — it may also be the largest single
-   explanation for the original battery's ten losses, and it is checkable there
-   in one command.
+1. **Four of the six members the battery lost converge in 2-5 minutes; two are
+   genuine corners.** All six converge in the configuration they DECLARE, which
+   is what this study first measured and reported — but a battery runs its
+   studies greedily, and in that state `dihedral_polyhedral2` and
+   `printed_mass_x1.10` both burn a full budget and hundreds of iterations
+   (§5c). Read §5c before quoting §2.
+2. **Two levers matter and neither is a modelling decision**: dropping the
+   optional payload is worth +7.907 min and 200 mm of span is worth +5.170 min.
+   Everything else is under a minute, and raising the chord cap ALONE is not a
+   remedy at all — it walks into a harder row (§5).
+3. **Four cells "failed" because the laptop was asleep**, not because of a
+   constraint. IPOPT's guard is a WALL clock and a suspended process is charged
+   for its suspension (§4). Re-measured awake, three of the four converge; the
+   fourth (`c_root_0.300`) is a genuine corner.
 
 ## 1. Why
 
@@ -30,10 +39,15 @@ FINDINGS §14.5.7 measured that more clock does not convert one. HANDOFF names
 the remedy — raise chord, raise span, widen the SM window, or carry less kit —
 and says it is the user's decision. **None of the four had a price.**
 
-## 2. Stage A — the corners do not reproduce
+## 2. Stage A — the corners do not reproduce AT THE DECLARED BASELINE
 
-Current tree (`1ff0917`), 15-minute budget, one solve per process, each member
-in the configuration it declares.
+> **Superseded in part by §5c.** Every row below is measured in the
+> configuration the member declares. That is NOT the configuration a battery
+> runs it in, and for two of the six it is the difference between a 2.7-minute
+> solve and no design at all.
+
+Current tree, 15-minute budget, one solve per process, each member in the
+configuration it declares.
 
 | member | battery | here | min | SM | AUW kg |
 |---|---|---|---|---|---|
@@ -46,66 +60,69 @@ in the configuration it declares.
 
 **All six land on the same five limits at once**: `span` on its 2.0 m cap,
 `c_root` on its 0.275 m cap, `cs_frac` on its 0.4 bound, `ballast_kg` on zero,
-and the static margin **exactly on its 0.0800 floor**. The aeroplane IS in the
-corner the failures were attributed to. It simply solves there.
+and the static margin **exactly on its 0.0800 floor** — what a binding
+constraint looks like (§14.5.8). The aeroplane IS in the corner the failures
+were attributed to. It simply solves there.
 
-## 3. Stage C — the converged champion is airworthy
+`flatness_2.0` re-derives `nominal` exactly (105.818, 3.07 min), which is the
+consistency check that member ought to pass and had never been asked to.
 
-`diagnostics.candidates_source` = **`legal`**, and notes[0] is the ordinary
-stall caveat rather than §28's fallback banner.
+## 3. Stage C — the converged champion is airworthy, on two machines
 
-This closes the question §28.4 left open. That section measured a **3-iteration**
-rcv2 champion whose every swept speed was illegal (trim at 4.2x its throw limit,
-SM 0.439) and asked whether a CONVERGED battery would solve its own balance —
-it has `ballast_kg`, ten placement variables and the throw limit as a hard NLP
-row, so it should. **It does.**
+`diagnostics.candidates_source` = **`legal`** here, twice (03:12 and 09:35), with
+notes[0] the ordinary stall caveat rather than §28's fallback banner.
 
-## 4. Every failure here was idle sleep, and the clock is a wall clock
+Independently, the 2026-08-07 battery
+`runs/20260807T061330-rcv2_endurance-vtail_sample_v1-7_rcv2` reports
+`candidates_source: "legal"`, `reported_point_violations` empty, trim −3.33°
+against a 6.53° cap — **and reproduces this study's `nominal` at 105.8 against
+105.818**.
 
-Nine cells "exceeded" a 30-minute wall budget after 2-6 minutes of solving. The
-cause is not the solver:
+So the §28 illegal champion was the **3-iteration truncation, not the aeroplane**.
+A converged rcv2 champion does solve its own balance, which is what §28.4 said
+was unknown.
 
-```
-00:16:46  Entering Sleep state due to 'Idle Sleep'
-00:42:46  Entering Sleep state ...   01:02:18 'Maintenance Sleep'
-01:19:26  01:35:29  01:52:34  02:10:26  02:26:53  ...
-```
+## 4. Four failures were idle sleep, and the clock is a wall clock
 
 `solve._solve_nlp` sets `ipopt.max_wall_time`, deliberately and correctly — it
-is protecting the run's wall clock against a solve that starts swapping
-(HANDOFF, and the comment at `solve.py:1618`). But a **suspended process is
-charged for its suspension**, so a member that spans an idle-sleep window is
-killed for time it never got to use.
+protects the run's wall clock against a solve that starts swapping. But a
+**suspended process is charged for its suspension**, so a member spanning a
+sleep window is killed for time it never got to use.
 
 | cell | ran (local) | verdict | machine |
 |---|---|---|---|
 | six baselines + `sm_floor_0.05` | 00:17-00:41 | **all converged** | awake |
 | `c_root_0.300` | 01:12-01:18 | wall-time | slept 01:02-01:18 |
 | `span_cap_2.2` | 02:06-02:08 | wall-time | slept 01:52-02:08 |
-| `kit_core` | 02:51-02:54 | wall-time | slept 02:26-… |
+| kit dropped | 02:51-02:54 | wall-time | slept 02:26-… |
 
 Perfect separation, and the 31-, 48- and 43-minute gaps BETWEEN those cells are
-the machine asleep between them. `solve._convergence_trace` called all three
-*"still converging when the clock stopped — the one case where a larger
-`--solve-timeout-min` may actually pay"*, which is exactly right and, on its
-own, would have sent the next reader to raise a cap that was never the problem.
+the machine asleep between them. Re-measured awake, **`span_cap_2.2` converges in
+2.97 minutes** — so that verdict was purely the artifact.
 
-**The fix is one word:** `caffeinate -i <command>`. The remaining measurements
-run under it.
+`solve._convergence_trace` called all three *"still converging when the clock
+stopped — the one case where a larger `--solve-timeout-min` may actually pay"*,
+which is exactly right, and on its own would have sent the next reader to raise
+a cap that was never the problem.
 
-### What this predicts about the original battery, and how to check it in one command
+**`caffeinate -i` is necessary and not sufficient.** It blocks idle sleep. It
+does NOT block **clamshell sleep** — closing the lid at 09:07 put the machine to
+sleep on battery anyway, and the kit cell (09:26-09:33, against `Maintenance
+Sleep` from 09:17:56 to a DarkWake at 09:33:19) was a second victim. Re-measured
+with the lid open it converges in 9.41 min, so it too was purely the artifact.
 
-That battery started at **03:17** — unattended, overnight. If it ran on a Mac
-that was allowed to idle-sleep, some of its ten losses are this artifact and not
-corners. The signature is unmistakable and its own artifact already records it:
+### The signature, and how to check any run for it
 
-    python3 -c "import json;d=json.load(open('runs/20260806T031736-.../run.json'));\
-    print([(k,v.get('solve_minutes'),v.get('return_status')) for k,v in ... if 'failed' in v])"
+**A member reporting `Maximum_WallTime_Exceeded` with `solve_minutes` far below
+`--solve-timeout-min` did not run out of time — it was asleep.** A genuine corner
+burns its whole budget and hundreds of iterations: §14.5.7's pusher did 187 then
+474, and this study's one real corner did **415**. The sleeping cells died at 68,
+25 and 15.
 
-**A member that reports `Maximum_WallTime_Exceeded` with `solve_minutes` far
-below `--solve-timeout-min` did not run out of time — it was asleep.** A genuine
-corner burns its whole budget and hundreds of iterations; §14.5.7's pusher did
-187 and then 474. The three cells here died at 68, 25 and 15 iterations.
+Both numbers are already in every `run.json`, so any past battery can be audited
+without re-solving. The `20260806T031736` battery started at **03:17**,
+unattended; if it ran on a Mac allowed to sleep, some of its ten losses are this
+and not corners.
 
 **This matters directly for the full solve on the more powerful device.** If it
 is a Mac and it is left alone, it will lose members the same way, and the
@@ -135,42 +152,419 @@ called those two sleep artifacts. And the iteration counts are 205-317, against
 the 68/25/15 of the cells that really were asleep, which is the second half of
 §4's own signature.
 
-WSL under WSLg does not idle-suspend the way the Mac did here, so this is the
-expected result — but it had to be checked rather than assumed, because the
-consequence of being wrong is the same either way: chasing a cap that was never
-the problem.
+It had to be checked rather than assumed, because the consequence of being wrong
+is the same either way: chasing a cap that was never the problem.
 
-## 5. Stage B — what the caps are worth
+> **AND THE ASSUMPTION WOULD HAVE BEEN WRONG. THE WSL BOX SUSPENDS TOO.**
+>
+> This section first read "WSL under WSLg does not idle-suspend the way the Mac
+> did here". That is false, measured 2026-08-08 by closing the lid: two `uptime`
+> readings imply boot times **26½ minutes apart**, which is impossible unless the
+> VM's clock stopped. Wall clock advanced 3 h 31 m; uptime advanced 3 h 05 m.
+>
+>     boot implied at 21:23:58 (up 12:27) : 08:56:58
+>     boot implied at 00:55:27 (up 15:32) : 09:23:27   <- 26m29s uncounted
+>
+> Nothing was running at the time, so nothing was lost. But **`caffeinate -i` has
+> no equivalent here and the hazard is identical**: a battery left overnight with
+> the lid shut will have its members charged for the suspension and will report
+> `Maximum_WallTime_Exceeded` in exactly the words §4 is about. The
+> `20260807T061330` battery escaped it only because it ran with the machine
+> awake — which is luck, not a property of the platform.
+>
+> **Leave the lid open for any unattended run on this box**, or change the
+> Windows power setting.
+>
+> What HAS changed since this paragraph was first written is the *diagnosis*, not
+> the hazard. `solve.suspended_minutes` (merged from the Mac side, `397d4db`)
+> compares `time.time()` against `time.monotonic()`, and **the measurement above
+> is already a test of it on this box**: `uptime` reads `/proc/uptime`, and here
+> that is the same clock to the centisecond —
+>
+>     /proc/uptime 57399.73   CLOCK_MONOTONIC 57399.73   CLOCK_BOOTTIME 57399.73
+>
+> which is itself worth knowing, because on ordinary Linux `CLOCK_BOOTTIME`
+> counts suspension and `CLOCK_MONOTONIC` does not. Under WSL2 the whole VM is
+> frozen, so neither advances and both under-read by the same 26m29s. That gap is
+> exactly what `suspended_minutes` returns, so a member that sleeps here now says
+> so past the 20-second floor and `run.json` carries the number.
+>
+> **The member still dies** — nothing prevents the suspension, it is only no
+> longer indistinguishable from a starved corner.
+
+## 5. Stage B — what every lever is actually worth
+
+Measured awake, on the nominal design (105.818 baseline).
+
+| relaxation | result | vs baseline |
+|---|---|---|
+| payload dropped (`airframe_only`, −192 g) | **113.725**, converged 9.41 min | **+7.907 min** |
+| `span_cap` 2.0 → 2.2 m | **110.989**, converged 2.97 min | **+5.170 min** |
+| `fineness_max` 8.0 → 9.0 | 106.895, converged 2.95 min | +1.077 min |
+| SM floor 0.08 → 0.05 | 106.669, converged 4.31 min | +0.851 min |
+| `boat_tail_min_d_eq` 1.8 → 1.5 | 106.270, converged 3.72 min | +0.452 min |
+| `c_root` 0.275 → 0.300 m | **no design** — 415 iters, full 30.92 min | — |
+| *+20 g reference bump* | 104.400 | −1.418 → **−0.0709 min/g** |
+
+**The two that matter are the payload and the span**, and both are decisions this
+model cannot make: the payload is why the aeroplane exists (`priced, never
+adopted`, and the call on main is that it is fitted), and the 2.0 m cap prices
+transport, storage, hand-launch and the print bed, none of which is in the model.
+
+The three pod/stability levers are real but small — about a minute each, and
+under half a minute for the boat tail.
+
+**The 20 g shadow price does not extrapolate to the payload step.** −0.0709 min/g
+predicts +13.6 min for 192 g; the measurement is +7.9. That is the re-optimization
+the local derivative cannot see, and it is the reason `screen_discrete` is a
+shortlister rather than a verdict.
+
+**The chord cap is binding only BECAUSE span is capped.** At 2.2 m the design
+comes off both — neither `span` nor `c_root` is pinned any more, only
+`ballast_kg` and `cs_frac`. Dropping the payload does the same thing. So `c_root`
+is never the lever: it is a symptom of whichever of the other two is holding.
+
+**The static-margin floor binds but is nearly worthless to relax**: giving up
+0.03 — over a third of the required 0.08 — buys 51 seconds.
+
+**Raising the chord cap alone is not a remedy.** It is the one genuine corner
+this study found: a plateau short of feasible (`inf_pr` progress over the last 25
+iterations, −2×10⁻⁶), dominated by
+
+    aircraft.py:1138  usable_nose / motor["length"] >= 1.0   short by 5.14e-02
+
+nearly 8× the next row (lift equilibrium). At a 300 mm root chord the nose can
+no longer be made long enough to hold the motor.
+
+### What that row actually is, at the champion
+
+`usable_nose` is not "how long the nose is". From `nose_split`:
+
+    r_req       = can_width / d_min
+    behind      = sqrt(1 - r_req^2)
+    usable_nose = pod_nose * behind
+
+so the length available for the motor **collapses to zero as the pod section
+approaches the can's diameter**, however long the nose is. Evaluated on the
+champion's own design vector (no solve — this is arithmetic):
+
+| | |
+|---|---|
+| pod section | `pod_xs` **0.874**, d_eq 67.64 mm — SMALLER than the 77.4 mm spec |
+| section shape | `pod_wh` **1.0017** — square to four decimal places |
+| narrow dimension | height, 67.58 mm; can needs 49.00 mm, `r_req` 0.7252 |
+| nose | `pod_nose` 74.07 mm, of which the cone eats 23.07 |
+| **usable nose** | **51.00 mm against a 51.00 mm can — slack −0.00 mm** |
+
+**The square section is not a coincidence, it is the optimum.** `pod_xs` sizes
+the section and `pod_wh` shapes it, orthogonally: `w*h = d_eq^2` whatever the
+ratio. At constant area a square MAXIMISES the narrow dimension, which is the
+one the motor can has to pass through — so the optimizer has already found the
+best shape this row can be given, and the design sits exactly on the row anyway.
+
+Sensitivities at that point, per +5%:
+
+| | usable nose |
+|---|---|
+| `pod_xs` (section size) | **+2.57 mm** |
+| `pod_nose` (nose length) | +2.55 mm |
+| `pod_wh` (section shape) | **−1.42 mm** |
+
+`pod_wh` going the WRONG way is the trap: past 1.0 the height becomes the narrow
+dimension and shrinks. Anyone reaching for "widen the pod" should widen `pod_xs`,
+not `pod_wh`.
+
+So the pod is squeezed DOWN by drag and held UP by the motor can, with its shape
+already optimal — which is why the two length levers (§5) buy about a minute
+each and no more.
+
+**That row is the one to work on, and it is not in HANDOFF's list of four.** The
+2026-08-07 battery reached the same conclusion independently: **five of its six
+failures name `aircraft.py:1138` as their closest miss**, by 1.4 to 3.3 mm of
+usable nose. Two machines, two routes, same row. `POD_LENGTH_RELAXATIONS` in
+`tools/price_caps.py` is where that lead is being followed.
+
+## 5b. Stage F — a hard span floor, and a proof that was one iteration away
+
+| span | result |
+|---|---|
+| 2.00 m | 105.818 (re-derives `nominal` exactly) |
+| 1.94 m | 104.336 |
+| 1.88 m | 99.517 |
+| 1.82 m | **no design** — 176 iters, full budget, *"dual blow-up: stuck"* |
+| 1.76 m | **no design** — 183 iters, full budget, *"dual blow-up: stuck"* |
+| 1.70 m | **`Infeasible_Problem_Detected`** — proved |
+
+So three of the battery's four lost spans come back, one is a genuine corner,
+and the sweep is **not flat on the low side**: the first 60 mm below the cap
+costs 1.48 min, the second costs 4.82, and below ~1.85 m there is no aeroplane.
+The dominant miss is lift equilibrium throughout, and it grows monotonically as
+span shrinks (4.68e-02 at 1.82, 5.31e-02 at 1.76) — which is the direct evidence
+for the interval-feasibility assumption `flatness_sweep`'s downward cascade
+rests on, and which had been an argument rather than a measurement.
+
+### The cascade is not dead code — it has never been given eight seconds
+
+`flatness_sweep`'s docstring records that the infeasibility gate has never once
+fired: *"on THIS model that proof has never arrived… every failure ever
+recorded, in every run, is `Maximum_WallTime_Exceeded`, so the 2026-07-31 sweep
+spent 130.6 minutes on four spans and skipped none."*
+
+The same member, same tree, same configuration, at two budgets:
+
+| budget | outcome | after |
+|---|---|---|
+| 15 min | `Maximum_WallTime_Exceeded` | 16.04 min, **192 iterations** |
+| 30 min | **`Infeasible_Problem_Detected`** | 16.16 min, **193 iterations** |
+
+**One iteration.** The certificate was ~8 seconds past where the budget cut it
+off, and the convergence trace had said so in words — *"still converging when the
+clock stopped, the one case where a larger `--solve-timeout-min` may actually
+pay"*. It is the one case, and it paid.
+
+`FLATNESS_TIMEOUT_MIN` is 20 minutes and this member wanted 16.2, so the shipped
+sweep would have got the proof here. What it would NOT have got is the two
+neighbours above (1.82, 1.76 both grind their whole budget and read STUCK), and
+the cascade only skips spans BELOW a proof — so the proof arriving at the BOTTOM
+of the range saves nothing. **The value is in the budget being long enough at the
+first infeasible span, not at the last.** On this sweep that is 1.82 m, and it
+did not certify in 16 minutes.
+
+### Measured, and it says leave the constant alone
+
+The obvious next move was to raise `FLATNESS_TIMEOUT_MIN`. **That was proposed
+here three hours before it was measured, and the measurement kills it.** Same
+member, 1.82 m — the FIRST infeasible span, the only one where a proof would
+actually pay:
+
+| budget | outcome | iterations |
+|---|---|---|
+| 15 min | wall-time | 176 |
+| 60 min | wall-time | **677** |
+
+Four times the clock, no certificate, and the dual side blew up doing it:
+`inf_du` reached **3.6e+16** and `inf_pr` went BACKWARDS over the last 25
+iterations (−0.134). The trace's verdict changed accordingly — *"dual blow-up:
+the multipliers diverged while the primal side sat still. Stuck, not slow — more
+clock buys nothing"* — which is §14.5.7's finding reproduced on a different
+member of a different aircraft.
+
+So the 1.70 m proof was **luck of that geometry**, not something a longer budget
+generally buys. `FLATNESS_TIMEOUT_MIN` stays at 20: raising it would spend real
+minutes on every sweep chasing a certificate that does not arrive where it would
+be worth anything.
+
+One thing did change at 60 minutes: the dominant violation flipped from lift
+equilibrium to **`usable_nose / motor["length"] >= 1.0`, by 1.21e-01**. That is
+the third independent appearance of that row — the chord-cap corner (§5), the
+2026-08-07 battery's five-of-six failures, and now the deepest flatness corner.
+
+## 5c. The greedy state, and what it does to §2's headline
+
+§2 measured every member in the configuration it DECLARES. A battery does not
+run them there: the studies run in declared order, each carrying the previous
+studies' adopted values, so by the time `tail_type` is judged the aeroplane is
+already carrying the prop the prop study adopted. Same label, different
+aeroplane. That caveat was recorded in §6.2 as small; **it is not small, and
+closing it changed the answer.**
+
+`screen` ranks `ancf_12x10` first of 65 candidates at the champion's own
+operating point and its own shadow price — and it is what the 2.0 m sample
+battery adopted. Re-running every member there:
+
+| member | declared baseline | greedy (12x10) |
+|---|---|---|
+| `nominal` | 105.818 | **122.081** |
+| `tail_conventional` | 100.867 | **115.277**, 3.29 min |
+| `tail_ttail` | 98.118 | **110.656**, 3.88 min |
+| `fuselage_integrated` | 102.001 | **116.715**, 2.44 min |
+| `dihedral_polyhedral2` | 103.362, 2.68 min | **NO DESIGN** — 376 iters, full budget |
+| `printed_mass_x1.10` | 96.504, 2.74 min | **NO DESIGN** — 359 iters, full budget |
+
+**Six of six converge at the declared baseline; four of six in the state that
+matters.** §2's "the corners do not reproduce" was true of the aeroplane it
+measured and misleading about the aeroplane the battery ran.
+
+The two that fail are genuine, on the same evidence used throughout: full
+budget, hundreds of iterations, and a STUCK reading rather than a cut-off one.
+And `printed_mass_x1.10` reproduces HANDOFF's diagnosis of that exact member
+precisely — dominated by lift equilibrium (1.316) then the static-margin floor
+(8.4e-02), which is the order HANDOFF records (0.268, then 0.047). The original
+reading of it was right.
+
+`dihedral_polyhedral2`'s closest miss is `usable_nose / motor["length"] >= 1.0`
+by 3.93e-02, with the electronics-stack row (`equipment.py:383`) behind it — the
+**fourth** independent appearance of the nose-and-motor row. The 12x10 is heavier
+and further forward than the incumbent, which tightens exactly that packing.
+
+### A free validation of the screen
+
+`screen_discrete` asserts that a screened attribute changes nothing the airframe
+solve fixed. For `prop_choice` that has been declared since M5.3 and never
+checked against its own re-solve. The screen predicted **122.042** for the
+adopted prop; the full re-optimization returns **122.081** — 0.03%.
 
 | relaxation | objective | vs 105.818 | note |
 |---|---|---|---|
+| `span_cap` 2.0 → 2.2 m | **110.990** | **+5.172 min** | a BUILD decision, already settled at 2.0 |
+| **`fineness_max` 8 → 9** | **106.895** | **+1.076 min** | lands exactly on the new ceiling |
 | SM floor 0.08 → 0.05 | **106.669** | **+0.851 min** | lands exactly on the new floor |
-| `c_root` 0.275 → 0.300 | *re-measuring* | | slept through |
-| `span_cap` 2.0 → 2.2 | *re-measuring* | | slept through |
-| kit `full` → `core` | *re-measuring* | | slept through |
+| **boat-tail 1.8 → 1.5 d_eq** | **106.270** | **+0.452 min** | saturated — see below |
+| `c_root` 0.275 → 0.300 | **fails** | | genuine corner, on the motor row |
+| **payload dropped** (`airframe_only`, −192 g) | **113.725** | **+7.907 min** | the biggest lever, and not one the model may pull |
 
-The one clean number so far says the static-margin floor **binds but is nearly
-worthless to relax**: giving up 0.03 of static margin — over a third of the
-required 0.08 — buys 51 seconds of endurance.
+**The static-margin floor binds but is nearly worthless to relax**: giving up
+0.03 of margin — over a third of the required 0.08 — buys 51 seconds.
+
+> ### The most valuable lever here is a MODEL-VALIDITY BOUND, not a requirement
+>
+> `fineness_max = 8` is worth **more than giving up a third of the static
+> margin**, and unlike the SM floor, the span cap or the chord cap it protects
+> nothing about the aeroplane. It exists because the Hoerner form factor keeps
+> falling to f ≈ 16 while the real minimum-drag band for a body of revolution is
+> f ≈ 6–7, so past 8 the drag model is not trusted. The optimizer is buying
+> 1.08 minutes by going somewhere the model cannot vouch for — which is what
+> that row's own comment means by *"landing on it is a defect report, not an
+> optimum"*. **Raising it is not a design decision available to the user; it is
+> a request for a better fuselage drag model.**
+>
+> **It also does not mean a longer pod.** Given the extra allowance the
+> optimizer made the pod *thinner*: d_eq 67.64 → 61.99 mm (−8.4%) against a
+> length of 541 → 558 mm (+3.1%), for −14 g of AUW. Less wetted area, not more.
+
+### Three things every one of these cells agrees on
+
+Measured on the WSL box at `913d2bc`, one process per cell.
+
+1. **The bay is 345.30 mm in all three, to the micron.** It is set by the parts
+   list and nothing else moves it.
+2. **The motor row stays EXACTLY binding in all three** (`usable_nose` slack
+   ≤ 0.2 µm). No length these levers buy reaches the nose — the optimizer spends
+   every millimetre of it on slenderness until the motor row stops it again. So
+   **neither lever should be expected to unstick the failing members**, and
+   whether they do is stage D, which is unmeasured.
+3. **`boat_tail_1.5` never reached 1.5.** `pod_tail` landed on its own BOX lower
+   bound of 100 mm, leaving the relaxed row 1.53 mm of slack and inactive. So
+   +0.452 min is the *saturated* value of that lever — the whole of what
+   relaxing the row can buy given the box — and any floor at or below
+   1.523·d_eq returns the same number. Reported this way because "the price of
+   1.8 → 1.5" would be a claim about a row that was not active at the answer.
+
+## 5d. The rescale, measured instead of argued
+
+§6.1 blamed part of the battery's losses on the ordering-row rescale that was
+reverted five hours after it started. Measured directly: the current tree
+against the same tree with `1363ea8` reverted (the rescale re-applied), in an
+isolated worktree so nothing else differs.
+
+| member | raw row (current) | rescaled row | ratio |
+|---|---|---|---|
+| `nominal` | 105.818385 / 2.80 min | 105.818383 / 2.87 min | 1.03x |
+| `tail_conventional` | 100.867014 / 4.73 min | 100.867012 / 6.43 min | **1.36x** |
+
+**Solution-preserving, confirmed independently**: the objectives agree to
+1.97e-08 and 1.83e-08 relative, inside the 2.4e-08 to 1.3e-07 the revert commit
+claimed.
+
+**The time cost is real but member-dependent** — invisible on the easy member,
++36% on the harder one, bracketing the ~45% that commit measured. Which bounds
+what it can explain: it turns a 12-minute member into a 17-minute one, so it can
+push a member that was ALREADY near its budget over the edge (which is what it
+did to `winglet_study__continuous_cant`), and it cannot turn a 3-minute member
+into a member that produces nothing.
+
+### So the 69% is a mixture, and all three parts are now measured
+
+| cause | evidence |
+|---|---|
+| genuine corners | 2 of 6 members in the greedy state, full budget, STUCK |
+| the reverted rescale | +36% on a harder member, enough to push a near-budget member over |
+| idle sleep | §4 — but only if that machine slept; checkable in its own artifact |
+
+No single one of them accounts for it, and **none of them is a cap**.
+
+## 5e. Stage D — the corners priced, which is what this study was for
+
+Every earlier section prices a lever on a design that already **solves**. The
+question the study exists to answer is the other one: what unsticks a member
+that does not. Both genuine corners (§5c), in the greedy state, against all six
+levers — 12 cells, one process each, `caffeinate` and the lid open.
+
+| lever | `dihedral_polyhedral2` | `printed_mass_x1.10` |
+|---|---|---|
+| payload dropped | **129.911** (10.4 min) | **126.310** (5.5 min) |
+| `span_cap` → 2.2 m | 126.453 (3.0) | 123.199 (7.3) |
+| `fineness_max` → 9.0 | 120.256 (2.7) | 104.886 (2.8) |
+| `c_root` → 0.300 m | 119.829 (3.0) | 116.258 (14.6) |
+| SM floor → 0.05 | 119.762 (27.0), margin given up | **no design** — 396 it |
+| `boat_tail` → 1.5 | 119.409 (2.8) | **no design** — 420 it |
+| *(none)* | no design — 376 it | no design — 359 it |
+
+### Four findings, two of which correct earlier sections of this study
+
+**1. Payload then span, on all three data sets.** `nominal` (§5), and now both
+corners, rank the levers the same way. That is the most replicated result here —
+and both leaders are decisions the model explicitly cannot make.
+
+**2. The static-margin window is the WORST lever available.** It is the one
+HANDOFF frames as the stability remedy. On one corner it is last of five that
+work AND gives up over a third of the required margin AND takes nine times
+longer to solve; on the other it does not work at all. Nothing in this study
+supports moving it.
+
+**3. The corners are not the same problem, so there is no single answer.**
+`dihedral_polyhedral2` yields to every lever; `printed_mass_x1.10` refuses two.
+A cap that frees one member can be the cap with no design behind it on another —
+`c_root_0.300` is a 3-minute fix on the dihedral corner and is §5's one genuine
+failure on `nominal`. "Raise cap X" is not a well-formed remedy at this
+aeroplane's operating point.
+
+**4. `fineness_max` unsticks BOTH corners, which contradicts the prediction it
+was measured against.** `c37ee07` reasoned that neither pod-length lever should
+be expected to unstick a failing member, because the motor row stays exactly
+binding in every stage-B cell (slack ≤ 0.2 µm) and every millimetre bought goes
+to slenderness rather than nose margin. That reasoning is sound on a design that
+solves, and it does not carry to one that does not: on both corners
+`fineness_9.0` converges, and it is the FASTEST lever on both (2.7 and 2.8 min).
+On `printed_mass_x1.10` it also produces much the worst aeroplane (104.886
+against span's 123.199) — it frees the corner cheaply and leaves a bad design,
+which is a different thing from being the right lever.
+
+> **`boat_tail_1.5` inherits `c37ee07`'s saturation caveat.** That lever never
+> reaches 1.5 — `pod_tail` lands on its own box lower bound of 100 mm and leaves
+> the relaxed row inactive — so 119.409 on the dihedral corner is the SATURATED
+> value, and the `printed_mass` failure is a failure of *whatever the box
+> allows*, not of a 1.5 d_eq boat tail.
+
+### And a correction to this study's own instrument
+
+§5c called `usable_nose / motor["length"] >= 1.0` the row that blocks this
+aeroplane, on a count of four independent corners. With all 12 corner cells in,
+`tools/price_caps.py misses` ranks **lift equilibrium first (4 stuck cells) and
+`usable_nose` second (3)**.
+
+More importantly, **the closest-miss row does not predict which lever frees a
+corner**, and this study has a direct counterexample: `printed_mass_x1.10` misses
+on lift equilibrium and is freed by a pod-length lever anyway. So the tally is a
+signal about where solves stall, and it is NOT a shortlist of what to fix. It is
+reported that way now.
 
 ## 6. What the converged rows do NOT license
 
 **Not "the caps are fine."** They license "these six members are not cap-blocked
-on the current tree." Two differences from the battery are unresolved:
+on the current tree." Two differences from the battery remain unresolved:
 
-1. **The battery ran on a tree that has since been reverted.** It started
-   2026-08-06 03:17; the ordering-row rescale was reverted at 08:22 the same day
-   (`1363ea8`). That rescale was solution-preserving and cost ~45% of solve time
-   — on its own enough to push a converging member past a 30-minute budget,
-   which is what it did to `winglet_study__continuous_cant`.
-2. **The battery's studies run greedily**, so its `tail_conventional` carried the
-   adopted prop and topology; these cells carry the declared baseline
-   (`ancf_11x6`). Same label, different aeroplane. `solve.screen_discrete` ranks
-   the prop catalogue with no NLP at all, so closing this is cheap — it is not
-   closed yet.
+1. **The battery ran on a tree since reverted.** It started 2026-08-06 03:17; the
+   ordering-row rescale was reverted at 08:22 the same day (`1363ea8`). That
+   rescale was solution-preserving and cost ~45% of solve time — on its own
+   enough to push a converging member past a 30-minute budget, which is what it
+   did to `winglet_study__continuous_cant`.
+2. ~~The battery's studies run greedily~~ — **CLOSED, see §5c.** It was the
+   caveat that mattered: two members that converge at the declared baseline have
+   no design at all in the greedy state.
 
-Between them and §4, there are now **three** candidate explanations for the 69%,
-and none of them is a cap.
+Both are now measured (§5c, §5d), and the 69% is a mixture of three causes, none
+of which is a cap.
 
 ## 7. Reproducing
 
@@ -188,3 +582,21 @@ command line named one and could not run.)
 committed with this study are under `docs/`, so reading THEM takes the override:
 
     PRICE_CAPS_OUT=docs/studies/rcv2_cap_pricing uv run python tools/price_caps.py report
+
+## 8. Still open
+
+Stage D is measured (§5e), so the question this study was built for is answered.
+What remains:
+
+| | |
+|---|---|
+| the span floor | known to lie between 1.82 and 1.88 m; not bisected |
+| flatness relaxations | never run against the stuck spans — deliberately deprioritised, since the design sits on the 2.0 m cap regardless |
+| `fineness_max` | §5e finds it unsticks both corners, and `c37ee07` shows raising it is a request for a better fuselage drag model rather than a decision the user can make. FUSELAGE_DRAG_PLAN tiers 2-3 are worth more than that plan estimated |
+| the 2026-08-07 battery's other losses | `winglet_off`, `winglet_continuous_cant` and the perturbed multistarts are expressible now (`cbd43e2`) and unpriced |
+
+**The headline for whoever picks this up:** none of the four caps HANDOFF names
+is a good answer. The two levers worth real minutes are the payload and the span
+cap, both of which are the user's call and neither of which the model can
+evaluate; the static-margin window is the worst lever measured; and the caps
+interact with the member, so there is no single cap to raise.

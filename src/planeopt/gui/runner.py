@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
-from .jobs import Job, JobState, parse_run_dir, program_and_args
+from .jobs import Job, JobState, parse_run_dir, program_and_args, reserve_live_dir
 
 
 def _was_paused(job: Job) -> bool:
@@ -103,6 +103,15 @@ class RunQueue(QObject):
         """
         if job.state is not JobState.PAUSED:
             return False
+        # A job restored from a pre-2026-08-08 queue file has had its shared
+        # live-frame directory dropped by `queuestore.load` (it would have
+        # adopted another run's frames). Give it one of its own here rather than
+        # at load, so opening the app does not create directories for jobs
+        # nobody resumes.
+        if job.live_dir is None:
+            job.live_dir = reserve_live_dir(
+                job.runs_dir, job.mission.stem, job.aircraft.name
+            )
         job.state = JobState.QUEUED
         job.exit_code = None
         self.queue_changed.emit()

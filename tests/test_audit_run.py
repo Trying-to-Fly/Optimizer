@@ -119,3 +119,118 @@ def test_the_audit_never_raises_on_either_source(tmp_path, capsys, source):
         capsys,
         diagnostics={"design_source": "parametric", "candidates_source": source},
     )
+
+
+# --- the diagnostics added 2026-08-07, which the aid was blind to ----------
+#
+# Both were added to `run.json` the same day and the reading aid was not
+# updated with them — the identical defect fixed above, one session later.
+
+
+def test_a_shadow_price_from_the_wrong_aeroplane_is_called_out(tmp_path, capsys):
+    """The +20 g bump is re-solved on the shipped design so the quoted rate is
+    ITS rate. When that solve fails the value falls back to the multistart
+    screen's, measured before the studies chose the design — and the artifact
+    reports the number either way."""
+    out = audit_text(
+        tmp_path,
+        capsys,
+        performance={
+            "objective_units": "min",
+            "best": {"objective_value": 122.12, "V_ms": 9.5},
+            "optimization": {
+                "shadow_price_obj_per_gram": -0.07094,
+                "shadow_price_source": {
+                    "source": "multistart_screen",
+                    "measured_on_objective": 105.818,
+                    "reported_beside_champion": 122.123,
+                    "final_bump_failed": "Maximum_WallTime_Exceeded",
+                },
+            },
+        },
+    )
+    assert "NOT THIS DESIGN'S RATE" in out
+    assert "105.818" in out and "122.123" in out
+
+
+def test_a_shadow_price_measured_on_the_shipped_design_is_not_accused(tmp_path, capsys):
+    out = audit_text(
+        tmp_path,
+        capsys,
+        performance={
+            "objective_units": "min",
+            "best": {"objective_value": 122.12, "V_ms": 9.5},
+            "optimization": {
+                "shadow_price_obj_per_gram": -0.0711,
+                "shadow_price_source": {"source": "final_design"},
+            },
+        },
+    )
+    assert "from final_design" in out
+    assert "NOT THIS DESIGN'S RATE" not in out
+
+
+def test_a_binding_pod_limit_is_reported(tmp_path, capsys):
+    """Neither limit can appear in `active_bounds` — that reports design-variable
+    BOX bounds and both of these are constraint rows — so if the aid does not
+    print them, nothing does."""
+    out = audit_text(
+        tmp_path,
+        capsys,
+        diagnostics={
+            "design_source": "parametric",
+            "candidates_source": "legal",
+            "afterbody": {
+                "fineness": 8.00000008, "fineness_max": 8.0,
+                "fineness_ceiling_active": True,
+                "boat_tail_d_eq": 1.7999998, "boat_tail_min_d_eq": 1.8,
+                "boat_tail_floor_active": True, "theta_max_deg": 18.91,
+            },
+        },
+    )
+    assert "FINENESS CEILING BINDING" in out
+    assert "BOAT-TAIL FLOOR STILL ACTIVE" in out
+    assert "do NOT delete the floor" in out
+
+
+def test_pod_limits_clear_of_their_bounds_are_reported_quietly(tmp_path, capsys):
+    out = audit_text(
+        tmp_path,
+        capsys,
+        diagnostics={
+            "design_source": "parametric",
+            "candidates_source": "legal",
+            "afterbody": {
+                "fineness": 6.20, "fineness_max": 8.0,
+                "fineness_ceiling_active": False,
+                "boat_tail_d_eq": 2.4, "boat_tail_min_d_eq": 1.8,
+                "boat_tail_floor_active": False, "theta_max_deg": 13.0,
+            },
+        },
+    )
+    assert "f=6.2" in out
+    assert "BINDING" not in out and "STILL ACTIVE" not in out
+
+
+def test_an_older_artifact_says_it_is_older_rather_than_reading_as_clean(
+    tmp_path, capsys
+):
+    """The 20260807T061330 battery predates both fields. Silence there would be
+    indistinguishable from "measured, and fine" — which is the exact confusion
+    this whole file exists to prevent."""
+    out = audit_text(
+        tmp_path,
+        capsys,
+        performance={
+            "objective_units": "min",
+            "best": {"objective_value": 122.6, "V_ms": 9.5},
+            "optimization": {"shadow_price_obj_per_gram": -0.0709},
+        },
+        diagnostics={
+            "design_source": "parametric",
+            "candidates_source": "legal",
+            "afterbody": {"fineness": 8.00000008, "theta_max_deg": 18.91},
+        },
+    )
+    assert "no provenance recorded" in out
+    assert "artifact predates them" in out

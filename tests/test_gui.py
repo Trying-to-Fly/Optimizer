@@ -7,6 +7,7 @@ running the app, not by asserting on pixels.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
@@ -17,6 +18,21 @@ import pytest
 from planeopt.gui import jobs, missionfile, runindex
 from planeopt.gui.workspace import Workspace, resolve
 from planeopt.types import MissionSpec
+
+
+def _gui(name: str):
+    """Import a `planeopt.gui` module, SKIPPING when the `gui` extra is absent.
+
+    The tests below exercise pure logic and say so — `RunQueue.__new__`, "no Qt
+    event loop needed" — but the module they reach through imports PySide6 at
+    import time, so without the extra they FAILED where every sibling skips
+    (test_fonts, test_liveview, test_newrun_dialog, and lines 449 and 584 of
+    this file). Nine red tests on a machine that simply has not installed a
+    heavy optional dependency is how a real regression goes unnoticed.
+    """
+    pytest.importorskip("PySide6.QtCore")
+    return importlib.import_module(f"planeopt.gui.{name}")
+
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -107,6 +123,118 @@ def test_corrupt_run_json_does_not_break_the_scan(tmp_path):
     assert runindex.scan(tmp_path)[0].error
 
 
+def _renderable(summaries):
+    """Every field the run tree and the detail pane touch."""
+    for s in summaries:
+        assert isinstance(s.objective_text, str)
+        assert isinstance(s.label, str)
+        assert isinstance(s.active_constraints, list)
+        assert isinstance(s.violated_constraints, list)
+        s.has_report, s.has_3d  # noqa: B018
+
+
+@pytest.mark.parametrize("body", ["null", "[1, 2, 3]", '"a run"', "42"])
+def test_json_that_is_not_a_run_record_costs_one_flagged_row(tmp_path, body):
+    """Valid JSON, but not an object — nothing below can read it.
+
+    The runs list is fed by any folder holding a `run.json`, so it reads
+    artifacts this app did not write. `{not json` was already caught; this was
+    not, and it raised out of `scan` and emptied the whole list.
+    """
+    _write_run(tmp_path, "20260725T120000")  # a good run, which must survive
+    bad = tmp_path / "20260726T120000-not-a-record"
+    bad.mkdir()
+    (bad / "run.json").write_text(body, encoding="utf-8")
+
+    summaries = runindex.scan(tmp_path)
+    assert len(summaries) == 2, "the good run was lost with the bad one"
+    wrong, good = summaries  # newest first
+    assert wrong.error, "a file that is not a run record must say so"
+    assert good.objective_text == "110.0 min", "the good run still reads"
+    _renderable(summaries)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"constraints": [1, 2]},
+        {"constraints": "none"},
+        {"masses": "heavy"},
+        {"geometry": 3},
+        {"performance": []},
+        {"performance": {"best": []}},
+        {"aircraft": 7, "status": 3},
+    ],
+    ids=lambda o: "+".join(sorted(o)),
+)
+def test_a_wrong_typed_block_reads_as_blank_not_a_crash(tmp_path, overrides):
+    """`data.get("masses") or {}` covers a MISSING or null block and nothing
+    more: one that is present but is a list, a string or a number sailed through
+    and raised on the next `.get` — out of `scan`, taking every other run with
+    it. This module's contract is the opposite ("must list those rather than
+    refuse to start"), so the row renders with whatever it could read.
+    """
+    _write_run(tmp_path, "20260725T120000")
+    _write_run(tmp_path, "20260726T120000", **overrides)
+
+    summaries = runindex.scan(tmp_path)
+    assert len(summaries) == 2
+    _renderable(summaries)
+    assert summaries[1].objective_text == "110.0 min", "the good run still reads"
+
+
+def test_a_non_numeric_objective_reads_as_a_dash_not_a_crash(tmp_path):
+    """`objective_text` is built while the tree is being filled in, so a
+    ValueError there empties the list rather than one cell."""
+    _write_run(
+        tmp_path, "20260725T120000",
+        performance={"objective_units": "min", "best": {"objective_value": "n/a"}},
+    )
+    assert runindex.scan(tmp_path)[0].objective_text == "—"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"performance": "fast"},
+        {"masses": [1, 2]},
+        {"geometry": 3},
+        {"masses": {"auw_kg": 1.0, "equipment": "none"}},
+        {"performance": {"optimization": [1]}},
+        {"performance": {"optimization": {"discrete_studies": [1]}}},
+        {"performance": {"optimization": {"priced_options": {"tail": "no"}}}},
+    ],
+    ids=lambda o: "+".join(sorted(o)),
+)
+def test_the_detail_pane_survives_a_wrong_typed_block(tmp_path, overrides):
+    """`show_run` reads the same blocks `summarize` does and had the same hole,
+    but it runs inside a SELECTION SLOT — on a run the user has just clicked."""
+    views = _gui("views")
+    _gui("window")  # a QApplication has to exist before any widget
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+
+    run = _write_run(tmp_path, "20260725T120000", **overrides)
+    views.DetailView().show_run(runindex.summarize(run))
+
+
+def test_a_string_note_is_one_bullet_not_one_per_character(tmp_path):
+    """A bare string is iterable, so `notes: "one note"` drew a bullet per
+    character — thirty-three labels for one sentence."""
+    views = _gui("views")
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    QApplication.instance() or QApplication([])
+
+    run = _write_run(tmp_path, "20260725T120000", notes="a single note as a string")
+    pane = views.DetailView()
+    pane.show_run(runindex.summarize(run))
+
+    bullets = [w.text() for w in pane.findChildren(QLabel) if w.text().startswith("\u2022 ")]
+    assert bullets == ["\u2022 a single note as a string"]
+
+
 def test_scan_of_a_missing_root_is_empty(tmp_path):
     assert runindex.scan(tmp_path / "nope") == []
 
@@ -146,6 +274,62 @@ def test_the_shipped_sample_mission_loads(tmp_path):
     # and re-rendering it produces a module that loads back identically
     reloaded = missionfile.load(missionfile.save(mission, tmp_path / "again.py"))
     assert reloaded.static_margin_range == mission.static_margin_range
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("endurance_sample", "endurance_sample.py"),
+        # A slash reads as a UNIT to a human and as a PATH to the filesystem.
+        # This one created `missions/endurance 3m/` and hid the module inside it,
+        # where `workspace.missions()` — a non-recursive glob — never sees it.
+        ("endurance 3m/s wind", "endurance_3m_s_wind.py"),
+        ("endurance (2026-08-08)", "endurance_2026-08-08.py"),
+        ("Bob's mission", "Bob_s_mission.py"),
+        ("wind\nspeed", "wind_speed.py"),
+        ("   ", "mission.py"),
+        ("", "mission.py"),
+    ],
+)
+def test_a_mission_name_is_confined_to_the_missions_directory(tmp_path, name, expected):
+    missions = tmp_path / "missions"
+    missions.mkdir()
+    path = missionfile.path_for(missions, MissionSpec(name=name, objective="endurance"))
+
+    assert path.name == expected
+    assert path.parent == missions, "a name must not choose its own directory"
+
+
+def test_a_name_cannot_climb_out_of_the_missions_directory(tmp_path):
+    """`../aircraft/aircraft` wrote OUTSIDE missions/ and overwrote a real
+    aircraft definition — the dialog's name field is free text."""
+    missions = tmp_path / "missions"
+    missions.mkdir()
+    victim = tmp_path / "aircraft"
+    victim.mkdir()
+    (victim / "aircraft.py").write_text("REAL = 'do not clobber'\n", encoding="utf-8")
+
+    mission = MissionSpec(name="../aircraft/aircraft", objective="endurance")
+    missionfile.save(mission, missionfile.path_for(missions, mission))
+
+    assert (victim / "aircraft.py").read_text(encoding="utf-8") == "REAL = 'do not clobber'\n"
+    assert not list(victim.glob("*.py.bak"))
+    assert [p.name for p in missions.glob("*.py")] == ["aircraft_aircraft.py"]
+
+
+def test_a_name_with_a_triple_quote_still_produces_a_module_that_loads(tmp_path):
+    """The name is rendered into the module's docstring, so a triple quote made
+    a file that would not parse. The dialog accepted it, queued the job, and the
+    child died on a SyntaxError before it ever read the aircraft."""
+    mission = MissionSpec(name='quoted """ name', objective="endurance", v_wind_ms=4.0)
+    path = missionfile.save(mission, missionfile.path_for(tmp_path, mission))
+
+    loaded = missionfile.load(path)
+    assert loaded.objective == "endurance"
+    assert loaded.v_wind_ms == 4.0
+    # The name the user typed survives verbatim in the field, which is the
+    # authoritative record — only the FILENAME and the docstring are sanitised.
+    assert loaded.name == 'quoted """ name'
 
 
 # --- job commands -------------------------------------------------------
@@ -213,7 +397,7 @@ def test_the_live_frame_directory_reaches_the_child(tmp_path):
 def test_pause_writes_the_sentinel_only_for_the_running_job(tmp_path):
     """Pause must never kill: it asks, and the run stops at a boundary it
     chooses. A queued (not yet started) job has nothing to ask."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue = runner.RunQueue.__new__(runner.RunQueue)  # no Qt event loop needed
     pause_path = tmp_path / "ckpt" / "m.PAUSE"
@@ -237,7 +421,7 @@ def test_the_dialog_default_matches_the_solver_default():
     """newrun copies the number instead of importing planeopt.solve (which drags
     in aerosandbox and would stall the dialog). Copies drift; this pins them."""
     from planeopt import solve
-    from planeopt.gui import newrun
+    newrun = _gui("newrun")
 
     assert newrun.SOLVE_TIMEOUT_MIN_DEFAULT == solve.SOLVE_TIMEOUT_MIN
 
@@ -331,7 +515,7 @@ def _paused_queue(tmp_path, stdout: str = "PAUSED — stopped at a member bounda
     Built without a Qt event loop: `_on_finished` is the whole of what the queue
     does when a child ends, and it is pure state.
     """
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue = runner.RunQueue.__new__(runner.RunQueue)
     pause_path = tmp_path / "ckpt" / "m.PAUSE"
@@ -347,7 +531,7 @@ def test_a_paused_job_is_not_reported_as_done(tmp_path, monkeypatch):
     """The child EXITS 0 on a pause — deliberately, so a shell loop does not read
     it as a crash — so without a state of its own a paused battery showed the
     same '✓ done' as a finished one, with no way back to it."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, pause_path = _paused_queue(tmp_path)
     pause_path.write_text("pause requested", encoding="utf-8")
@@ -364,7 +548,7 @@ def test_a_finished_job_is_still_done_even_if_a_pause_was_requested_late(tmp_pat
     """The sentinel alone is not enough: a pause asked for after the last member
     started leaves the file behind on a run that finished and wrote artifacts.
     That run has a run directory, and a run directory means DONE."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     run_dir = tmp_path / "20260804T120000-endurance_sample-fixture"
     run_dir.mkdir(parents=True)
@@ -382,7 +566,7 @@ def test_a_finished_job_is_still_done_even_if_a_pause_was_requested_late(tmp_pat
 def test_an_ordinary_finish_is_not_mistaken_for_a_pause(tmp_path, monkeypatch):
     """No sentinel on disk — `cli.optimize` unlinks it at startup — so a run that
     was never paused must not acquire the state."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, _ = _paused_queue(tmp_path, stdout="status: M3\n")
     monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
@@ -398,7 +582,7 @@ def test_resume_requeues_the_same_job_rather_than_a_new_one(tmp_path, monkeypatc
     directory. Re-filling the New Run dialog by hand is the alternative, and a
     field typed differently would not fail loudly; it would produce one artifact
     from two configurations."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, _ = _paused_queue(tmp_path)
     job.state, job.exit_code = jobs.JobState.PAUSED, 0
@@ -413,7 +597,7 @@ def test_resume_requeues_the_same_job_rather_than_a_new_one(tmp_path, monkeypatc
 
 
 def test_only_a_paused_job_can_be_resumed(tmp_path, monkeypatch):
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, _ = _paused_queue(tmp_path)
     monkeypatch.setattr(runner.RunQueue, "queue_changed", _Signal())
@@ -427,7 +611,7 @@ def test_only_a_paused_job_can_be_resumed(tmp_path, monkeypatch):
 def test_resume_leaves_the_sentinel_for_the_cli_to_clear(tmp_path, monkeypatch):
     """One owner for that file. `cli.optimize` unlinks it at startup and says so,
     which is what makes a CLI resume and a GUI resume behave identically."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue, job, pause_path = _paused_queue(tmp_path)
     pause_path.write_text("pause requested", encoding="utf-8")
@@ -465,7 +649,12 @@ def test_a_paused_job_survives_closing_the_app(tmp_path):
 
     job = _job(tmp_path, checkpoint_dir=tmp_path / "ckpt",
                pause_file=tmp_path / "ckpt" / "m.PAUSE",
-               live_dir=tmp_path / "_live" / "m",
+               # A RESERVED directory, which is what the dialog has produced
+               # since 2026-08-08. This used to say `_live/m` — the shared
+               # per-mission name — and that shape is now deliberately dropped
+               # on load, because resuming into it adopts frames another run
+               # left there. See the legacy test below.
+               live_dir=tmp_path / "_live" / "20260808T091655-m-fixture",
                multistart=5, flatness=False, solve_timeout_min=45.0,
                memory_budget_gb=20.0)
     job.state = jobs.JobState.PAUSED
@@ -482,6 +671,51 @@ def test_a_paused_job_survives_closing_the_app(tmp_path):
     # --multistart would produce one artifact from two configurations
     assert (restored.multistart, restored.flatness) == (5, False)
     assert (restored.solve_timeout_min, restored.memory_budget_gb) == (45.0, 20.0)
+
+
+def test_a_shared_live_dir_from_an_old_queue_file_is_not_carried_forward(tmp_path):
+    """The frame-adoption defect, arriving through PERSISTED state.
+
+    `runs/_live/<mission>` was shared by every run of that mission until
+    2026-08-08. `FrameWriter` starts one past the highest sequence on disk, so a
+    run resuming into one appends to whatever a cancelled run left there and
+    relocates the lot into its own `frames/` — where the stranger's frames sort
+    FIRST and the timelapse opens on an aeroplane it never flew.
+
+    Reserving per job fixed that at the DIALOG. The queue file round-trips
+    `live_dir` faithfully, which is correct for a real pause and is exactly what
+    reopens the hole for a job written before the fix. This machine had three
+    such entries, one pointing at a directory holding 1,683 orphaned frames.
+    """
+    from planeopt.gui import queuestore
+
+    for shared in ("m", "endurance_sample", "rcv2_endurance"):
+        job = _job(tmp_path, live_dir=tmp_path / "_live" / shared)
+        job.state = jobs.JobState.PAUSED
+        queuestore.save(tmp_path, [job])
+        restored, = queuestore.load(tmp_path)
+        assert restored.live_dir is None, f"{shared!r} was carried forward"
+    # and loading must not have created anything: opening the app is not a
+    # reason to make directories for jobs nobody has resumed
+    assert not (tmp_path / "_live").exists()
+
+
+def test_resuming_a_job_without_a_live_dir_reserves_one(tmp_path):
+    """The other half: dropping the path must not silently cost the live view."""
+    from planeopt.gui.runner import RunQueue
+
+    job = _job(tmp_path, live_dir=None)
+    job.state = jobs.JobState.PAUSED
+    queue = RunQueue.__new__(RunQueue)
+    queue.jobs = [job]
+    queue.queue_changed = _Signal()
+    queue.job_started = _Signal()
+    queue._start_next = lambda: None
+    assert queue.resume(job) is True
+    assert job.live_dir is not None
+    assert job.live_dir.is_dir()
+    assert job.live_dir.parent == job.runs_dir / "_live"
+    assert jobs.is_reserved_live_dir(job.live_dir)
 
 
 def test_nothing_starts_on_its_own_at_launch(tmp_path):
@@ -537,7 +771,7 @@ def test_the_queue_file_is_written_atomically(tmp_path):
 
 def test_restore_does_not_start_anything(tmp_path, monkeypatch):
     """`restore` exists separately from `submit` for exactly this."""
-    from planeopt.gui import runner
+    runner = _gui("runner")
 
     queue = runner.RunQueue.__new__(runner.RunQueue)
     queue.jobs, queue._current, queue._process = [], None, None

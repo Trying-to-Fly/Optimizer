@@ -19,6 +19,8 @@ from .. import types
 
 
 def _fmt(v) -> str:
+    if v is None:
+        return "—"  # a hook row with no value; "None" in a design brief reads as a bug
     if isinstance(v, float):
         return f"{v:,.4g}"
     return str(v)
@@ -41,10 +43,16 @@ def render(result: types.RunResult, aircraft) -> str:
         "",
     ]
     if champ:
+        # `.get(key, default)` covers a key that is ABSENT and not one that is
+        # present and null — a distinction JSON makes and this line did not, so
+        # a champion carrying `"static_margin": null` formatted None and took
+        # `planeopt brief` down with a TypeError. Same blind spot `runindex`
+        # had on the same artifact.
+        sm = champ.get("static_margin")
         lines += [
             f"**Champion:** {champ['objective_value']:.1f} {units} at "
             f"V = {champ['V_ms']:.1f} m/s, AUW {champ['auw_kg']:.3f} kg, "
-            f"static margin {champ.get('static_margin', float('nan')):.3f}.",
+            f"static margin {'—' if sm is None else format(sm, '.3f')}.",
             "",
         ]
     if shadow is not None:

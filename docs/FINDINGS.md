@@ -2908,14 +2908,21 @@ solve's 30-minute allowance:
 | member type | ceiling | behavior at timeout |
 |---|---:|---|
 | optional alternative / sensitivity | 12 min | record the failed member |
-| flatness point | 10 min | record it as timed out; leave smaller points unproven |
+| flatness point | 20 min | record it as timed out; leave smaller points unproven |
 
 This does not call an unattempted span infeasible. It stops repeating an equal
 budget below the first timed-out span and makes that missing evidence explicit
-in the report. The 10-minute flatness cap remains above the historical slowest
-successful flatness member (6.0 min); after graph sharing, the latest four
-successful members took 1.7-3.2 minutes. This policy reduces worst-case time
-without adding model evaluations or weakening the equations.
+in the report. The flatness cap was proposed at 10 minutes here and restored to
+20 on merge (user decision, reaffirmed 2026-08-10): 20 remains the standing
+2026-07-31 decision, the cascade already bounds what a wrongly-generous cap can
+cost to one member's ceiling, and RCV2_CAP_PRICING §4 measured that more clock
+past it buys no certificate. Two further interactions closed on merge: a
+timeout whose member spanned a machine-sleep window (`suspended_minutes`, §4 of
+that study) does not trigger the skip-below cascade, because that member never
+received its budget; the historical slowest successful flatness member is 6.0
+min, and after graph sharing the latest four took 1.7-3.2 minutes. This policy
+reduces worst-case time without adding model evaluations or weakening the
+equations.
 
 ## 33. "Legal" now includes final numeric stability (2026-08-07)
 

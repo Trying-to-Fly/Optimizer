@@ -758,6 +758,56 @@ def test_a_live_directorys_timelapse_lands_beside_it(qt_app, tmp_path):
     assert result["out_dir"] == tmp_path / "_live" / "endurance-timelapse"
 
 
+def test_a_smaller_re_render_does_not_keep_the_previous_ones_tail(qt_app, tmp_path):
+    """Images are numbered from zero every render, into the same directory.
+
+    So a render that produces FEWER images than the last left the previous
+    one's tail behind — and `_encode` feeds ffmpeg `-i frame_%06d.png`, which
+    reads from 000000 upward and stops at the first MISSING index. The video was
+    therefore the new render followed by the old one, while the reported count
+    described only the new part.
+    """
+    live = tmp_path / "frames"
+    _write(live, "f000000__multistart__nominal__i0000.json.gz", _frame(kind="iterate"))
+    _write(live, "f000001__multistart__nominal__i0001.json.gz", _frame(kind="iterate"))
+    _write(live, "f000002__multistart__nominal__final.json.gz", _frame())
+    out = tmp_path / "out"
+
+    big = timelapse.render(live, out, size=(320, 240), kind="all", hold_candidate=6)
+    assert big["images"] == 8, "two iterates plus six repeats of the candidate"
+    assert len(list(out.glob("frame_*.png"))) == 8
+
+    small = timelapse.render(live, out, size=(320, 240), kind="candidate", hold_candidate=6)
+    assert small["images"] == 6
+    on_disk = sorted(p.name for p in out.glob("frame_*.png"))
+    assert len(on_disk) == small["images"], (
+        f"{len(on_disk) - small['images']} image(s) from the previous render "
+        f"survived, and ffmpeg would encode them: {on_disk}"
+    )
+    # What ffmpeg would actually read: the unbroken run from zero.
+    contiguous = 0
+    while f"frame_{contiguous:06d}.png" in set(on_disk):
+        contiguous += 1
+    assert contiguous == small["images"]
+
+
+def test_a_re_render_leaves_files_it_did_not_write(qt_app, tmp_path):
+    """`--out` can name any directory, so the clear is by exact filename."""
+    live = tmp_path / "frames"
+    _write(live, "f000000__multistart__nominal__final.json.gz", _frame())
+    out = tmp_path / "out"
+    out.mkdir()
+    keep = out / "notes.txt"
+    keep.write_text("mine", encoding="utf-8")
+    (out / "frame_1.png").write_bytes(b"not ours either")
+
+    timelapse.render(live, out, size=(320, 240), hold_candidate=1)
+    timelapse.render(live, out, size=(320, 240), hold_candidate=1)
+
+    assert keep.read_text(encoding="utf-8") == "mine"
+    assert (out / "frame_1.png").is_file(), "only frame_%06d.png is this renderer's"
+
+
 def test_timelapse_skips_a_corrupt_frame_rather_than_failing(qt_app, tmp_path):
     live = tmp_path / "frames"
     _write(live, "f000000__multistart__nominal__final.json.gz", _frame())
