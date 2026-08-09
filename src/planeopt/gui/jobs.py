@@ -16,6 +16,10 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
+# Qt-free, like this module: `missionfile` is stdlib plus `..types`, so the
+# name-sanitising rule stays in one place without dragging a dialog in behind it.
+from . import missionfile
+
 #: A live-frame directory reserved for ONE job looks like
 #: `<stamp>-<mission>-<aircraft>`. Anything else in `runs/_live/` is a shared
 #: directory from before that reservation existed — see `reserve_live_dir`.
@@ -44,7 +48,14 @@ def reserve_live_dir(runs_dir: Path, mission_name: str, aircraft_name: str) -> P
     # Local time, deliberately: these names are read by a human beside a machine,
     # not compared across time zones — same convention as a run directory.
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")  # noqa: DTZ005
-    base = f"{stamp}-{mission_name}-{aircraft_name}"
+    # Sanitised HERE and not only by the caller. This builds ONE path component
+    # out of two names, so a `/` in either would silently make it three — and
+    # the mission name is free text from the New Run dialog. `RunQueue.resume`
+    # is now a second caller, passing `job.mission.stem`, so the guard belongs
+    # with the function rather than with one of its callers.
+    base = "-".join((
+        stamp, missionfile.module_name(mission_name), missionfile.module_name(aircraft_name),
+    ))
     parent = runs_dir / "_live"
     for attempt in range(1, 1000):
         candidate = parent / (base if attempt == 1 else f"{base}-{attempt}")
