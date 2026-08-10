@@ -2956,3 +2956,87 @@ selection-time result remains separately recorded as
 `run.json` and a red banner immediately below the report status; the artifact
 remains useful diagnostically but no longer presents itself as a flight or
 construction recommendation.
+
+## 34. The rcv2 measurement of §30-32, and the seed that was a ratio (2026-08-10)
+
+Sections 30-32 were measured on `vtail_sample`. This is the first paired
+measurement on `vtail_rcv2` — the aeroplane this project is actually flying —
+run from the GUI against the same mission and checkpoint set the two 2026-08
+main-code batteries used, so every row below has a cold-start control that is
+bit-identical across those two runs.
+
+### 34.1 Graph sharing buys memory, not time
+
+| member | branch | main (x2) | wall | peak |
+|---|---|---|---:|---:|
+| `nominal` | 105.8184 / 5.61 min / 5.58 GB | 105.8184 / 5.69-5.83 / 11.66-12.02 | -1 to -4% | **-52%** |
+| `perturbed_0` | 105.8184 / 8.75 min / 9.87 GB | 105.8184 / 8.22-8.23 / 11.67-12.04 | **+6.4%** | -16% |
+
+The objective is identical to four decimals on both, and
+`tools/bughunt/verify_shared_ll.py` returns EQUIVALENT on rcv2 at a worst error
+of 1.998e-15 against a 1e-12 tolerance, with the deflection leak absent. So the
+physics is untouched — that part of §30 holds on this aeroplane too.
+
+The speed claim does not. §30.1 already declined to call CSE a full-run
+improvement after one run came in 6.5% slower; here the harder of the two
+members is 6.4% slower, which is the same number again from an independent
+model. **The saving is memory, and it is not uniform**: 52% on one member and
+16% on the other. Treat the 12.19x as what it was measured as — a
+three-iteration setup benchmark — and not as a member-time expectation.
+
+This matters to §32's cap arithmetic. The 10-minute flatness ceiling is
+defended partly on converged members having dropped to 1.7-3.2 minutes after
+graph sharing. That figure is `vtail_sample`. On rcv2 the four converged
+flatness members of both main batteries took **4.22-6.43 minutes**, and nothing
+measured here suggests graph sharing shortens them. The margin under a 10-minute
+cap is therefore about 1.56x, not the 3x the surrounding comment implies. The
+trial is not thereby wrong — its exit condition is about a timed-out member's
+convergence trace, and all four timed-out rcv2 flatness members (1.76 m and
+1.70 m, both runs) read "dual blow-up... Stuck, not slow", which is the trace
+that CONFIRMS the cap. But the cap has less headroom on this aeroplane than the
+comment claims, and no run has yet measured a converged rcv2 flatness member
+under the shared graph.
+
+### 34.2 Multistart consensus, priced on real members
+
+The §31 predicate fires on the recorded rcv2 champions with room to spare:
+objective relative error 6.61e-12 against a 1e-8 tolerance, worst design
+variable `t_taper` at 1.45e-7 of its declared range against 1e-5. It is not a
+threshold so strict that it never triggers. What it skips is `perturbed_1`,
+which **failed in both main batteries** after consuming 33.2 minutes each time.
+Confirmed live in this run.
+
+### 34.3 A hot start replayed a ratio and killed every member it touched
+
+`mass_bump` and all four `prop_choice` alternatives died with
+`Invalid_Number_Detected` at iteration 0. Cold members in the same run
+converged normally; the correlation with `solver_seed` was perfect across five
+members, and every one of them converges on main.
+
+AeroSandbox builds each variable as `var = scale * raw`, taking `scale` from
+that member's `init_guess`, and scales constraint rows the same way
+(`var/scale >= lower_bound/scale`). IPOPT's `x` and `lam_g` are therefore
+ratios against a per-member basis. A hot start is precisely when that basis
+moves, since `init_guess` becomes the champion's value — so the champion's
+converged ratios `[1.111, 1.25, 0.745, 1.929, ...]` were written into a problem
+whose correct starting point was `[1.0, 1.0, ...]`, applying the design twice.
+Instrumented at the failure: `x` finite, **sixteen rows of `g` NaN**, reported
+V 8.24 against the champion's 9.52.
+
+The `nx`/`ng` guard cannot detect it — both members have identical dimensions.
+The round-trip test could not either: it built both problems with
+`init_guess=2.0`, the one basis a hot start never has.
+
+`_hot_start_kwargs` now carries only `inits`, which was always the sound half —
+physical values keyed by name, scaled correctly on the way in by
+`Opti.variable(init_guess=...)`. Dropping the seed and keeping `inits`
+reproduced main's `mass_bump` objective exactly: 104.3996, `Solve_Succeeded`,
+52 iterations.
+
+One caveat on §32's remaining premise. That corrected member took **11.93
+minutes against main's cold 7.41-7.78**, i.e. the primal warm start made it
+slower, on one member. That is the direction `WARM_START_OPTIONS` in `solve.py`
+already documents ("do not reach for `--warm-start` expecting speed"). Whether
+champion-derived `inits` pay for themselves anywhere in the battery is now an
+open question rather than an assumption, and it wants the same paired treatment
+the rows above got.
