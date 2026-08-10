@@ -1,0 +1,661 @@
+{
+ "date": "2026-08-10",
+ "platform": "WSL2 (Linux), 25 GB",
+ "aircraft": "vtail_rcv2",
+ "mission": "rcv2_endurance",
+ "solver": "IPOPT exact Hessian, shared CasADi lifting-line graph",
+ "what_this_is": "First full rcv2 battery on casadi-speed-stability, run through the GUI New Run dialog, against the two completed main-code batteries on the same aircraft and mission. Answers the gap FINDINGS 34.4 named: its measurement was one member (mass_bump, the most favourable hot start in the battery) and it was generalised to every warm start in the code.",
+ "branch_config": {
+  "FLATNESS_TIMEOUT_MIN": 10.0,
+  "OPTIONAL_MEMBER_TIMEOUT_MIN": 12.0,
+  "SOLVE_TIMEOUT_MIN_from_dialog": 30.0,
+  "multistart": 3,
+  "hot_start_kwargs_sends_warm_start": true
+ },
+ "wall_clock_minutes": {
+  "main_08_07": 333.5,
+  "main_08_08": 333.25,
+  "branch": 181.45,
+  "branch_speedup_vs_main_08_08": 1.837,
+  "caveat": "The branch total is low partly because six members quit at a cap instead of converging. It is not a like-for-like speed figure."
+ },
+ "outcome_counts": {
+  "main_failed_branch_solved": [
+   "re-solve_battery__mass_bump",
+   "study_wing_dihedral_form__polyhedral2",
+   "winglet_study__continuous_cant"
+  ],
+  "main_solved_branch_failed": [
+   "flatness_sweep__2.0",
+   "priced_equipment_fit__airframe_only",
+   "re-solve_battery__chain_eta_x0.90",
+   "re-solve_battery__printed_mass_x0.90",
+   "re-solve_battery__printed_mass_x1.10",
+   "winglet_study__off"
+  ],
+  "never_attempted_by_branch": [
+   "flatness_sweep__1.7",
+   "flatness_sweep__1.76",
+   "flatness_sweep__1.82",
+   "flatness_sweep__1.88",
+   "flatness_sweep__1.94",
+   "multistart__perturbed_1"
+  ],
+  "objectives_differing": {
+   "re-solve_battery__chain_eta_x1.10": {
+    "branch": 132.5800270065904,
+    "main": 132.62513288271774,
+    "delta": -0.0451058761273373
+   },
+   "study_tail_type__ttail": {
+    "branch": 111.86404813845724,
+    "main": 110.65550659707142,
+    "delta": 1.208541541385813
+   }
+  }
+ },
+ "run_level": {
+  "branch_champion_objective_min": 122.1,
+  "branch_design_trustworthy": false,
+  "main_08_07_design_trustworthy": true,
+  "branch_sm_unreliable_reason": "fewer than 2 of 3 meshes agree on static_margin: +0.07374 at (8, 8), +0.08701 at (12, 10), +0.05155 at (16, 10)",
+  "note": "aero.py is byte-identical to main, so the mesh disagreement is a property of this champion, not a code regression. The branch champion reaches the 0.08 floor closer than main's: gap -0.0135 against -0.0228.",
+  "timelapse_frames": {
+   "branch": 793,
+   "main_08_08": 2385
+  }
+ },
+ "per_member": {
+  "flatness_sweep__1.7": {
+   "main_08_07": {
+    "minutes": 22.32,
+    "objective": null,
+    "converged": false,
+    "iter_count": 206.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.052356719970703,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "main_08_08": {
+    "minutes": 22.44,
+    "objective": null,
+    "converged": false,
+    "iter_count": 207.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.689445495605469,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "branch": null
+  },
+  "flatness_sweep__1.76": {
+   "main_08_07": {
+    "minutes": 22.3,
+    "objective": null,
+    "converged": false,
+    "iter_count": 205.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.052356719970703,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "main_08_08": {
+    "minutes": 22.35,
+    "objective": null,
+    "converged": false,
+    "iter_count": 205.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.689445495605469,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "branch": null
+  },
+  "flatness_sweep__1.82": {
+   "main_08_07": {
+    "minutes": 5.2,
+    "objective": 105.85697440184141,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 5.24,
+    "objective": 105.85697440184141,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": null
+  },
+  "flatness_sweep__1.88": {
+   "main_08_07": {
+    "minutes": 4.22,
+    "objective": 116.17897793455,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 4.29,
+    "objective": 116.17897793455,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": null
+  },
+  "flatness_sweep__1.94": {
+   "main_08_07": {
+    "minutes": 4.49,
+    "objective": 119.54606021598765,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 4.57,
+    "objective": 119.54606021598765,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": null
+  },
+  "flatness_sweep__2.0": {
+   "main_08_07": {
+    "minutes": 6.39,
+    "objective": 122.12279273150756,
+    "converged": true,
+    "peak_rss_gb": 13.920501708984375
+   },
+   "main_08_08": {
+    "minutes": 6.43,
+    "objective": 122.12279273150756,
+    "converged": true,
+    "peak_rss_gb": 13.558540344238281
+   },
+   "branch": {
+    "minutes": 10.79,
+    "objective": null,
+    "converged": false,
+    "iter_count": 46.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 16.42182159423828,
+    "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+   }
+  },
+  "multistart__mass_bump": {
+   "main_08_07": {
+    "minutes": 7.78,
+    "objective": 104.3995680297317,
+    "converged": true,
+    "peak_rss_gb": 12.0369873046875
+   },
+   "main_08_08": {
+    "minutes": 7.41,
+    "objective": 104.3995680297317,
+    "converged": true,
+    "peak_rss_gb": 11.674156188964844
+   },
+   "branch": {
+    "minutes": 3.81,
+    "objective": 104.3995679175085,
+    "converged": true,
+    "iter_count": 13.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 14.497055053710938
+   }
+  },
+  "multistart__nominal": {
+   "main_08_07": {
+    "minutes": 5.69,
+    "objective": 105.81838501037146,
+    "converged": true,
+    "peak_rss_gb": 12.024246215820312
+   },
+   "main_08_08": {
+    "minutes": 5.83,
+    "objective": 105.81838501037146,
+    "converged": true,
+    "peak_rss_gb": 11.661415100097656
+   },
+   "branch": {
+    "minutes": 6.95,
+    "objective": 105.81838501037166,
+    "converged": true,
+    "iter_count": 22.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": false,
+    "peak_rss_gb": 5.928142547607422
+   }
+  },
+  "multistart__perturbed_0": {
+   "main_08_07": {
+    "minutes": 8.22,
+    "objective": 105.81838500967153,
+    "converged": true,
+    "peak_rss_gb": 12.036087036132812
+   },
+   "main_08_08": {
+    "minutes": 8.23,
+    "objective": 105.81838500967153,
+    "converged": true,
+    "peak_rss_gb": 11.67352294921875
+   },
+   "branch": {
+    "minutes": 8.61,
+    "objective": 105.8183850097915,
+    "converged": true,
+    "iter_count": 36.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": false,
+    "peak_rss_gb": 10.214466094970703
+   }
+  },
+  "multistart__perturbed_1": {
+   "main_08_07": {
+    "minutes": 33.27,
+    "objective": null,
+    "converged": false,
+    "iter_count": 206.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.036903381347656,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 33.25,
+    "objective": null,
+    "converged": false,
+    "iter_count": 215.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.674003601074219,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "branch": null
+  },
+  "priced_equipment_fit__airframe_only": {
+   "main_08_07": null,
+   "main_08_08": {
+    "minutes": 12.97,
+    "objective": 132.57063626948192,
+    "converged": true,
+    "peak_rss_gb": 13.557563781738281
+   },
+   "branch": {
+    "minutes": 12.84,
+    "objective": null,
+    "converged": false,
+    "iter_count": 56.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 14.933845520019531,
+    "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+   }
+  },
+  "priced_equipment_fit__core": {
+   "main_08_07": {
+    "minutes": 12.62,
+    "objective": 132.57063626948192,
+    "converged": true,
+    "peak_rss_gb": 13.9195556640625
+   },
+   "main_08_08": null,
+   "branch": null
+  },
+  "re-solve_battery__chain_eta_x0.90": {
+   "main_08_07": {
+    "minutes": 12.33,
+    "objective": 111.34610298362101,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 12.32,
+    "objective": 111.34610298362101,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": {
+    "minutes": 12.78,
+    "objective": null,
+    "converged": false,
+    "iter_count": 57.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.660343170166016,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   }
+  },
+  "re-solve_battery__chain_eta_x1.10": {
+   "main_08_07": {
+    "minutes": 12.28,
+    "objective": 132.62513288271774,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 12.4,
+    "objective": 132.62513288271774,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": {
+    "minutes": 8.96,
+    "objective": 132.5800270065904,
+    "converged": true,
+    "iter_count": 34.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 15.660343170166016
+   }
+  },
+  "re-solve_battery__mass_bump": {
+   "main_08_07": {
+    "minutes": 32.32,
+    "objective": null,
+    "converged": false,
+    "iter_count": 314.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.052356719970703,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 32.41,
+    "objective": null,
+    "converged": false,
+    "iter_count": 315.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.689445495605469,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "branch": {
+    "minutes": 7.24,
+    "objective": 120.16277689207524,
+    "converged": true,
+    "iter_count": 30.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 15.660343170166016
+   }
+  },
+  "re-solve_battery__printed_mass_x0.90": {
+   "main_08_07": {
+    "minutes": 4.51,
+    "objective": 127.8828949831413,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 4.6,
+    "objective": 127.8828949831413,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": {
+    "minutes": 12.95,
+    "objective": null,
+    "converged": false,
+    "iter_count": 57.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.660343170166016,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   }
+  },
+  "re-solve_battery__printed_mass_x1.10": {
+   "main_08_07": {
+    "minutes": 6.91,
+    "objective": 114.97529792829005,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 6.99,
+    "objective": 114.97529792829005,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469
+   },
+   "branch": {
+    "minutes": 13.62,
+    "objective": null,
+    "converged": false,
+    "iter_count": 54.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 16.261474609375,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   }
+  },
+  "study_fuselage_topology__integrated": {
+   "main_08_07": {
+    "minutes": 5.81,
+    "objective": 116.71535328700611,
+    "converged": true,
+    "peak_rss_gb": 12.0413818359375
+   },
+   "main_08_08": {
+    "minutes": 5.73,
+    "objective": 116.71535328700611,
+    "converged": true,
+    "peak_rss_gb": 11.677509307861328
+   },
+   "branch": {
+    "minutes": 7.65,
+    "objective": 116.71535301457243,
+    "converged": true,
+    "iter_count": 31.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 14.398616790771484
+   }
+  },
+  "study_prop_choice__ancf_12x10": {
+   "main_08_07": {
+    "minutes": 9.23,
+    "objective": 122.08072432109881,
+    "converged": true,
+    "peak_rss_gb": 12.037124633789062
+   },
+   "main_08_08": {
+    "minutes": 9.0,
+    "objective": 122.08072432109881,
+    "converged": true,
+    "peak_rss_gb": 11.674537658691406
+   },
+   "branch": {
+    "minutes": 4.52,
+    "objective": 122.08072419150123,
+    "converged": true,
+    "iter_count": 14.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 14.336784362792969
+   }
+  },
+  "study_prop_choice__ancf_12x9": {
+   "main_08_07": {
+    "minutes": 8.34,
+    "objective": 118.12856437672215,
+    "converged": true,
+    "peak_rss_gb": 12.037479400634766
+   },
+   "main_08_08": {
+    "minutes": 8.23,
+    "objective": 118.12856437672215,
+    "converged": true,
+    "peak_rss_gb": 11.674549102783203
+   },
+   "branch": {
+    "minutes": 7.71,
+    "objective": 118.12856425325475,
+    "converged": true,
+    "iter_count": 32.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 11.050655364990234
+   }
+  },
+  "study_prop_choice__ancf_13x11": {
+   "main_08_07": {
+    "minutes": 6.93,
+    "objective": 118.9980487008849,
+    "converged": true,
+    "peak_rss_gb": 12.037384033203125
+   },
+   "main_08_08": {
+    "minutes": 6.68,
+    "objective": 118.9980487008849,
+    "converged": true,
+    "peak_rss_gb": 11.67459487915039
+   },
+   "branch": {
+    "minutes": 6.81,
+    "objective": 118.99804856272365,
+    "converged": true,
+    "iter_count": 25.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 11.050533294677734
+   }
+  },
+  "study_prop_choice__ancf_14x9": {
+   "main_08_07": {
+    "minutes": 8.82,
+    "objective": 119.98565475874298,
+    "converged": true,
+    "peak_rss_gb": 12.037384033203125
+   },
+   "main_08_08": {
+    "minutes": 8.63,
+    "objective": 119.98565475874298,
+    "converged": true,
+    "peak_rss_gb": 11.67459487915039
+   },
+   "branch": {
+    "minutes": 6.67,
+    "objective": 119.98565457632287,
+    "converged": true,
+    "iter_count": 27.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 11.050533294677734
+   }
+  },
+  "study_tail_type__conventional": {
+   "main_08_07": {
+    "minutes": 7.27,
+    "objective": 115.27732299238188,
+    "converged": true,
+    "peak_rss_gb": 14.285144805908203
+   },
+   "main_08_08": {
+    "minutes": 7.05,
+    "objective": 115.27732299238188,
+    "converged": true,
+    "peak_rss_gb": 14.139896392822266
+   },
+   "branch": {
+    "minutes": 8.89,
+    "objective": 115.27732276545346,
+    "converged": true,
+    "iter_count": 28.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 14.297859191894531
+   }
+  },
+  "study_tail_type__ttail": {
+   "main_08_07": {
+    "minutes": 8.26,
+    "objective": 110.65550659707142,
+    "converged": true,
+    "peak_rss_gb": 14.78591537475586
+   },
+   "main_08_08": {
+    "minutes": 8.05,
+    "objective": 110.65550659707142,
+    "converged": true,
+    "peak_rss_gb": 14.422927856445312
+   },
+   "branch": {
+    "minutes": 8.29,
+    "objective": 111.86404813845724,
+    "converged": true,
+    "iter_count": 28.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 13.236503601074219
+   }
+  },
+  "study_wing_dihedral_form__polyhedral2": {
+   "main_08_07": {
+    "minutes": 33.28,
+    "objective": null,
+    "converged": false,
+    "iter_count": 209.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 14.27713394165039,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 33.35,
+    "objective": null,
+    "converged": false,
+    "iter_count": 212.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 13.914173126220703,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "branch": {
+    "minutes": 9.95,
+    "objective": 118.69894403026726,
+    "converged": true,
+    "iter_count": 40.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 15.86483383178711
+   }
+  },
+  "winglet_study__continuous_cant": {
+   "main_08_07": {
+    "minutes": 32.33,
+    "objective": null,
+    "converged": false,
+    "iter_count": 317.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.04526138305664,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 32.43,
+    "objective": null,
+    "converged": false,
+    "iter_count": 314.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.682197570800781,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "branch": {
+    "minutes": 8.96,
+    "objective": 122.12279341725845,
+    "converged": true,
+    "iter_count": 54.0,
+    "return_status": "Solve_Succeeded",
+    "warm_started": true,
+    "peak_rss_gb": 14.926643371582031
+   }
+  },
+  "winglet_study__off": {
+   "main_08_07": {
+    "minutes": 12.38,
+    "objective": 122.12279353362132,
+    "converged": true,
+    "peak_rss_gb": 13.912723541259766
+   },
+   "main_08_08": {
+    "minutes": 12.37,
+    "objective": 122.12279353362132,
+    "converged": true,
+    "peak_rss_gb": 13.54971694946289
+   },
+   "branch": {
+    "minutes": 13.45,
+    "objective": null,
+    "converged": false,
+    "iter_count": 74.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.747028350830078,
+    "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+   }
+  }
+ }
+}

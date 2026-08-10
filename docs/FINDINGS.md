@@ -3108,3 +3108,184 @@ functions knew is preserved where it is load-bearing: the scaling explanation in
 `var = scale * raw` behaviour directly rather than through helpers that can be
 deleted. Results now record `warm_started` in place of `hot_start_used`, which
 is the flag that turned out to matter.
+
+## 35. The full rcv2 battery on this branch: the warm start costs more than it buys (2026-08-10)
+
+§34.4 ended by naming what it had not established: "it is one member —
+`mass_bump` is a 20 g perturbation of the champion, the most favourable hot
+start in the battery; the `prop_choice` alternatives and the winglet study seed
+across bigger design changes and are not measured here." This is that
+measurement. A complete `vtail_rcv2` battery, launched through the GUI New Run
+dialog, against the two completed main-code batteries on the same aircraft,
+mission and checkpoint set. Every member below therefore has a cold control
+that is bit-identical across two independent main runs. Distilled results:
+`docs/studies/rcv2_branch_vs_main_20260810.json`.
+
+The answer is that the options generalise badly. On the nearest seed they halve
+a solve; three members further out they destroy it.
+
+### 35.1 What the battery did and did not produce
+
+**181.5 minutes against main's 333.3, and that ratio is not a speed figure** —
+the branch is fast partly because six members hit a wall-clock cap instead of
+converging. The honest ledger is by outcome, not by clock:
+
+| | members |
+|---|---|
+| main failed, branch **solved** | `polyhedral2`, `winglet continuous_cant`, `re-solve mass_bump` |
+| main solved, branch **failed** | `flatness 2.0`, `winglet off`, `priced_equipment_fit`, `printed_mass_x1.10`, `printed_mass_x0.90`, `chain_eta_x0.90` |
+| skipped by design | `perturbed_1` (multistart consensus, §34.2) |
+| never attempted | five flatness spans, 1.94 m down to 1.70 m |
+
+The gains are real and three of them are new knowledge. Every one of main's four
+33-minute burns is now resolved: `perturbed_1` skipped as provably redundant,
+and the other three SOLVED — `polyhedral2` in 9.95 min at 40 iterations against
+main's 33.35 and 212, `continuous_cant` in 8.96 against 32.43, `re-solve
+mass_bump` in 7.24 against 32.41. **The continuous-cant question has never had
+an answer before this run**; both main batteries decided it by timeout.
+`continuous_cant` converges to 122.12279342 against main's `winglet off`
+122.12279353, with `d_exp` at 3.8e-10 — freeing tip cant to 88° reproduces the
+winglet-off optimum exactly and buys nothing.
+
+The losses cost more. **The flatness sweep produced nothing**: main returned
+four converged points (122.12 / 119.55 / 116.18 / 105.86) and this run returned
+zero. `winglet off` is the baseline of the paired winglet comparison, so the
+winglet cannot be priced. Both `chain_eta` arms are compromised — one failed,
+the other landed 0.045 low (§35.4).
+
+### 35.2 The iteration ladder: the seed helps, then it stops, then it kills
+
+Every warm-started member in one table, ordered by iterations. The pattern is
+monotone and it is the finding:
+
+| member | iters | branch | main | outcome |
+|---|---:|---:|---:|---|
+| `mass_bump` (+20 g) | 13 | 3.81 | 7.41-7.78 | **-50%** |
+| prop `ancf_12x10` | 14 | 4.52 | 9.00-9.23 | **-50%** |
+| prop `ancf_13x11` | 25 | 6.81 | 6.68-6.93 | +2% |
+| prop `ancf_14x9` | 27 | 6.67 | 8.63-8.82 | -23% |
+| tail `conventional` | 28 | 8.89 | 7.05-7.27 | +26% |
+| fuselage `integrated` | 31 | 7.65 | 5.73-5.81 | +32% |
+| prop `ancf_12x9` | 32 | 7.71 | 8.23-8.34 | -6% |
+| `flatness 2.0` | 46 | 10.79 | 6.39-6.43 | **FAILED** |
+| `printed_mass_x1.10` | 54 | 13.62 | 6.91-6.99 | **FAILED** |
+| `printed_mass_x0.90` | 57 | 12.95 | 4.51-4.60 | **FAILED** |
+| `chain_eta_x0.90` | 57 | 12.78 | 12.32-12.33 | **FAILED** |
+| `winglet off` | 74 | 13.45 | 12.37-12.38 | **FAILED** |
+
+`WARM_START_OPTIONS` pins the starting point to the bounds (`bound_push` and
+its three companions at 1e-6) and starts with almost no barrier (`mu_init`
+1e-4). Those settings are correct for a point that is near-optimal **including
+its duals**. `_hot_start_kwargs` supplies primal values only, and correctly so:
+§34.3 removed the duals because they are ratios against a basis a hot start
+moves. So every warm-started member now begins pinned against thirteen active
+bounds, with no barrier to regularise multipliers it was never given.
+
+When the seed is nearly exact that is a gift. Further out the solver has to
+walk away from the corner it was pinned to, with no barrier to help, and the
+failure modes are the ones the run recorded verbatim:
+
+- `printed_mass_x1.10` — *"dual blow-up: the multipliers diverged while the
+  primal side sat still. Stuck, not slow — more clock buys nothing."*
+- `printed_mass_x0.90` — *"no dual blow-up, but the primal side stopped moving
+  — a plateau short of feasible, which is what a starved corner looks like."*
+  `inf_pr_final` 0.0796, and `inf_pr_progress_last_25` **negative**.
+
+**Seed distance does not explain it.** `printed_mass_x0.90` is a -10% mass
+perturbation, no further from the champion than `mass_bump`'s +20 g, and it was
+main's FASTEST member at 4.51 min. What separates them is that the re-solve
+battery perturbs model parameters rather than design variables, so the champion
+is infeasible under the perturbed physics — and an infeasible corner is exactly
+where these options leave no room to move. That is a hypothesis; the
+measurement is the table.
+
+The remedy that follows from the evidence is to stop `_hot_start_kwargs`
+sending `warm_start=True`. The 2026-08-10 02:08 run is the control: `inits`
+alone converged `mass_bump` in 11.93 min — slower than main, but CONVERGED.
+Five of this run's six failures are the options, not the caps. Whether
+`mu_init` at IPOPT's default 0.1 keeps the wins while removing the failures is
+the obvious next experiment and is not yet measured.
+
+### 35.3 Both wall-clock caps are set below members that converge
+
+Two caps failed members that main solved, for two different reasons, and only
+one of them is a cap problem.
+
+**`FLATNESS_TIMEOUT_MIN = 10.0` — the trial ends. Raise it toward 20.** The
+exit condition written at the constant is a timed-out member whose trace reads
+"still converging when the clock stopped". The 2.0 m member returned exactly
+that string, at `inf_pr_final` 1.8e-04 with a worst violation of 1.6e-05 on
+`L == weight_n` and `inf_pr_progress_last_25` still positive. This is the EASY
+span — main converged it in 6.39 and 6.43 minutes. §34.1's evidence that the
+cap was safe came from the 1.76 m and 1.70 m members reading "dual blow-up...
+Stuck, not slow"; those are the hard ones and that reading still confirms the
+cap for them. Ten minutes does not fit the span the champion sits on.
+
+**`OPTIONAL_MEMBER_TIMEOUT_MIN = 12.0` is below four members main converged.**
+`winglet off` 12.37-12.38, `priced_equipment_fit__airframe_only` 12.97,
+`chain_eta_x0.90` 12.32-12.33, `chain_eta_x1.10` 12.28-12.40. (The 08-07
+battery priced a different candidate, `core`, at 12.62 — also over.) The
+constant's docstring justifies
+12 on the grounds that "every optional member that did converge in that run
+landed inside 9.1 minutes", citing the 2026-08-07 full run — which is one of
+the two batteries above, and has four converged optional members between 12.28
+and 12.62. The 9.1 figure is `vtail_sample`'s. **This is the same category
+error §34.1 caught in the flatness cap's own justification**, made twice in the
+same constant block, and this time it costs converged members. Sixteen clears
+all four with margin.
+
+### 35.4 A warm start moves WHERE a member lands, not only how long it takes
+
+Two members converged to different optima than main, in both directions:
+
+| member | branch | main | delta |
+|---|---:|---:|---:|
+| `study_tail_type__ttail` | 111.8640 | 110.6555 | **+1.21** |
+| `re-solve_battery__chain_eta_x1.10` | 132.5800 | 132.6251 | **-0.045** |
+
+Both `Solve_Succeeded`; both main batteries agree with each other to 14 digits.
+The T-tail is a different aeroplane, not a numerical wobble — `fin_height`
+-34%, `fin_c_root` +84%, `fin_taper` -60%, `fin_sweep` -23%, `tail_arm` +17%.
+
+`WARM_START_OPTIONS` states that the seed "is not changing WHERE it lands, only
+how long it takes to get there". That held for every member §32 and §34.1
+measured and it is false here. Two consequences. Study candidates seeded from
+the champion are no longer landing in the same basins their cold controls
+found, so a rejection margin computed this way is not the margin a cold run
+would have computed. And a sensitivity band is the worst place for it: a failed
+member is visibly absent from a report, whereas `chain_eta_x1.10` at 0.03% low
+is printed as a number.
+
+The T-tail conclusion is unchanged either way — V-tail 122.08 over conventional
+115.28 over T-tail 111.86 — so no adoption decision in this run turns on it.
+
+### 35.5 The run-level gate fired, on a champion that only exists because of the above
+
+`design_trustworthy` is **False** for this run and True for both main runs:
+"fewer than 2 of 3 meshes agree on static_margin: +0.07374 at (8, 8), +0.08701
+at (12, 10), +0.05155 at (16, 10)". `aero.py` is byte-identical to main, so
+this is a property of this champion rather than a code regression — and this
+champion reached the artifact through `continuous_cant` because `winglet off`
+failed. The §33 gate is working: it declined to certify a design whose
+stability estimate depends on the mesh. Worth recording that the branch
+champion is nonetheless CLOSER to the mission's 0.08 floor than main's, gap
+-0.0135 against -0.0228.
+
+Everything downstream of the solver worked. Artifacts, report, `interactive_3d`,
+geometry, manufacturing, timelapse and MP4 all wrote without incident;
+`suspended_minutes` stayed at nanosecond jitter for 192 minutes with the lid
+open; peak RSS reached 16.4 GB against a 22 GB budget. The timelapse is 793
+source frames against main's 2385, which is the run's own summary in one number
+— frames are written per iteration.
+
+### 35.6 What this does NOT establish
+
+One battery, not a paired repeat, so a member that failed here might converge
+on a second run; main's figures are doubled and this branch's are not. The
+mechanism in §35.2 is inferred from three convergence traces and the option
+values, not from an instrumented solve — nobody has watched the multipliers
+diverge with `mu_init` varied. And the branch's three genuine gains
+(`polyhedral2`, `continuous_cant`, `re-solve mass_bump`) are all members main
+never solved, so they have no cold control at all: they are new answers, but
+they are unverified new answers, and `continuous_cant` agreeing with main's
+`winglet off` to nine digits is the only one with independent corroboration.

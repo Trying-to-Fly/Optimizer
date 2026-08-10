@@ -70,7 +70,38 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 - Adaptive multistart keeps the codex schedule but draws its perturbed starts
   from main's `multistart_inits()`.
 
-### FLATNESS_TIMEOUT_MIN: 10 on TRIAL (user decision 2026-08-10, was 20 from 2026-07-31)
+### THE TRIAL BELOW IS OVER: 10 IS TOO TIGHT, AND FOUR THINGS NEED FIXING
+
+**The first full rcv2 battery on this branch ran 2026-08-10 (FINDINGS §35,
+`docs/studies/rcv2_branch_vs_main_20260810.json`) and the trial's exit condition
+fired verbatim.** Nothing below this block is wrong about how the trial was set
+up; it is simply answered. Read §35 before touching `solve.py`. The four items,
+in the order their evidence justifies:
+
+1. **Stop `_hot_start_kwargs` sending `warm_start=True`.** Five of the run's six
+   member failures are `WARM_START_OPTIONS`, not the caps. Those options pin the
+   start to the bounds with almost no barrier, which is only valid alongside
+   duals that §34.3 correctly removed. The 02:08 control run converged the same
+   member on `inits` alone — slower than main, but converged. Whether `mu_init`
+   at IPOPT's default 0.1 keeps §34.4's wins is UNMEASURED and is the next
+   experiment.
+2. **`FLATNESS_TIMEOUT_MIN` 10 → 20.** The 2.0 m member — the span the champion
+   sits on, which main converges in 6.4 min — timed out reading "still
+   converging when the clock stopped". The whole sweep was lost: main returned
+   four points, this run returned none.
+3. **`OPTIONAL_MEMBER_TIMEOUT_MIN` 12 → 16.** Four members main converges take
+   12.28-12.97. Its docstring's "inside 9.1 minutes" is a `vtail_sample` figure
+   — the same category error §34.1 caught in the flatness cap.
+4. **Do not cascade a "still converging" flatness timeout.** One marginal
+   timeout at 2.0 m skipped all five smaller spans. The sleep exemption added in
+   `9e4e153` is the precedent: that member did not get its budget either.
+
+Also from that run, and NOT a cap or an option: a warm start changes WHERE a
+member lands. `ttail` converged 1.21 min better than main and `chain_eta_x1.10`
+0.045 worse, both `Solve_Succeeded`. A sensitivity band is the worst place for
+that, because a wrong number still prints.
+
+### FLATNESS_TIMEOUT_MIN: 10 on TRIAL (user decision 2026-08-10, was 20 from 2026-07-31) — CONCLUDED, see above
 
 The codex branch had silently lowered the 20-minute cap (a recorded user
 decision) to 10. The merge first restored 20; Mo then chose to TRIAL 10, on the
@@ -81,6 +112,9 @@ is written at `FLATNESS_TIMEOUT_MIN` in `solve.py`**: a timed-out flatness
 member whose convergence trace reads "still converging when the clock stopped"
 means 10 is too tight — raise it back toward 20. "Stuck, not slow" confirms
 the cap. Watch for that trace verdict in the next real batteries.
+
+*That verdict arrived on the first battery: "still converging". See the block
+above.*
 
 ## NEW (Mac side of the eighteenth session, 2026-08-07/08): the caps are priced, and none of the four is the answer
 
