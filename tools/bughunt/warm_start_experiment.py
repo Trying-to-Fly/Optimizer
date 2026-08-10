@@ -11,9 +11,24 @@ with it, silently, and left every hot start in the configuration
 is discarded before the first iteration.
 
 (`hot_start_used` and the seed machinery it came from were deleted once this
-measurement was in; `_solve_nlp` now gates on `warm_start` alone. The arms below
-still measure the right two configurations — `bump_inits_only` reproduces the
-old behaviour by dropping the flag, which is what the old code did by accident.)
+measurement was in; `_solve_nlp` now gates on `warm_start` alone.)
+
+**RE-OPENED BY FINDINGS §35, and the three arms below are now the whole
+question.** That section measured the options across a full rcv2 battery rather
+than this one member, found they destroy members far from the seed, and stopped
+`_hot_start_kwargs` sending `warm_start=True`. The battery that followed then
+showed the surviving configuration — `inits` alone — running +55% against main's
+cold on seven members, reproducing the `bump_inits_only` penalty this file first
+measured. So the ranking these three arms establish IS the open decision:
+
+    bump_cold                cold: no seed at all
+    bump_inits_only          `inits` alone: the code as of §35
+    bump_inits_and_options   `inits` + WARM_START_OPTIONS: the code before it
+
+If cold beats `inits` alone, seeding is strictly dominated on this member and
+should be removed rather than merely stripped of its options. What that cannot
+settle is coverage: three members of the pre-§35 battery converged WITH the
+options that main has never solved at all, and none of them is `mass_bump`.
 
 That predicts §34.3's own caveat — the corrected `mass_bump` took 11.93 min
 against main's cold 7.41-7.78 — is the seed-only penalty rather than evidence
@@ -80,22 +95,39 @@ def _machine() -> dict:
     }
 
 
-def run(arm: str, state: Path) -> dict:
-    ac, _ = cli.load_aircraft(Path("aircraft/vtail_rcv2"))
-    ms, _ = cli.load_mission(Path("missions/rcv2_endurance.py"))
+def arm_kwargs(arm: str, champion: dict | None) -> dict:
+    """What `_solve_nlp` is called with for one arm. Pure, so it can be tested.
 
+    This was inline in `run` and could only be exercised by spending a ~10-minute
+    solve, which is how it came to be broken for a while without anyone noticing
+    (see the `warm_start` note below).
+    """
     kwargs: dict = {}
     if arm != "champion":
         kwargs["extra_mass_kg"] = BUMP_KG
     if arm in ("bump_inits_only", "bump_inits_and_options"):
+        # The function under test builds the seed, so the experiment cannot
+        # drift from what the battery actually does.
+        kwargs |= solve._hot_start_kwargs(champion or {})
+        # The OPTIONS are set here rather than taken from `_hot_start_kwargs`,
+        # because which of them that function sends is the thing under test and
+        # has now changed twice. It sent `warm_start=True` between 77ac441 and
+        # §35; this arm used to strip it with a bare `kwargs.pop("warm_start")`,
+        # which became a KeyError the moment §35 stopped sending it — the
+        # experiment for a question could not be run while that question was
+        # open. Setting the flag explicitly per arm cannot break that way again.
+        kwargs["warm_start"] = arm == "bump_inits_and_options"
+    return kwargs
+
+
+def run(arm: str, state: Path) -> dict:
+    ac, _ = cli.load_aircraft(Path("aircraft/vtail_rcv2"))
+    ms, _ = cli.load_mission(Path("missions/rcv2_endurance.py"))
+
+    champion = None
+    if arm in ("bump_inits_only", "bump_inits_and_options"):
         champion = json.loads((state / "champion.json").read_text())["result"]
-        # The function under test builds both warm arms, so the experiment
-        # cannot drift from what the battery actually does.
-        kwargs |= solve._hot_start_kwargs(champion)
-        if arm == "bump_inits_only":
-            # Exactly cf9d5b6: the same physical seed, without the options that
-            # let IPOPT keep it. This pop IS the change being measured.
-            kwargs.pop("warm_start")
+    kwargs = arm_kwargs(arm, champion)
 
     before = _machine()
     memory.reset_peak_rss()
