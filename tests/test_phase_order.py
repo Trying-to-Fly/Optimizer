@@ -178,3 +178,42 @@ def test_optional_members_are_seeded_and_use_phase_specific_budgets(
     assert bump
     assert bump[-1]["timeout_min"] == solve.OPTIONAL_MEMBER_TIMEOUT_MIN
     assert bump[-1]["inits"]["span"] == pytest.approx(2.0)
+
+
+#: Every OPTIONAL member measured converging on `vtail_rcv2`, in minutes, across
+#: the two 2026-08 main-code batteries. These are the members the cap governs —
+#: studies, the winglet pair, the priced equipment fit and the re-solve battery.
+#: `winglet off` is the slowest that matters most: it is a paired study's
+#: BASELINE, so losing it costs the comparison rather than one candidate.
+RCV2_CONVERGED_OPTIONAL_MIN = {
+    "winglet off": 12.38,
+    "priced_equipment_fit__airframe_only": 12.97,
+    "chain_eta_x0.90": 12.33,
+    "chain_eta_x1.10": 12.40,
+    "study_tail_type__ttail": 8.26,
+    "study_fuselage_topology__integrated": 5.81,
+}
+
+
+def test_the_optional_cap_clears_every_optional_member_that_has_converged():
+    """A cap below a member that converges does not save time, it loses answers.
+
+    `OPTIONAL_MEMBER_TIMEOUT_MIN` was 12.0, justified in `solve.py` by "every
+    optional member that did converge in that run landed inside 9.1 minutes" —
+    a `vtail_sample` figure attached to a citation of an rcv2 run whose four
+    slowest converged optional members take 12.28 to 12.97. The 2026-08-10
+    battery then failed both of those it reached, including the winglet
+    baseline, which took the whole winglet comparison with it (FINDINGS §35.3).
+
+    The same substitution of `vtail_sample` timings for rcv2's had already been
+    caught once in the flatness cap (§34.1). This pins it against the measured
+    numbers so a third occurrence is a red test rather than a lost run.
+    """
+    slowest = max(RCV2_CONVERGED_OPTIONAL_MIN.values())
+    assert solve.OPTIONAL_MEMBER_TIMEOUT_MIN > slowest, (
+        f"the cap is at or below {slowest:.2f} min, which is a member that "
+        "CONVERGES on rcv2 — it will be failed, not saved"
+    )
+    # And it must still do the job it exists for: no unselected alternative
+    # gets the primary solve's full entitlement.
+    assert solve.OPTIONAL_MEMBER_TIMEOUT_MIN < solve.SOLVE_TIMEOUT_MIN

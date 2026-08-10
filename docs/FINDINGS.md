@@ -3278,7 +3278,23 @@ open; peak RSS reached 16.4 GB against a 22 GB budget. The timelapse is 793
 source frames against main's 2385, which is the run's own summary in one number
 — frames are written per iteration.
 
-### 35.6 What this does NOT establish
+### 35.6 What was changed, and what that trade costs
+
+All four fixes are applied as of this section (`_hot_start_kwargs` no longer
+sends `warm_start`, `FLATNESS_TIMEOUT_MIN` 20, `OPTIONAL_MEMBER_TIMEOUT_MIN`
+16, and a "still converging" flatness timeout no longer cascades — keyed off a
+new stable `verdict` rather than the prose `reading`, so a copy-edit cannot
+change which members cascade). **None of them is re-measured.** The next battery
+prices them, and it starts from a fresh fingerprint because `solve.py` moved.
+
+The trade item 1 makes is not free and is worth stating plainly: all three
+members this run solved that main could not — `polyhedral2`, `continuous_cant`,
+re-solve `mass_bump` — were WARM-STARTED when they succeeded. Removing the
+automatic seed may cost those gains. The expectation is therefore that the next
+run is slower than 181 minutes and more complete, and the number to beat is
+main's 333.
+
+### 35.7 What this does NOT establish
 
 One battery, not a paired repeat, so a member that failed here might converge
 on a second run; main's figures are doubled and this branch's are not. The

@@ -70,13 +70,17 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 - Adaptive multistart keeps the codex schedule but draws its perturbed starts
   from main's `multistart_inits()`.
 
-### THE TRIAL BELOW IS OVER: 10 IS TOO TIGHT, AND FOUR THINGS NEED FIXING
+### THE TRIAL BELOW IS OVER: 10 WAS TOO TIGHT — ALL FOUR FIXES ARE APPLIED
 
 **The first full rcv2 battery on this branch ran 2026-08-10 (FINDINGS §35,
 `docs/studies/rcv2_branch_vs_main_20260810.json`) and the trial's exit condition
 fired verbatim.** Nothing below this block is wrong about how the trial was set
-up; it is simply answered. Read §35 before touching `solve.py`. The four items,
-in the order their evidence justifies:
+up; it is simply answered. Read §35 before touching `solve.py` again.
+
+**All four items below are APPLIED and the fast suite is green (705 passed).
+Nothing is re-measured** — the next battery is what prices them, and it starts
+from a fresh fingerprint because `solve.py` moved. The four, in the order their
+evidence justifies:
 
 1. **Stop `_hot_start_kwargs` sending `warm_start=True`.** Five of the run's six
    member failures are `WARM_START_OPTIONS`, not the caps. Those options pin the
@@ -99,7 +103,20 @@ in the order their evidence justifies:
 Also from that run, and NOT a cap or an option: a warm start changes WHERE a
 member lands. `ttail` converged 1.21 min better than main and `chain_eta_x1.10`
 0.045 worse, both `Solve_Succeeded`. A sensitivity band is the worst place for
-that, because a wrong number still prints.
+that, because a wrong number still prints. Item 1 removes the automatic seeding
+that caused it, so it should not recur — but nothing has confirmed that, and
+`--warm-start` still pairs the seed with the options on request.
+
+**What to watch on the next battery, in priority order.** Whether the six
+members that failed now converge (`flatness 2.0`, `winglet off`,
+`priced_equipment_fit`, both `printed_mass` arms, `chain_eta_x0.90`); whether
+the three main never solved still solve without the seed — `polyhedral2`,
+`continuous_cant` and the re-solve `mass_bump` were all warm-started when they
+succeeded, so **item 1 may cost those gains** and that is the trade nobody has
+priced; and whether `ttail` and `chain_eta_x1.10` now return main's objectives.
+Expect the run to be SLOWER than 181 min: the caps are looser, six members will
+run to convergence instead of quitting, and the seed no longer shortens the
+members it was helping. Main's 333 min is the number to beat.
 
 ### FLATNESS_TIMEOUT_MIN: 10 on TRIAL (user decision 2026-08-10, was 20 from 2026-07-31) — CONCLUDED, see above
 

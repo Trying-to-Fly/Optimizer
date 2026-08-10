@@ -168,24 +168,33 @@ def test_hot_start_kwargs_carry_the_operating_state_by_name():
     # Physical values keyed by name is the ONLY thing that survives the basis
     # move — see the scaling test above. Everything a hot start sends must be
     # something `Opti.variable(init_guess=...)` can scale on the way in.
-    assert set(kwargs) == {"inits", "warm_start"}
+    assert set(kwargs) == {"inits"}
     assert not any(k.endswith("seed") for k in kwargs)
 
 
-def test_hot_start_asks_for_the_warm_start_options_and_solve_nlp_reads_them():
-    """`inits` without `WARM_START_OPTIONS` is a penalty, not a wash.
+def test_a_champion_seed_does_not_drag_the_warm_start_options_with_it():
+    """§35: those options are why five of six members failed, so `inits` travels alone.
 
-    `_solve_nlp` gates those options on `warm_start`, and §34.4 measured what
-    happens when a seed arrives without them: 52 iterations against 31 cold,
-    because IPOPT's default `bound_push` shoves the champion off the thirteen
-    bounds it sits on before iteration 0. With them, 13. The flag used to be
-    implied by a side effect of seeding (`hot_start_used`), which is how it went
-    missing when the seed was removed — so this pins the flag AND the parameter
-    it has to land in.
+    `WARM_START_OPTIONS` pins the start point to the bounds and sets `mu_init`
+    two orders below IPOPT's default, which is correct only for a point that is
+    near-optimal INCLUDING its duals — and duals are exactly what
+    `_hot_start_kwargs` cannot carry (they are ratios against a basis a hot
+    start moves). §34.4 measured the pairing on ONE member, `mass_bump`, a +20 g
+    perturbation and the most favourable seed in a battery, where it converged
+    in 13 iterations against 31 cold. The full rcv2 battery measured the rest:
+    46, 54, 57, 57 and 74 iterations, all failures, on members main converges
+    cold in 4.5-7 minutes.
+
+    `inits` alone stays because it is not what failed — the 02:08 control run
+    converged `mass_bump` on `inits` alone in 11.93 min, slower than main's
+    7.41-7.78 but converged.
     """
     kwargs = solve._hot_start_kwargs({"dv": {"span": 2.0}})
 
-    assert kwargs["warm_start"] is True
+    assert "warm_start" not in kwargs
+    # The parameter must still EXIST — `--warm-start` is an explicit user
+    # request and still pairs the seed with the options. What changed is that
+    # seeding no longer implies it, which is the failure mode this pins.
     assert "warm_start" in inspect.signature(solve._solve_nlp).parameters
     # Every key it emits must be something `_solve_nlp` actually accepts;
     # a stray kwarg would be a TypeError inside a forked worker.

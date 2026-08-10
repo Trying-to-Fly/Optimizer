@@ -268,6 +268,16 @@ class SolveFailure(RuntimeError):
         super().__init__(f"{self.return_status}{iters}{worst}{slept}")
 
 
+#: The three readings `_convergence_trace` can return, as stable keys rather
+#: than the prose beside them. `reading` is written for a person opening a run
+#: artifact and is free to be reworded; `verdict` is what code branches on, and
+#: the flatness cascade does exactly that. Matching the prose instead would mean
+#: a copy-edit could silently change which members cascade.
+VERDICT_DUAL_BLOW_UP = "dual_blow_up"
+VERDICT_STARVED_CORNER = "starved_corner"
+VERDICT_STILL_CONVERGING = "still_converging"
+
+
 def _convergence_trace(stats: dict, tail: int = 25) -> dict:
     """The DUAL side of a failure, which the primal violations cannot show.
 
@@ -319,18 +329,21 @@ def _convergence_trace(stats: dict, tail: int = 25) -> dict:
             # cannot be one of them.
             stalled = progress is not None and abs(progress) < 0.05 * pr[-1]
             if du[-1] > 1e3 * max(pr[-1], 1e-12):
+                out["verdict"] = VERDICT_DUAL_BLOW_UP
                 out["reading"] = (
                     "dual blow-up: the multipliers diverged while the primal "
                     "side sat still. Stuck, not slow — more clock buys nothing "
                     "(FINDINGS 14.5.7). Run tools/degeneracy.py"
                 )
             elif stalled:
+                out["verdict"] = VERDICT_STARVED_CORNER
                 out["reading"] = (
                     "no dual blow-up, but the primal side stopped moving — a "
                     "plateau short of feasible, which is what a starved corner "
                     "looks like (FINDINGS 14.5.8)"
                 )
             else:
+                out["verdict"] = VERDICT_STILL_CONVERGING
                 out["reading"] = (
                     "still converging when the clock stopped — the one case "
                     "where a larger --solve-timeout-min may actually pay"
@@ -986,16 +999,42 @@ def _hot_start_kwargs(result: dict) -> dict:
     which `Opti.variable(init_guess=...)` scales correctly on the way in. That
     alone reproduced main's `mass_bump` objective exactly (104.3996).
 
-    **`warm_start` is not optional company for `inits` — it is what makes the
-    seed worth having.** `_solve_nlp` gates `WARM_START_OPTIONS` on it, and
-    without them IPOPT's default `bound_push` of 0.01 shoves the starting point
-    1% off every bound before iteration 0, which is the one thing a champion is
-    good for: it sits on thirteen of them. Seeding without the options is not a
-    wash but a PENALTY — §34.4 measured this member at 52 iterations that way
-    against 31 cold, and 13 with them. The seed used to imply the options by a
-    side effect (it set `hot_start_used`, which the gate also read), so removing
-    the seed silently removed them too; sending the flag outright is what stops
-    that being re-discovered. The CLI `--warm-start` path always paired the two.
+    **`warm_start` is deliberately NOT sent, as of FINDINGS §35** — the first
+    full rcv2 battery measured what §34.4 had not. `WARM_START_OPTIONS` pins the
+    starting point to the bounds (`bound_push` and its three companions at 1e-6)
+    and starts with almost no barrier (`mu_init` 1e-4). That is right for a
+    point which is near-optimal INCLUDING its duals — and the duals are exactly
+    what the paragraphs above explain we cannot carry. So those options leave
+    every warm-started member pinned against thirteen active bounds with no
+    barrier to regularise multipliers it was never given.
+
+    On the nearest seed that is a gift: `mass_bump` (+20 g) converged in 13
+    iterations against 31 cold, which is the single member §34.4 measured. The
+    battery measured the rest of the curve, and it degrades monotonically to
+    outright failure — 46 iterations on `flatness 2.0`, 54 and 57 on the
+    `printed_mass` pair, 74 on `winglet off`, on members main converges cold in
+    4.5 to 7 minutes. Five of that run's six member failures were these options.
+    `printed_mass_x0.90` is the one that settles it: a -10% perturbation, no
+    further from the champion than `mass_bump`'s +20 g, main's FASTEST member at
+    4.51 min, and it plateaued short of feasible with primal progress running
+    NEGATIVE.
+
+    §35.4 also retired the claim that a seed only changes how long a solve
+    takes: `ttail` landed 1.21 min better than main and `chain_eta_x1.10` 0.045
+    worse, both converged. A seed that moves the basin is worst in a sensitivity
+    band, where a member that lands slightly wrong still prints as a number.
+
+    `inits` alone is kept because it is sound and it is not what failed: the
+    2026-08-10 02:08 control run converged `mass_bump` on `inits` alone in 11.93
+    min — slower than main's 7.41-7.78, but CONVERGED. Slower and right beats
+    faster and absent.
+
+    **Open, and worth measuring before anyone re-enables this:** whether
+    `mu_init` left at IPOPT's default 0.1 keeps §34.4's win while removing the
+    failures. The barrier is what regularises dual estimates, so it is the one
+    option in that dict most obviously assuming duals we do not supply. Nobody
+    has run that arm. The CLI `--warm-start` flag is untouched and still pairs
+    the seed with the options for anyone who asks for it explicitly.
     """
     inits = dict(result.get("dv") or {})
     for source, target in (
@@ -1007,7 +1046,7 @@ def _hot_start_kwargs(result: dict) -> dict:
             inits[target] = result[source]
     if result.get("rpm") is not None:
         inits["prop_rev_s"] = float(result["rpm"]) / 60.0
-    return {"inits": inits, "warm_start": True}
+    return {"inits": inits}
 
 
 def airworthiness_price(
@@ -1736,11 +1775,35 @@ M2_STATUS = "M3: full-vehicle optimization (wing + tail + balance + spars + trim
 #: a 58% saving. The champion sits on THIRTEEN declared bounds here rather than
 #: `vtail_sample`'s eight, which is the mechanism above with more to destroy.
 #:
-#: So the conclusion is now per-aeroplane: on `vtail_sample` warm starting is a
-#: wash and not worth reaching for; on `vtail_rcv2` it roughly halves a nearby
-#: re-solve. What is NOT optional either way is pairing the seed with these
-#: options — `_hot_start_kwargs` sends `warm_start=True` for exactly that reason.
-#: `_solve_nlp` logs when a warm start is used.
+#: **BOTH claims above were then falsified by a full battery — FINDINGS §35,
+#: and `_hot_start_kwargs` no longer sends `warm_start=True`.** The two arms
+#: above are one member each, and `mass_bump` is a +20 g perturbation: the most
+#: favourable hot start a battery contains. Measured across every member of the
+#: 2026-08-10 rcv2 run, the iteration count degrades monotonically with distance
+#: from the seed — 13 on `mass_bump`, 14 on the winning prop, 25-32 across the
+#: rest of that study, 31 on a fuselage topology swap, then 46, 54, 57, 57 and
+#: 74 on members that FAILED, five of the run's six failures. Those last are
+#: members main converges cold in 4.5 to 7 minutes.
+#:
+#: The mechanism is in this dict. It pins the start to the bounds and sets
+#: `mu_init` two orders below IPOPT's default, which is right for a point that
+#: is near-optimal INCLUDING its duals — and the duals are the one thing
+#: `_hot_start_kwargs` cannot carry (they are ratios against a basis a hot start
+#: moves). So the further the seed, the longer the solver spends walking off a
+#: corner it was pinned to with no barrier to help, until it stops arriving:
+#: `printed_mass_x1.10` ended in a dual blow-up, `printed_mass_x0.90` on a
+#: plateau short of feasible with primal progress running negative.
+#:
+#: "Only how long, not where" also did not survive. §35.4: `ttail` converged
+#: 1.21 min BETTER than main's cold control and `chain_eta_x1.10` 0.045 worse,
+#: both `Solve_Succeeded`, both against main figures that agree with each other
+#: to 14 digits. A seed that moves the basin is worst in a sensitivity band,
+#: where a member landing slightly wrong still prints as a number.
+#:
+#: These options are therefore reached only via an explicit `--warm-start`,
+#: never automatically. UNMEASURED and the obvious next arm: `mu_init` left at
+#: IPOPT's default 0.1, which is the option here most obviously assuming duals
+#: that are not supplied. `_solve_nlp` logs when a warm start is used.
 #:
 #: Why it cannot do better still: only the primal point is seeded, because a run
 #: artifact records `dv` and not IPOPT's multipliers — and those cannot simply be
@@ -2596,10 +2659,25 @@ PROVEN_INFEASIBLE_STATUS = "Infeasible_Problem_Detected"
 
 #: Optional alternatives and sensitivity points must not each inherit the
 #: primary solve's 30-minute entitlement. The 2026-08-07 full run spent 135
-#: minutes in members that ultimately timed out; every optional member that did
-#: converge in that run landed inside 9.1 minutes. Twelve keeps measured margin
-#: without allowing one unselected alternative to own half an hour.
-OPTIONAL_MEMBER_TIMEOUT_MIN = 12.0
+#: minutes in members that ultimately timed out, and that half of the reasoning
+#: is unchanged.
+#:
+#: **16.0, raised from 12.0 (FINDINGS §35.3).** The 12 was justified here by
+#: "every optional member that did converge in that run landed inside 9.1
+#: minutes", citing the 2026-08-07 full run. That is a `vtail_sample` figure.
+#: On the rcv2 run it actually cites, four converged optional members took
+#: **12.28 to 12.97 minutes** — `winglet off` 12.37-12.38,
+#: `priced_equipment_fit__airframe_only` 12.97, `chain_eta_x0.90` 12.32-12.33,
+#: `chain_eta_x1.10` 12.28-12.40 — so a 12-minute cap sat below four members
+#: that converge, and the 2026-08-10 battery duly failed the two of them it
+#: reached. (§34.1 caught this same substitution of `vtail_sample`'s timings for
+#: rcv2's in the flatness cap; it was made twice in this constant block.)
+#:
+#: Sixteen clears all four with margin and still refuses an unselected
+#: alternative half an hour. It is deliberately NOT set from the worst measured
+#: member plus epsilon: `winglet off` is a paired study's BASELINE, so losing it
+#: costs the comparison rather than one candidate.
+OPTIONAL_MEMBER_TIMEOUT_MIN = 16.0
 
 #: Wall-clock ceiling for ONE FLATNESS MEMBER, minutes — well below
 #: `SOLVE_TIMEOUT_MIN`, because a span perturbation that is going to converge on
@@ -2628,25 +2706,34 @@ OPTIONAL_MEMBER_TIMEOUT_MIN = 12.0
 #: recorded as unproven rather than consuming the same budget repeatedly. This
 #: is an expenditure rule, not a mathematical inference about feasibility.
 #:
-#: **10.0 as a TRIAL — user decision, 2026-08-10, superseding the 2026-07-31
-#: decision to hold 20.** The 20 stood on two legs: the one solve known to
-#: converge past 12 minutes took 21.5, and a wrongly-timed-out member silently
-#: dropped its span from the curve. Both legs have moved. Graph sharing brought
-#: converged flatness members to 1.7-3.2 minutes (the pre-sharing record was
-#: 6.0, and 21.5 belonged to a tail-topology swap, a different problem), and a
-#: timeout no longer loses anything silently — the member is recorded as timed
-#: out, smaller spans as unproven, and a sleep-spanning timeout does not
-#: cascade at all. The worst case is now visible evidence, not a silent hole,
-#: which is what makes a cheaper cap testable at all.
+#: **20.0. The 10-minute trial ran and ENDED ON ITS OWN EXIT CONDITION**
+#: (FINDINGS §35.3, first full rcv2 battery, 2026-08-10). It was tried because
+#: graph sharing had brought converged flatness members to 1.7-3.2 minutes and
+#: because a wrong timeout was now visible evidence rather than a silent hole.
+#: The exit condition was written here: a timed-out member whose convergence
+#: trace reads "still converging when the clock stopped" means 10 is too tight,
+#: while "stuck, not slow" confirms the cap.
 #:
-#: THE EXIT CONDITION, so the trial ends on evidence rather than mood: a
-#: timed-out flatness member whose convergence trace reads "still converging
-#: when the clock stopped" is the signal that 10 is too tight — raise it back
-#: toward 20 on that member's span. A trace reading "stuck, not slow" instead
-#: CONFIRMS the cap: RCV2_CAP_PRICING §4 measured 15 vs 60 minutes on the
-#: first infeasible span and four times the clock bought no certificate, just
-#: a dual blow-up.
-FLATNESS_TIMEOUT_MIN = 10.0
+#: The 2.0 m member returned "still converging" verbatim — at `inf_pr_final`
+#: 1.8e-04, a worst violation of 1.6e-05 on `L == weight_n`, and primal progress
+#: over the last 25 iterations still POSITIVE. That is the span the champion
+#: sits on, and the span both main batteries converge in 6.39 and 6.43 minutes.
+#: The 1.7-3.2 figure was `vtail_sample`'s; rcv2's converged flatness members
+#: run 4.22-6.43, so 10 was never the 3x margin the trial assumed — it was 1.56x
+#: on a member that is not even the hard one.
+#:
+#: The cost of getting it wrong is not one span. Because the largest span runs
+#: first, its timeout cascaded into all five smaller spans and the sweep
+#: returned NOTHING, where main returned four converged points. That asymmetry
+#: is why this errs high: an over-generous cap costs one member's clock, and a
+#: tight one can cost the entire curve.
+#:
+#: The "stuck, not slow" half of the exit condition still stands and is still
+#: the reason this is not larger — RCV2_CAP_PRICING §4 measured 15 vs 60 minutes
+#: on the first infeasible span, and four times the clock bought no certificate,
+#: just a dual blow-up. Both rcv2 flatness members that genuinely stall (1.76 m
+#: and 1.70 m) read exactly that in both main batteries.
+FLATNESS_TIMEOUT_MIN = 20.0
 
 
 #: How far BELOW the incumbent span the sweep reaches, as a fraction of it.
@@ -2789,12 +2876,30 @@ def flatness_sweep(
             # exposure is asymmetric: cascading wrongly drops the tail of the
             # curve, while declining to cascade costs one bounded member budget.
             slept = float(fr[span].get("suspended_minutes") or 0.0)
+            verdict = (fr[span].get("convergence") or {}).get("verdict")
             if slept > SUSPENSION_FLOOR_MIN:
                 log.info(
                     "  flatness sweep: %.2f m hit its wall clock but the "
                     "process was suspended for %.1f min of it; smaller spans "
                     "still get their own budget",
                     span, slept,
+                )
+            elif verdict == VERDICT_STILL_CONVERGING:
+                # Same exemption as the sleep case above, for the same reason: a
+                # member still descending when the clock stopped did not get its
+                # budget either, so its timeout is evidence about the CAP and
+                # not about the problem. Cascading on it is how the 2026-08-10
+                # battery turned one marginal 2.0 m timeout into an empty sweep
+                # — main returned four converged points, that run returned none
+                # (FINDINGS §35.3). The other two verdicts still cascade: a dual
+                # blow-up or a starved corner is the solver saying more clock
+                # buys nothing, which is exactly when smaller spans should not
+                # each buy one.
+                log.info(
+                    "  flatness sweep: %.2f m hit its wall clock but was still "
+                    "converging; that is evidence the cap is short, not that "
+                    "smaller spans are hopeless — they still get their budget",
+                    span,
                 )
             else:
                 timed_out_at = span

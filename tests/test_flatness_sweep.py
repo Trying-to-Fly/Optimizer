@@ -93,15 +93,16 @@ def test_a_member_is_capped_well_below_the_champion_s_budget():
     b = _Batch()
     solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
     assert {t for _, t in b.jobs} == {solve.FLATNESS_TIMEOUT_MIN}
-    # 6.0 min is the slowest FLATNESS member that ever converged BEFORE graph
-    # sharing (n = 6, both runs, both chord caps); the four since took 1.7-3.2
-    # min. Not "the slowest solve on the model" — that is tail_type=conventional
-    # at 21.5 min, a different problem from a span perturbation. The cap sat at
-    # 20 on that count (user decision, 2026-07-31) while a wrong timeout meant a
-    # silently lost span; now that a timeout is recorded and bounded by the
-    # cascade, 10 is on trial (user decision, 2026-08-10) — the decision record
-    # and its exit condition live at `FLATNESS_TIMEOUT_MIN`.
-    SLOWEST_CONVERGED_FLATNESS_MIN = 6.0
+    # 6.43 min is the slowest FLATNESS member measured converging on the
+    # aeroplane this project flies: rcv2's four converged spans run 4.22-6.43 in
+    # both main batteries, WITH graph sharing. The 1.7-3.2 min figure that once
+    # sat here is `vtail_sample`'s, and substituting it for rcv2's is precisely
+    # what put the cap below a member that converges (FINDINGS §34.1, §35.3).
+    # Not "the slowest solve on the model" either — that is
+    # tail_type=conventional at 21.5 min, a different problem from a span
+    # perturbation. The 10-minute trial ran on 2026-08-10 and ended on its own
+    # exit condition; the decision record lives at `FLATNESS_TIMEOUT_MIN`.
+    SLOWEST_CONVERGED_FLATNESS_MIN = 6.43
     assert 1.5 * SLOWEST_CONVERGED_FLATNESS_MIN <= solve.FLATNESS_TIMEOUT_MIN
     assert solve.FLATNESS_TIMEOUT_MIN < solve.SOLVE_TIMEOUT_MIN
 
@@ -163,6 +164,68 @@ def test_a_timeout_spanning_a_sleep_window_does_not_cascade():
     by_span = {round(e["span"], 4): e for e in flat}
     assert by_span[1.8]["return_status"] == TIMEOUT
     assert all(by_span[s]["objective_value"] is not None for s in (1.7, 1.6, 1.5))
+
+
+def test_a_timeout_that_was_still_converging_does_not_cascade():
+    """The cap being short is evidence about the CAP, not about smaller spans.
+
+    Same exemption as the sleep case, for the same reason and with the same
+    asymmetry: a member still descending when the clock stopped never received
+    its budget. FINDINGS §35.3 is what this costs when it is missing — the 2.0 m
+    member timed out reading "still converging" three minutes past a cap that
+    was too tight, and the cascade turned that into an EMPTY sweep where main
+    returned four converged points.
+
+    The verdict is read from a stable key rather than the prose beside it, so
+    that rewording an artifact string cannot silently change which members
+    cascade.
+    """
+
+    class _StillConvergingBatch(_Batch):
+        def __call__(self, label, jobs, **kw):
+            out = super().__call__(label, jobs, **kw)
+            for key, kw_job in jobs:
+                if round(kw_job["fixed"]["span"], 4) == 1.8:
+                    out[key]["convergence"] = {
+                        "verdict": solve.VERDICT_STILL_CONVERGING,
+                        "reading": "still converging when the clock stopped",
+                    }
+            return out
+
+    b = _StillConvergingBatch({1.8: TIMEOUT})
+    flat = solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
+    assert b.asked == pytest.approx([2.0, 1.9, 1.8, 1.7, 1.6, 1.5])
+    by_span = {round(e["span"], 4): e for e in flat}
+    assert by_span[1.8]["return_status"] == TIMEOUT
+    assert all(by_span[s]["objective_value"] is not None for s in (1.7, 1.6, 1.5))
+
+
+@pytest.mark.parametrize(
+    "verdict", [solve.VERDICT_DUAL_BLOW_UP, solve.VERDICT_STARVED_CORNER]
+)
+def test_a_stuck_timeout_still_cascades(verdict):
+    """The other half of the exit condition, and the reason the guard is narrow.
+
+    "Stuck, not slow" is the solver saying more clock buys nothing — measured
+    three separate times (FINDINGS §14.5.7, RCV2_CAP_PRICING §4). That is
+    precisely when smaller spans should not each buy the same budget, so only
+    `still_converging` may exempt a member.
+    """
+
+    class _StuckBatch(_Batch):
+        def __call__(self, label, jobs, **kw):
+            out = super().__call__(label, jobs, **kw)
+            for key, kw_job in jobs:
+                if round(kw_job["fixed"]["span"], 4) == 1.8:
+                    out[key]["convergence"] = {"verdict": verdict}
+            return out
+
+    b = _StuckBatch({1.8: TIMEOUT})
+    flat = solve.flatness_sweep(b, span_cap=2.0, span_min=1.5)
+    assert b.asked == pytest.approx([2.0, 1.9, 1.8])
+    by_span = {round(e["span"], 4): e for e in flat}
+    for span in (1.7, 1.6, 1.5):
+        assert by_span[span]["return_status"] == SKIPPED_AFTER_TIMEOUT
 
 
 def test_the_real_2026_07_31_sweep_costs_less_than_it_did():
