@@ -196,6 +196,14 @@ def test_an_all_feasible_sweep_is_unaffected():
 
 
 def test_each_converged_fixed_span_hot_starts_the_next_member():
+    """Each converged span seeds the next — by NAME, never by solver vector.
+
+    The chaining is the point: member N+1 starts from member N's design rather
+    than the aircraft's declared guesses. What it must NOT carry is the raw
+    IPOPT seed, which is a per-member ratio vector (see
+    `solve._apply_solver_seed`); the 2026-08-10 rcv2 battery failed every
+    hot-started member at iteration 0 on exactly that.
+    """
     class _SeedBatch(_Batch):
         def __call__(self, label, jobs, **kw):
             out = super().__call__(label, jobs, **kw)
@@ -207,17 +215,16 @@ def test_each_converged_fixed_span_hot_starts_the_next_member():
             return out
 
     b = _SeedBatch()
-    champion_seed = {"nx": 1, "ng": 0, "x": [2.0], "lam_g": []}
     solve.flatness_sweep(
         b, span_cap=2.0, span_min=1.8,
-        warm_kwargs={"inits": {"span": 2.0}, "solver_seed": champion_seed},
+        warm_kwargs={"inits": {"span": 2.0}},
     )
 
-    assert b.job_kwargs[0]["solver_seed"] == champion_seed
-    assert b.job_kwargs[1]["solver_seed"] == {
-        "nx": 1, "ng": 1, "x": [2.0], "lam_g": [0.0],
-    }
+    # the second member starts from the first member's converged design...
     assert b.job_kwargs[1]["inits"]["span"] == pytest.approx(2.0)
+    # ...and no member is ever handed a raw solver vector, even though the
+    # stub recorded one on every result.
+    assert all("solver_seed" not in kw for kw in b.job_kwargs)
 
 
 def test_the_sweep_samples_the_span_range_inclusively():

@@ -114,6 +114,9 @@ def test_complete_solver_seed_round_trips_and_checks_dimensions():
     assert seed is not None
     assert (seed["nx"], seed["ng"]) == (1, 2)
 
+    # SAME `init_guess`, so same scale — the one case where replaying raw `x`
+    # means anything. See the scaling test below for why that is not the case a
+    # hot start produces.
     compatible = asb.Opti()
     compatible.variable(init_guess=2.0, lower_bound=0.0)
     compatible.subject_to(compatible.x[0] <= 3.0)
@@ -124,7 +127,35 @@ def test_complete_solver_seed_round_trips_and_checks_dimensions():
     assert not solve._apply_solver_seed(incompatible, seed)
 
 
-def test_hot_start_kwargs_carry_the_operating_state_and_private_seed():
+def test_a_solver_seed_is_meaningless_once_init_guess_moves():
+    """Why `_hot_start_kwargs` does not carry `solver_seed`.
+
+    `nx`/`ng` match, so `_apply_solver_seed` accepts the seed — and the restored
+    PHYSICAL value is wrong, because AeroSandbox normalizes by `init_guess`
+    (`var = scale * raw`). This is the exact shape of the 2026-08-10 rcv2
+    failure: a hot start sets `init_guess` to the champion, which changes the
+    scale, so replaying the champion's ratios applies the design twice.
+    """
+    original = asb.Opti()
+    variable = original.variable(init_guess=2.0, lower_bound=0.0)
+    original.minimize((variable - 8.0) ** 2)
+    solution = original.solve(verbose=False)
+    converged = float(solution.value(variable))
+    seed = solve._capture_solver_seed(original, solution)
+    # stored as a RATIO against init_guess=2.0, not as the physical 8.0
+    assert seed["x"][0] == pytest.approx(converged / 2.0, rel=1e-6)
+
+    # A hot start re-declares the variable AT the champion's value.
+    target = asb.Opti()
+    hot = target.variable(init_guess=converged, lower_bound=0.0)
+    assert solve._apply_solver_seed(target, seed) is True   # the guard passes...
+    restored = float(target.value(hot, target.initial()))
+    # ...and the physical starting point is the design squared over its guess.
+    assert restored == pytest.approx(converged**2 / 2.0, rel=1e-6)
+    assert restored != pytest.approx(converged, rel=1e-3)
+
+
+def test_hot_start_kwargs_carry_the_operating_state_but_never_the_seed():
     result = {
         "dv": {"span": 2.0},
         "V_ms": 9.5,
@@ -142,4 +173,6 @@ def test_hot_start_kwargs_carry_the_operating_state_and_private_seed():
         "deflection_deg": -2.0,
         "prop_rev_s": 60.0,
     }
-    assert kwargs["solver_seed"] is result["_solver_seed"]
+    # The seed is recorded on the member but deliberately NOT replayed: it is a
+    # per-member ratio vector and a hot start is exactly when the basis moves.
+    assert "solver_seed" not in kwargs

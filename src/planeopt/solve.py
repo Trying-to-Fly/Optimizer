@@ -961,7 +961,22 @@ def multistart_consensus(first: dict, second: dict) -> tuple[bool, dict]:
 
 
 def _hot_start_kwargs(result: dict) -> dict:
-    """Primal fallback plus exact solver seed for a nearby re-solve."""
+    """The champion's operating point, BY NAME, for a nearby re-solve.
+
+    **No `solver_seed`, deliberately** — see `_apply_solver_seed`. AeroSandbox
+    normalizes each variable by its own `init_guess`, so IPOPT's raw `x` is a
+    vector of RATIOS whose meaning is fixed by the member that produced it. A
+    hot start is precisely the case where `init_guess` differs (it becomes the
+    champion's value), so replaying those ratios applies the design twice. The
+    2026-08-10 rcv2 battery measured the result: every hot-started member —
+    `mass_bump` and all four `prop_choice` alternatives — died with
+    `Invalid_Number_Detected` at iteration 0, sixteen constraint rows NaN, on
+    members that converge normally on main.
+
+    `inits` is the part that was always sound: physical values keyed by name,
+    which `Opti.variable(init_guess=...)` scales correctly on the way in. That
+    alone reproduced main's `mass_bump` objective exactly (104.3996).
+    """
     inits = dict(result.get("dv") or {})
     for source, target in (
         ("V_ms", "V"),
@@ -972,10 +987,7 @@ def _hot_start_kwargs(result: dict) -> dict:
             inits[target] = result[source]
     if result.get("rpm") is not None:
         inits["prop_rev_s"] = float(result["rpm"]) / 60.0
-    out = {"inits": inits}
-    if result.get("_solver_seed") is not None:
-        out["solver_seed"] = result["_solver_seed"]
-    return out
+    return {"inits": inits}
 
 
 def airworthiness_price(
@@ -1715,10 +1727,26 @@ EXACT_HESSIAN_OPTIONS = {"ipopt.hessian_approximation": "exact"}
 def _apply_solver_seed(opti, seed: dict | None) -> bool:
     """Restore a complete IPOPT primal/constraint-dual point when compatible.
 
-    A discrete candidate may change the NLP shape. Such a seed is not partially
-    applied: both dimensions must match exactly or the new problem starts from
-    its ordinary declared guesses. This makes hot-starting an acceleration, not
-    a source of misaligned multipliers.
+    **NOT WIRED IN — do not re-attach this to `_hot_start_kwargs` without first
+    fixing the scaling basis.** The dimension check below is necessary and NOT
+    sufficient, which is the whole defect. AeroSandbox builds every variable as
+    `var = scale * raw`, taking `scale` from that member's `init_guess`, and
+    scales constraint rows the same way (`var/scale >= lower_bound/scale`). So
+    `opti.x` and `lam_g` are RATIOS against a per-member basis, not physical
+    values. Two members of one model therefore have identical `nx`/`ng` and
+    incompatible vectors, and this function cannot tell the difference.
+
+    Measured, 2026-08-10 rcv2 battery: seeding `mass_bump` from the champion
+    left the initial point finite in `x` but NaN in sixteen rows of `g`, and
+    IPOPT stopped at iteration 0 with `Invalid_Number_Detected`. The champion's
+    own converged ratios were `[1.111, 1.25, 0.745, 1.929, ...]`; the correct
+    starting point for a member already seeded with `inits` is `[1.0, 1.0, ...]`,
+    because its scale IS the champion. Applying the former on top of the latter
+    doubles the design. Every hot-started member in that run failed identically.
+
+    A correct implementation must record the per-variable and per-constraint
+    scale factors alongside the vectors, or store physical values keyed by name.
+    The primal half of that is already available and already used: `inits`.
     """
     if not seed:
         return False
