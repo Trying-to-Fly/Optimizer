@@ -76,13 +76,13 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 `docs/studies/rcv2_post_fix_20260811.json`). Five of six member failures gone,
 both members main cannot solve kept, flatness sweep whole. What matters now:
 
-1. **One bug is OPEN and it is the best one left.** `printed_mass_x0.90` fails
-   on this branch in BOTH warm-start configurations and gets worse (57 → 102
-   iterations); main solves it in 4.51 min, its fastest member. Not the options,
-   therefore the `inits` seed or the champion behind it. **The experiment that
-   settles it is cold-vs-seeded on that one member and it is unrun** —
-   `tools/bughunt/warm_start_experiment.py` is the instrument, repaired in
-   78f5a4c.
+1. **CLOSED overnight (§36.7).** `printed_mass_x0.90` failed on this branch in
+   both warm-start configurations while main solves it in 4.51 min. Paired arms
+   settled it: cold 6.31 min / 26 iterations CONVERGED, seeded 17.04 / 78 timed
+   out, same closest miss (`usable_nose / motor["length"] >= 1.0`). The seed
+   strands a member its own cold solve reaches. Fixed by `_cold_retry` — a
+   failed seeded battery member is retried once without its seed. **No battery
+   has run with that in place yet.**
 2. **Span chaining is removed from the flatness sweep (§36.3) and UNMEASURED.**
    It reported span 1.82 m as `Solve_Succeeded` at 50.6483 against main's
    105.8570 — cruise 17.67 m/s, taper at its bound — inside a curve reading

@@ -3455,3 +3455,40 @@ produced an unchained sweep on this branch, and the claim that cold spans
 reproduce main's curve rests on main's own two batteries rather than on this
 code. `design_trustworthy` is False again (0.0572 vs 0.0534 across meshes), on
 `aero.py` byte-identical to main, so it remains a property of the champion.
+
+### 36.7 §36.4 closed: the seed strands a member its own cold solve reaches
+
+Paired arms on `printed_mass_x0.90`, one machine, back to back, control first
+(`tools/bughunt/printed_mass_seed_experiment.py`, arms in
+`docs/studies/printed_mass_seed/`):
+
+| arm | wall | iters | objective | status |
+|---|---:|---:|---|---|
+| `champion` (seed source) | 5.66 | 22 | 105.8184 | converged |
+| `x090_cold` | **6.31** | **26** | **110.5926** | **converged** |
+| `x090_seeded` | **17.04** | **78** | — | `Maximum_WallTime_Exceeded` |
+
+Same closest miss the battery reported, `usable_nose / motor["length"] >= 1.0`.
+So the -10% design is perfectly findable — 26 iterations from the declared
+guesses — and the battery simply could not reach it from the champion. At -10%
+printed mass the optimum shrinks, and shrinking from the champion's nose
+geometry drives into the motor-fit wall. That was the plausible story in §36.4;
+it is now the measured one.
+
+**Fixed by retrying a failed seeded battery member once, cold** (`_cold_retry`).
+Retrying rather than choosing which members to seed is the point: the same
+battery has seeding earn its place elsewhere — `chain_eta_x0.90` 47% faster than
+main, `polyhedral2` and `continuous_cant` solved at all — and nothing anyone has
+stated predicts which members a seed helps and which it strands. The cost is
+bounded and paid only on failure: one extra member budget, in exchange for an
+answer instead of a hole. A cold retry that also fails keeps the SEEDED result,
+because that is the one carrying the convergence verdict.
+
+Scoped to the re-solve battery, where the failure was measured. The discrete
+studies also seed and none of them failed in this run, so covering them too
+would be generalising past the evidence — the error §34.4 made and §35 had to
+undo. If a study member ever fails seeded, this is the shape of the fix.
+
+UNMEASURED: no battery has yet run with `_cold_retry` in place, and the
+experiment used the DECLARED champion rather than the battery's adopted one, so
+it reproduces the mechanism rather than that member exactly.

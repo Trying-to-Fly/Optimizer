@@ -1,0 +1,397 @@
+{
+  "arm": "x090_cold",
+  "seeded": false,
+  "printed_scale": 0.9,
+  "minutes": 6.31,
+  "peak_gb": 5.5,
+  "status": "Solve_Succeeded",
+  "iter_count": 26.0,
+  "failed": null,
+  "objective_value": 110.59258737145466,
+  "V_ms": 9.499999890018678,
+  "auw_kg": 2.0514138397606727,
+  "convergence": null,
+  "machine_before": {
+    "ram_total_gb": 25.44,
+    "ram_available_gb": 23.96,
+    "swap_gb": 10.0
+  },
+  "machine_after": {
+    "ram_total_gb": 25.44,
+    "ram_available_gb": 19.88,
+    "swap_gb": 10.0
+  },
+  "result": {
+    "dv": {
+      "span": 2.0000000199866195,
+      "c_root": 0.27067421753884346,
+      "taper": 0.5171475850860046,
+      "fullness": 1.9594347116235844,
+      "le_shear": 1.0000000099608912,
+      "eta_break": 0.24999999613530346,
+      "washout_tip": 1.9911449945473154e-08,
+      "tail_arm": 1.0645619269146673,
+      "t_span": 0.45273530093868325,
+      "t_c_root": 0.09331901227642168,
+      "t_taper": 0.9999999932858539,
+      "t_sweep": 1.58426977071343e-07,
+      "cs_frac": 0.4000000038580706,
+      "spar_od_center": 0.015924476633351045,
+      "spar_wall_center": 0.0005999999900368276,
+      "spar_od_outer": 0.013598076340131016,
+      "spar_wall_outer": 0.0004999999900133456,
+      "ballast_kg": -6.992424762040082e-10,
+      "x_battery": 0.33759173061442416,
+      "pod_nose": 0.07407452478111988,
+      "pod_bay": 0.3452999300060784,
+      "pod_xs": 0.8744087100871071,
+      "pod_bay_end": 0.6108916706196666,
+      "pod_wh": 1.001744103373241,
+      "dihedral_tip": 4.4601424377964705,
+      "d_exp": -4.800601816724333e-09,
+      "pod_tail": 0.12175385949908235,
+      "t_dihedral": 52.37126405004273,
+      "wl_len": 0.0867728601485733,
+      "wl_cant": 88.00000087777553,
+      "wl_cr": 0.6666666634721516,
+      "wl_taper": 1.0000000096451898,
+      "wl_toe": -2.616459863113869,
+      "x_esc": 0.44259172077880427,
+      "x_flight_controller": 0.5308917006170396,
+      "x_gps_compass": 0.5390917203317191,
+      "x_airspeed_board": 0.5968916806187906,
+      "x_buzzer": 0.5580917144412211,
+      "x_companion_pi": 0.4450917206152949,
+      "x_bec_pi": 0.49074171061616695,
+      "x_receiver_elrs": 0.5718916906179149,
+      "x_telemetry_sik": 0.43909172083857895
+    },
+    "active_bounds": [
+      {
+        "variable": "ballast_kg",
+        "value": -6.992424762040082e-10,
+        "bound": 0.0,
+        "at": "lower",
+        "box": [
+          0.0,
+          0.2
+        ]
+      },
+      {
+        "variable": "cs_frac",
+        "value": 0.4000000038580706,
+        "bound": 0.4,
+        "at": "upper",
+        "box": [
+          0.2,
+          0.4
+        ]
+      },
+      {
+        "variable": "d_exp",
+        "value": -4.800601816724333e-09,
+        "bound": 0.0,
+        "at": "lower",
+        "box": [
+          0.0,
+          2.0
+        ]
+      },
+      {
+        "variable": "eta_break",
+        "value": 0.24999999613530346,
+        "bound": 0.25,
+        "at": "lower",
+        "box": [
+          0.25,
+          0.85
+        ]
+      },
+      {
+        "variable": "le_shear",
+        "value": 1.0000000099608912,
+        "bound": 1.0,
+        "at": "upper",
+        "box": [
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "variable": "span",
+        "value": 2.0000000199866195,
+        "bound": 2.0,
+        "at": "upper",
+        "box": [
+          1.5,
+          2.0
+        ]
+      },
+      {
+        "variable": "spar_wall_center",
+        "value": 0.0005999999900368276,
+        "bound": 0.0006,
+        "at": "lower",
+        "box": [
+          0.0006,
+          0.002
+        ]
+      },
+      {
+        "variable": "spar_wall_outer",
+        "value": 0.0004999999900133456,
+        "bound": 0.0005,
+        "at": "lower",
+        "box": [
+          0.0005,
+          0.0018
+        ]
+      },
+      {
+        "variable": "t_sweep",
+        "value": 1.58426977071343e-07,
+        "bound": 0.0,
+        "at": "lower",
+        "box": [
+          0.0,
+          25.0
+        ]
+      },
+      {
+        "variable": "t_taper",
+        "value": 0.9999999932858539,
+        "bound": 1.0,
+        "at": "upper",
+        "box": [
+          0.4,
+          1.0
+        ]
+      },
+      {
+        "variable": "washout_tip",
+        "value": 1.9911449945473154e-08,
+        "bound": 0.0,
+        "at": "upper",
+        "box": [
+          -4.0,
+          0.0
+        ]
+      },
+      {
+        "variable": "wl_cant",
+        "value": 88.00000087777553,
+        "bound": 88.0,
+        "at": "upper",
+        "box": [
+          55.0,
+          88.0
+        ]
+      },
+      {
+        "variable": "wl_taper",
+        "value": 1.0000000096451898,
+        "bound": 1.0,
+        "at": "upper",
+        "box": [
+          0.5,
+          1.0
+        ]
+      }
+    ],
+    "dv_bounds": {
+      "span": [
+        1.5,
+        2.0
+      ],
+      "c_root": [
+        0.16,
+        0.275
+      ],
+      "taper": [
+        0.35,
+        1.0
+      ],
+      "fullness": [
+        1.0,
+        4.0
+      ],
+      "le_shear": [
+        0.0,
+        1.0
+      ],
+      "eta_break": [
+        0.25,
+        0.85
+      ],
+      "washout_tip": [
+        -4.0,
+        0.0
+      ],
+      "tail_arm": [
+        0.4,
+        1.2
+      ],
+      "t_span": [
+        0.25,
+        1.2
+      ],
+      "t_c_root": [
+        0.06,
+        0.22
+      ],
+      "t_taper": [
+        0.4,
+        1.0
+      ],
+      "t_sweep": [
+        0.0,
+        25.0
+      ],
+      "cs_frac": [
+        0.2,
+        0.4
+      ],
+      "spar_od_center": [
+        0.006,
+        0.02
+      ],
+      "spar_wall_center": [
+        0.0006,
+        0.002
+      ],
+      "spar_od_outer": [
+        0.005,
+        0.02
+      ],
+      "spar_wall_outer": [
+        0.0005,
+        0.0018
+      ],
+      "ballast_kg": [
+        0.0,
+        0.2
+      ],
+      "x_battery": [
+        -0.1,
+        0.4
+      ],
+      "pod_nose": [
+        0.03,
+        0.25
+      ],
+      "pod_bay": [
+        0.2,
+        0.55
+      ],
+      "pod_xs": [
+        0.75,
+        1.3
+      ],
+      "pod_bay_end": [
+        0.4,
+        0.62
+      ],
+      "pod_wh": [
+        0.65,
+        1.55
+      ],
+      "dihedral_tip": [
+        0.0,
+        20.0
+      ],
+      "d_exp": [
+        0.0,
+        2.0
+      ],
+      "pod_tail": [
+        0.1,
+        0.45
+      ],
+      "t_dihedral": [
+        20.0,
+        55.0
+      ],
+      "wl_len": [
+        0.05,
+        0.3
+      ],
+      "wl_cant": [
+        55.0,
+        88.0
+      ],
+      "wl_cr": [
+        0.4,
+        0.95
+      ],
+      "wl_taper": [
+        0.5,
+        1.0
+      ],
+      "wl_toe": [
+        -3.0,
+        3.0
+      ],
+      "x_esc": [
+        -0.1,
+        1.6
+      ],
+      "x_flight_controller": [
+        -0.1,
+        1.6
+      ],
+      "x_gps_compass": [
+        -0.1,
+        1.6
+      ],
+      "x_airspeed_board": [
+        -0.1,
+        1.6
+      ],
+      "x_buzzer": [
+        -0.1,
+        1.6
+      ],
+      "x_companion_pi": [
+        -0.1,
+        1.6
+      ],
+      "x_bec_pi": [
+        -0.1,
+        1.6
+      ],
+      "x_receiver_elrs": [
+        -0.1,
+        1.6
+      ],
+      "x_telemetry_sik": [
+        -0.1,
+        1.6
+      ]
+    },
+    "V_ms": 9.499999890018678,
+    "alpha_deg": 5.769178416321618,
+    "deflection_deg": -3.364952771986753,
+    "rpm": 3685.8216264347984,
+    "objective_value": 110.59258737145466,
+    "auw_kg": 2.0514138397606727,
+    "x_cg_m": 0.49864591936611147,
+    "static_margin": 0.07999999000230493,
+    "P_elec_w": 22.694307977945485,
+    "motor_voltage": 4.222989646833785,
+    "motor_current_a": 5.105291365138123,
+    "throttle_frac": 0.28533713829958,
+    "current_cap_a": 40.0,
+    "placard_speed_ms": null,
+    "drag_n": 0.9687679402762478,
+    "J": 0.5534955517391388,
+    "clmax_ab_used": [
+      1.0867661240406215,
+      0.01877562808319164
+    ],
+    "suspended_minutes": 0.0,
+    "return_status": "Solve_Succeeded",
+    "iter_count": 26.0,
+    "converged": true,
+    "warm_started": false
+  }
+}

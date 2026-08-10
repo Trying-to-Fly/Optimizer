@@ -1,0 +1,25 @@
+{
+  "arm": "x090_seeded",
+  "seeded": true,
+  "printed_scale": 0.9,
+  "minutes": 17.04,
+  "peak_gb": 5.95,
+  "status": "Maximum_WallTime_Exceeded",
+  "iter_count": 78.0,
+  "failed": "SolveFailure: Maximum_WallTime_Exceeded after 78 iterations; closest miss aircraft.py:1150 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)",
+  "objective_value": null,
+  "V_ms": null,
+  "auw_kg": null,
+  "convergence": null,
+  "machine_before": {
+    "ram_total_gb": 25.44,
+    "ram_available_gb": 23.97,
+    "swap_gb": 10.0
+  },
+  "machine_after": {
+    "ram_total_gb": 25.44,
+    "ram_available_gb": 18.31,
+    "swap_gb": 10.0
+  },
+  "result": {}
+}

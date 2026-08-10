@@ -217,3 +217,80 @@ def test_the_optional_cap_clears_every_optional_member_that_has_converged():
     # And it must still do the job it exists for: no unselected alternative
     # gets the primary solve's full entitlement.
     assert solve.OPTIONAL_MEMBER_TIMEOUT_MIN < solve.SOLVE_TIMEOUT_MIN
+
+
+def test_a_seeded_battery_member_that_fails_is_retried_cold():
+    """FINDINGS §36.4: a champion seed can strand a member its cold solve reaches.
+
+    `printed_mass_x0.90` is main's FASTEST member at 4.51 min and failed on this
+    branch in both warm-start configurations. Paired arms settled it — cold 6.31
+    min / 26 iterations converged, seeded 17.04 / 78 timed out, same closest
+    miss the battery reported. So the battery must not treat a seeded failure as
+    the member's answer.
+    """
+    seen = []
+
+    def batch(label, jobs, prep=None, restore=None, timeout_min=None):
+        seen.append((label, [(k, dict(kw)) for k, kw in jobs]))
+        out = {}
+        for key, kw in jobs:
+            # fails while seeded, converges once the seed is gone
+            if key == "printed_mass_x0.90" and "inits" in kw:
+                out[key] = {"failed": "Maximum_WallTime_Exceeded",
+                            "return_status": "Maximum_WallTime_Exceeded"}
+            else:
+                out[key] = {"objective_value": 100.0, "dv": {"span": 2.0}}
+        return out
+
+    jobs = [
+        ("printed_mass_x1.10", {"inits": {"span": 2.0}, "printed_scale": 1.10}),
+        ("printed_mass_x0.90", {"inits": {"span": 2.0}, "printed_scale": 0.90}),
+    ]
+    first = batch("re-solve battery", jobs)
+    assert "failed" in first["printed_mass_x0.90"]
+
+    recovered = solve._cold_retry(batch, jobs, first, timeout_min=16.0)
+
+    assert set(recovered) == {"printed_mass_x0.90"}
+    assert recovered["printed_mass_x0.90"]["objective_value"] == 100.0
+    # the retry must drop the seed and keep the perturbation — retrying with
+    # neither would measure a different member entirely
+    retry_jobs = dict(seen[-1][1])
+    assert "inits" not in retry_jobs["printed_mass_x0.90"]
+    assert retry_jobs["printed_mass_x0.90"]["printed_scale"] == 0.90
+    assert len(retry_jobs) == 1, "only the failed member is retried"
+
+
+def test_a_member_that_fails_cold_too_keeps_its_seeded_diagnosis():
+    """Two identical-looking failures are worse than one explained failure.
+
+    The seeded result carries the convergence verdict (`dual_blow_up`,
+    `starved_corner`, `still_converging`) that says what KIND of failure it was
+    and therefore what to do about it. A cold retry that also fails must not
+    overwrite that with a second bare timeout.
+    """
+    def batch(label, jobs, prep=None, restore=None, timeout_min=None):
+        return {k: {"failed": "Maximum_WallTime_Exceeded"} for k, _ in jobs}
+
+    jobs = [("chain_eta_x0.90", {"inits": {"span": 2.0}, "eta_scale": 0.90})]
+    seeded = {"chain_eta_x0.90": {
+        "failed": "Maximum_WallTime_Exceeded",
+        "convergence": {"verdict": solve.VERDICT_STARVED_CORNER},
+    }}
+
+    assert solve._cold_retry(batch, jobs, seeded, timeout_min=16.0) == {}
+
+
+def test_nothing_is_retried_when_every_member_converged():
+    """The cost is paid only on failure; a clean battery must cost nothing."""
+    calls = []
+
+    def batch(label, jobs, prep=None, restore=None, timeout_min=None):
+        calls.append(label)
+        return {k: {"objective_value": 1.0} for k, _ in jobs}
+
+    jobs = [("chain_eta_x1.10", {"inits": {}, "eta_scale": 1.10})]
+    good = {"chain_eta_x1.10": {"objective_value": 1.0}}
+
+    assert solve._cold_retry(batch, jobs, good, timeout_min=16.0) == {}
+    assert calls == []

@@ -1049,6 +1049,59 @@ def _hot_start_kwargs(result: dict) -> dict:
     return {"inits": inits}
 
 
+def _cold_retry(batch, jobs, results: dict, timeout_min: float) -> dict:
+    """Re-solve any SEEDED member that failed, once, without its seed.
+
+    FINDINGS §36.4 and the experiment that closed it
+    (`tools/bughunt/printed_mass_seed_experiment.py`): `printed_mass_x0.90` is
+    main's FASTEST member at 4.51 min, and it failed on this branch in both
+    warm-start configurations, getting worse between them. Paired arms on one
+    machine, control first, settled why —
+
+        x090_cold      6.31 min   26 iterations   converged
+        x090_seeded   17.04 min   78 iterations   Maximum_WallTime_Exceeded
+
+    — with the same closest miss the battery reported, `usable_nose /
+    motor["length"] >= 1.0`. At -10% printed mass the optimum shrinks, and
+    shrinking from the champion's nose geometry drives into the motor-fit wall.
+    The -10% design is perfectly findable; the battery just could not reach it
+    from where it was started.
+
+    Retrying rather than choosing which members to seed is deliberate. The same
+    battery shows seeding EARNING its place elsewhere — `chain_eta_x0.90`
+    converged 47% faster than main, and `polyhedral2` and `continuous_cant` are
+    members main has never solved at all. No rule anyone has stated predicts
+    which members a seed helps and which it strands, so the honest mechanism is
+    to try, and to fall back when trying fails.
+
+    The cost is bounded and only paid on failure: a member that fails seeded
+    costs its budget twice instead of once, in exchange for an answer instead of
+    a hole. A cold retry that ALSO fails changes nothing — the seeded result is
+    kept, because it carries the convergence trace that says what kind of
+    failure it was.
+
+    **Scoped to the re-solve battery, where the failure was measured.** The
+    discrete studies also seed and no study member failed in that run, so
+    extending this there would be generalising past the evidence — which is the
+    error §34.4 made and §35 had to undo. If a study member ever fails seeded,
+    this is the shape of the fix.
+    """
+    stale = [(label, {k: v for k, v in job.items() if k != "inits"})
+             for label, job in jobs if "failed" in (results.get(label) or {})]
+    if not stale:
+        return {}
+    log.info(
+        "  re-solve battery: %d seeded member(s) failed (%s); retrying cold, "
+        "because a champion seed can strand a member its own cold solve reaches",
+        len(stale), ", ".join(label for label, _ in stale),
+    )
+    retried = batch("re-solve battery (cold retry)", stale, timeout_min=timeout_min)
+    # Keep the seeded failure when the cold retry fails too: it is the one that
+    # carries a convergence verdict, and two identical-looking failures in an
+    # artifact are worse than one explained failure.
+    return {label: r for label, r in retried.items() if "failed" not in r}
+
+
 def airworthiness_price(
     feasible: list[dict], best: dict, rules: dict, v_min_ms: float, sign: int,
     points_for_rule=None,
@@ -3508,10 +3561,12 @@ def optimize(
     if not design_trustworthy:
         battery_jobs = [j for j in battery_jobs if j[0] == "mass_bump"]
     battery = {}
+    battery_timeout = min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min)
     battery_results = batch(
-        "re-solve battery", battery_jobs,
-        timeout_min=min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min),
+        "re-solve battery", battery_jobs, timeout_min=battery_timeout,
     )
+    battery_results |= _cold_retry(batch, battery_jobs, battery_results,
+                                   battery_timeout)
     for label, r in battery_results.items():
         if label == "mass_bump":
             continue
