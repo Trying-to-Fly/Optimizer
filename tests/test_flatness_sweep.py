@@ -258,40 +258,48 @@ def test_an_all_feasible_sweep_is_unaffected():
     assert by_span[1.5]["objective_value"] == pytest.approx(101.5)
 
 
-def test_each_converged_fixed_span_hot_starts_the_next_member():
-    """Each converged span seeds the next — by NAME, never by solver vector.
+def test_every_span_is_an_independent_re_optimization():
+    """No span may be seeded — not by its predecessor, not by the champion.
 
-    The chaining is the point: member N+1 starts from member N's design rather
-    than the aircraft's declared guesses. What it must NOT carry is the raw
-    IPOPT seed, which is a per-member ratio vector (see `solve._hot_start_kwargs`
-    and the scaling test in `test_solver_graph.py`); the 2026-08-10 rcv2 battery
-    failed every hot-started member at iteration 0 on exactly that.
+    The sweep answers "how flat is the optimum's NEIGHBOURHOOD", which is only
+    a property of the aeroplane if each point is re-optimized from the same
+    declared starting position. Seed member N+1 from member N and the curve
+    describes the path the sweep walked instead.
 
-    Nothing writes `_solver_seed` onto a result any more, so the stub below is
-    hypothetical — deliberately. It is the guard that catches someone
-    reintroducing a capture and letting it reach a member.
+    FINDINGS §36 is what that costs. Chaining walked span 1.82 m into a
+    different basin and reported it `Solve_Succeeded` at 50.6483 against main's
+    105.8570 — cruise 17.67 m/s against 10.12, taper pinned to its upper bound
+    — inside a curve that otherwise read 122 / 119 / 116. A timeout is visibly
+    absent from an artifact; this was a converged member with a plausible
+    status and a nonsense value, and nothing flagged it.
+
+    Main has never chained, and its four rcv2 spans are identical across two
+    batteries. There was no speed argument on the other side either: chained,
+    those four spans cost 25.59 min against main's cold 20.53.
     """
-    class _SeedBatch(_Batch):
-        def __call__(self, label, jobs, **kw):
-            out = super().__call__(label, jobs, **kw)
-            for result in out.values():
-                result["_solver_seed"] = {
-                    "nx": 1, "ng": 1, "x": [result["dv"]["span"]],
-                    "lam_g": [0.0],
-                }
-            return out
+    b = _Batch()
+    flat = solve.flatness_sweep(b, span_cap=2.0, span_min=1.8)
 
-    b = _SeedBatch()
-    solve.flatness_sweep(
-        b, span_cap=2.0, span_min=1.8,
-        warm_kwargs={"inits": {"span": 2.0}},
-    )
+    assert len(b.job_kwargs) == len(flat) == 6  # every span, none skipped here
+    for kw in b.job_kwargs:
+        # `fixed` and `timeout_min` are the whole contract; anything else is a
+        # starting position leaking in from another member.
+        assert set(kw) == {"fixed", "timeout_min"}
 
-    # the second member starts from the first member's converged design...
-    assert b.job_kwargs[1]["inits"]["span"] == pytest.approx(2.0)
-    # ...and no member is ever handed a raw solver vector, even though the
-    # stub recorded one on every result.
-    assert all("solver_seed" not in kw for kw in b.job_kwargs)
+
+def test_the_sweep_takes_no_seed_from_its_caller():
+    """`warm_kwargs` is GONE rather than defaulted to None.
+
+    A dormant parameter is an invitation — c532bbc made the same call about
+    `_apply_solver_seed`, that a guard which is necessary and not sufficient
+    gets trusted by whoever wires it back up. Here there is nothing to wire:
+    the sweep's contract is that it seeds nothing.
+    """
+    import inspect
+
+    params = inspect.signature(solve.flatness_sweep).parameters
+    assert "warm_kwargs" not in params
+    assert not any("warm" in p for p in params)
 
 
 def test_the_sweep_samples_the_span_range_inclusively():

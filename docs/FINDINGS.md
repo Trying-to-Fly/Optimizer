@@ -3294,7 +3294,7 @@ automatic seed may cost those gains. The expectation is therefore that the next
 run is slower than 181 minutes and more complete, and the number to beat is
 main's 333.
 
-### 35.7 What this does NOT establish
+### 35.7 What this does NOT establish (answered by §36)
 
 One battery, not a paired repeat, so a member that failed here might converge
 on a second run; main's figures are doubled and this branch's are not. The
@@ -3305,3 +3305,153 @@ diverge with `mu_init` varied. And the branch's three genuine gains
 never solved, so they have no cold control at all: they are new answers, but
 they are unverified new answers, and `continuous_cant` agreeing with main's
 `winglet off` to nine digits is the only one with independent corroboration.
+
+## 36. The four fixes, priced — and one silent wrong answer they uncovered (2026-08-11)
+
+§35 applied four changes without measuring any of them. This is the battery
+that prices them: same aeroplane, same mission, same GUI path, 269.8 minutes,
+against the two main-code batteries and against §35's own run. Distilled
+results: `docs/studies/rcv2_post_fix_20260811.json`.
+
+**Five of §35's six member failures are gone, both members main cannot solve
+are kept, and the flatness sweep is whole.** The sixth failure is a different
+bug that survives both configurations, and the sweep turned out to be carrying a
+worse defect than the one §35 fixed.
+
+### 36.1 The scoreboard
+
+| | pre-fix (§35) | post-fix |
+|---|---|---|
+| members main solved, branch failed | 6 | **1** |
+| members main never solved, branch solved | 3 | **3** |
+| flatness points produced | **0** | **4** (main's four) |
+| objectives differing from main | 2 | 3 (see §36.3) |
+| wall clock | 181.5 min | 261.0 min |
+
+Recovered: `flatness 2.0` (9.04 min), `winglet off` (10.45), `equipment_fit`
+(8.59), `printed_mass_x1.10` (7.76), `chain_eta_x0.90` (6.50). Every one lands
+on main's objective. Three of them are FASTER than main — `equipment_fit` by
+34%, `chain_eta_x0.90` by 47% — so removing the options was not a speed
+sacrifice on the members that were failing.
+
+`printed_mass_x1.10` is the one that confirms §35.2's mechanism rather than
+merely correlating with it. Its pre-fix trace read "the multipliers diverged
+while the primal side sat still. Stuck, not slow — more clock buys nothing",
+and that was true: no cap would have saved it. §35.2 blamed `WARM_START_OPTIONS`
+pinning the start to the bounds with `mu_init` two orders below default, leaving
+no barrier to regularise multipliers that were never supplied. Removing exactly
+those options converges exactly that member, at 114.9753 against main's
+114.9753.
+
+**Both members main has never solved survived losing the options**, which is the
+trade §35.6 flagged as unpriced and the reason fix 1 kept `inits`:
+`polyhedral2` 12.84 min at 53 iterations (was 9.95 at 40), `continuous_cant`
+15.02 at 92 (was 8.96 at 54). Seeding buys coverage, not just speed, so it is
+not strictly dominated.
+
+`continuous_cant` needed 15.02 minutes against a 16-minute cap. **Fix 3 is the
+only reason fix 1 did not cost that member**, which is worth noting because the
+two were argued for separately and are load-bearing together.
+
+### 36.2 The caps, and an error in fix 3's own reasoning
+
+Fix 2 (flatness 10 → 20) did not rescue any member: the 2.0 m span converged in
+9.04, inside the old cap. What rescued it was fix 1 — with the options it took
+10.79 and failed, without them 9.04 and converged. **§35.3 attributed that
+member to the cap and was wrong**; the iteration counts (46 then 49, but
+converging) are what separate the two explanations, and a reader of §35 alone
+would draw the wrong lesson.
+
+Fix 2 earns its place differently. The 1.76 m member ran to a DIAGNOSED stop at
+125 iterations and recorded `dual_blow_up`, which is the verdict that should
+cascade — and fix 4 correctly declined to exempt it, so 1.70 m was skipped.
+Both halves of the exit condition executed on one run. The phase cost 46.8 min
+against main's 64.9/65.3, because skipping 1.70 m after a properly diagnosed
+1.76 m saves what main spent proving the same thing twice.
+
+Fix 3 (optional 12 → 16) contains the error it was written to fix. Sixteen was
+derived from main's slowest converged optional member (12.97) plus margin — but
+the code under test is SLOWER than main, and its slowest optional member is
+`continuous_cant` at 15.02. **A cap calibrated against timings from a
+configuration the code no longer runs is the same category error as
+substituting `vtail_sample`'s numbers for rcv2's**, which §35.3 criticised. It
+held by one minute, by luck. `tests/test_phase_order.py` pins the cap against
+measured members and should be extended to post-fix numbers when they settle.
+
+### 36.3 The silent wrong answer: chained spans walked out of the basin
+
+The flatness sweep produced four points, three of them main's to four decimals.
+The fourth:
+
+| span 1.82 m | objective | cruise | taper |
+|---|---:|---:|---:|
+| main x2 | 105.8570 | 10.12 m/s | 0.921 |
+| this run | **50.6483** | **17.67 m/s** | 1.000 (at bound) |
+
+`Solve_Succeeded`. Half the endurance, nearly double the cruise speed, taper
+pinned to its upper bound, inside a curve otherwise reading 122 / 119 / 116.
+Nothing in the artifact flagged it. **This is worse than every failure in §35**:
+a timeout is visibly absent from a report, whereas this is a converged member
+with a plausible status and a nonsense value, feeding the one deliverable the
+sweep exists to produce.
+
+The cause is span-to-span chaining — `next_warm = _hot_start_kwargs(fr[span])`,
+each converged span seeding the next. **Main has never had it**; `next_warm` and
+`warm_kwargs` do not exist there, every span is re-optimized from the declared
+guesses, and main's four spans are identical across two batteries. Span 2.0 m,
+seeded from the champion rather than a predecessor, drifts too: 122.0524 against
+122.1228.
+
+A sweep answers "how flat is the neighbourhood of this optimum", which is only a
+property of the aeroplane if each point is an independent re-optimization.
+Chained, it partly measures the path the sweep walked.
+
+**Removed, and there is no trade on the other side.** On the same four spans,
+chained cost 25.59 min against main's cold 20.53 — the chaining was 25% SLOWER
+as well as wrong. `warm_kwargs` is deleted rather than defaulted to None, on
+c532bbc's reasoning that a dormant parameter is an invitation.
+
+### 36.4 `printed_mass_x0.90`: one member fails in every branch configuration
+
+| | wall | iters | `inf_pr_final` | result |
+|---|---:|---:|---:|---|
+| main x2 | 4.51 / 4.60 | — | — | 127.8829 |
+| pre-fix | 12.95 | 57 | 0.0796 | starved corner |
+| post-fix | 16.59 | 102 | 0.1115 | starved corner |
+
+Main's FASTEST member, failing on the branch both with the options and without,
+and getting worse: double the iterations, higher final infeasibility, primal
+progress negative. So it is not `WARM_START_OPTIONS`, which leaves the `inits`
+seed itself, or the champion it derives from, or something else in the branch.
+
+Its closest miss is the motor-fit row, `usable_nose / motor["length"] >= 1.0`.
+That is physically plausible — at -10% printed mass the optimum shrinks, and
+shrinking from the champion's nose geometry drives into the motor-fit wall —
+but plausible is not measured. **The experiment that settles it is cold versus
+seeded on this one member**, and it is unrun.
+
+### 36.5 Basins, corrected
+
+§35.4 said a warm start moves where a member lands. The natural refinement
+after `ttail` kept its shifted objective without the options — that `inits`
+decides WHERE and the options decide HOW FAST — is wrong, and this run falsifies
+it: `chain_eta_x1.10` returned exactly to main's 132.625133 once the options
+went, so there the OPTIONS moved the basin. `ttail` stayed at 111.8640. Both
+components can move it; which one does is member-dependent, and no rule stated
+so far predicts which.
+
+`re-solve mass_bump` is the uncomfortable case: 120.4453 here against 120.1628
+pre-fix, and main times out on it in both batteries. Two branch answers that
+disagree by 0.28, no cold control, and the number feeds the reported shadow
+price.
+
+### 36.6 What this does NOT establish
+
+One battery again, not a paired repeat. The champion differs from §35's — 11
+active bounds against 13 — so member-for-member comparisons against the pre-fix
+run are weaker than they look; comparisons against main, where main converged,
+are the sound ones. The §36.3 fix is applied but UNMEASURED: no run has yet
+produced an unchained sweep on this branch, and the claim that cold spans
+reproduce main's curve rests on main's own two batteries rather than on this
+code. `design_trustworthy` is False again (0.0572 vs 0.0534 across meshes), on
+`aero.py` byte-identical to main, so it remains a property of the champion.

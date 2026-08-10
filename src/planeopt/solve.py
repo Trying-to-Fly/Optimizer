@@ -2748,7 +2748,6 @@ def flatness_sweep(
     run_timeout_min: float = SOLVE_TIMEOUT_MIN,
     incumbent_span: float | None = None,
     span_floor: float | None = None,
-    warm_kwargs: dict | None = None,
 ) -> list[dict]:
     """Re-optimize everything else at each of `n` fixed spans around the optimum.
 
@@ -2832,7 +2831,6 @@ def flatness_sweep(
     fr: dict[float, dict] = {}
     floor: float | None = None
     timed_out_at: float | None = None
-    next_warm = dict(warm_kwargs or {})
     for span in spans:
         if floor is not None:
             fr[span] = {
@@ -2856,7 +2854,6 @@ def flatness_sweep(
             continue
         fr[span] = batch("flatness sweep", [
             (span, {
-                **next_warm,
                 "fixed": {"span": span},
                 "timeout_min": member_timeout_min,
             })
@@ -2908,11 +2905,21 @@ def flatness_sweep(
                     "recorded as unproven without another member budget",
                     span,
                 )
-        elif "failed" not in fr[span]:
-            # The first fixed-span problem has one extra equality relative to
-            # the champion and rejects its dual seed. Subsequent spans have the
-            # same shape and can reuse the complete fixed-span point.
-            next_warm = _hot_start_kwargs(fr[span])
+        # NOTHING seeds the next span. Chaining was removed in FINDINGS §36
+        # after it walked span 1.82 m into a different basin and reported it
+        # `Solve_Succeeded` at 50.6483 against main's 105.8570 — cruise 17.67
+        # m/s against 10.12, taper pinned to its upper bound. A curve reading
+        # 122 / 119 / 116 / 50 does not describe the neighbourhood of an
+        # optimum, and nothing in the artifact said so.
+        #
+        # Each point must be an INDEPENDENT re-optimization at its own fixed
+        # span, or the sweep measures the path it took rather than the
+        # optimum's flatness. Main has never chained and its four rcv2 spans
+        # are identical across two batteries.
+        #
+        # There is no speed argument on the other side, which is what makes
+        # this a deletion and not a trade: on the same four spans, chained
+        # 25.59 min against main's cold 20.53.
 
     return [
         {"span": s, "objective_value": None, **_failed_entry(fr[s])}
@@ -3478,7 +3485,6 @@ def optimize(
             batch, span_cap, run_timeout_min=solve_timeout_min,
             incumbent_span=champion["dv"].get("span"),
             span_floor=span_box[0],
-            warm_kwargs=_hot_start_kwargs(champion),
         )
 
     # re-solve battery (MODEL_DETAILS 6.4 item 2): each is a full re-optimization.

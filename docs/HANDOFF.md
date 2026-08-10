@@ -70,6 +70,35 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 - Adaptive multistart keeps the codex schedule but draws its perturbed starts
   from main's `multistart_inits()`.
 
+### READ FIRST (2026-08-11): the four fixes are MEASURED, and the sweep had a worse bug
+
+**FINDINGS §36** prices §35's four fixes on a full battery (269.8 min,
+`docs/studies/rcv2_post_fix_20260811.json`). Five of six member failures gone,
+both members main cannot solve kept, flatness sweep whole. What matters now:
+
+1. **One bug is OPEN and it is the best one left.** `printed_mass_x0.90` fails
+   on this branch in BOTH warm-start configurations and gets worse (57 → 102
+   iterations); main solves it in 4.51 min, its fastest member. Not the options,
+   therefore the `inits` seed or the champion behind it. **The experiment that
+   settles it is cold-vs-seeded on that one member and it is unrun** —
+   `tools/bughunt/warm_start_experiment.py` is the instrument, repaired in
+   78f5a4c.
+2. **Span chaining is removed from the flatness sweep (§36.3) and UNMEASURED.**
+   It reported span 1.82 m as `Solve_Succeeded` at 50.6483 against main's
+   105.8570 — cruise 17.67 m/s, taper at its bound — inside a curve reading
+   122/119/116. Silent wrong answers beat loud failures for damage. No run has
+   yet produced an unchained sweep here.
+3. **`OPTIONAL_MEMBER_TIMEOUT_MIN = 16` held by one minute, by luck.** It was
+   derived from main's slowest converged optional member; the post-fix code is
+   slower and its slowest is `continuous_cant` at 15.02. Same category error
+   §35.3 criticised. Re-derive from post-fix numbers once they settle.
+4. **§35.3 mis-attributed `flatness 2.0` to the cap.** Fix 1 rescued it, not
+   fix 2 — it converges in 9.04 min, inside the old 10-minute cap. Fix 2 still
+   earns its place, but for letting 1.76 m reach a diagnosed `dual_blow_up`
+   stop rather than for rescuing anything.
+
+Everything below this block is the §35 record and is left as written.
+
 ### THE TRIAL BELOW IS OVER: 10 WAS TOO TIGHT — ALL FOUR FIXES ARE APPLIED
 
 **The first full rcv2 battery on this branch ran 2026-08-10 (FINDINGS §35,
