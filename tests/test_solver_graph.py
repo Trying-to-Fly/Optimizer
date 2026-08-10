@@ -104,66 +104,57 @@ def test_lifting_line_batches_reject_mismatched_lengths(monkeypatch):
         at(cas.DM([1.0, 2.0]), cas.DM([1.0, 2.0, 3.0]))
 
 
-def test_complete_solver_seed_round_trips_and_checks_dimensions():
-    original = asb.Opti()
-    variable = original.variable(init_guess=2.0, lower_bound=0.0)
-    original.subject_to(original.x[0] <= 3.0)
-    original.minimize((variable - 1.0) ** 2)
-    solution = original.solve(verbose=False)
-    seed = solve._capture_solver_seed(original, solution)
+def test_ipopts_raw_vectors_are_ratios_against_a_basis_a_hot_start_moves():
+    """Why `_hot_start_kwargs` seeds BY NAME and nothing here replays `opti.x`.
 
-    assert seed is not None
-    assert (seed["nx"], seed["ng"]) == (1, 2)
-
-    # SAME `init_guess`, so same scale — the one case where replaying raw `x`
-    # means anything. See the scaling test below for why that is not the case a
-    # hot start produces.
-    compatible = asb.Opti()
-    compatible.variable(init_guess=2.0, lower_bound=0.0)
-    compatible.subject_to(compatible.x[0] <= 3.0)
-    assert solve._apply_solver_seed(compatible, seed)
-
-    incompatible = asb.Opti()
-    incompatible.variable(init_guess=np.ones(2))
-    assert not solve._apply_solver_seed(incompatible, seed)
-
-
-def test_a_solver_seed_is_meaningless_once_init_guess_moves():
-    """Why `_hot_start_kwargs` does not carry `solver_seed`.
-
-    `nx`/`ng` match, so `_apply_solver_seed` accepts the seed — and the restored
-    PHYSICAL value is wrong, because AeroSandbox normalizes by `init_guess`
-    (`var = scale * raw`). This is the exact shape of the 2026-08-10 rcv2
-    failure: a hot start sets `init_guess` to the champion, which changes the
-    scale, so replaying the champion's ratios applies the design twice.
+    This is the 2026-08-10 rcv2 failure in miniature, and it outlives the
+    functions that fell for it (`_apply_solver_seed`/`_capture_solver_seed`,
+    deleted): AeroSandbox normalizes as `var = scale * raw` with `scale` taken
+    from `init_guess`, so a converged `opti.x` is a RATIO against the member
+    that produced it. A hot start is exactly when that basis moves, because
+    `init_guess` becomes the champion's value — replaying the ratio there
+    applies the design twice, and the dimensions match perfectly while it
+    happens. On rcv2 that meant sixteen constraint rows NaN and
+    `Invalid_Number_Detected` at iteration 0, on members that converge cold.
     """
     original = asb.Opti()
     variable = original.variable(init_guess=2.0, lower_bound=0.0)
     original.minimize((variable - 8.0) ** 2)
     solution = original.solve(verbose=False)
     converged = float(solution.value(variable))
-    seed = solve._capture_solver_seed(original, solution)
-    # stored as a RATIO against init_guess=2.0, not as the physical 8.0
-    assert seed["x"][0] == pytest.approx(converged / 2.0, rel=1e-6)
 
-    # A hot start re-declares the variable AT the champion's value.
+    # Stored as a ratio against init_guess=2.0, NOT as the physical 8.0.
+    raw = float(np.asarray(solution.value(original.x)).ravel()[0])
+    assert raw == pytest.approx(converged / 2.0, rel=1e-6)
+
+    # A hot start re-declares the variable AT the champion's value, so the same
+    # physical point is now the ratio 1.0 — and the two bases have identical
+    # dimensions, which is why no shape check could ever have told them apart.
     target = asb.Opti()
     hot = target.variable(init_guess=converged, lower_bound=0.0)
-    assert solve._apply_solver_seed(target, seed) is True   # the guard passes...
-    restored = float(target.value(hot, target.initial()))
-    # ...and the physical starting point is the design squared over its guess.
-    assert restored == pytest.approx(converged**2 / 2.0, rel=1e-6)
-    assert restored != pytest.approx(converged, rel=1e-3)
+    assert int(target.x.numel()) == int(original.x.numel())
+
+    target.set_initial(target.x, np.array([[raw]]))
+    replayed = float(target.value(hot, target.initial()))
+    # The design, squared over its guess — not the design.
+    assert replayed == pytest.approx(converged**2 / 2.0, rel=1e-6)
+    assert replayed != pytest.approx(converged, rel=1e-3)
+
+    # What `_hot_start_kwargs` does instead, and why it survives the move.
+    correct = asb.Opti()
+    by_name = correct.variable(init_guess=converged, lower_bound=0.0)
+    assert float(correct.value(by_name, correct.initial())) == pytest.approx(
+        converged, rel=1e-9
+    )
 
 
-def test_hot_start_kwargs_carry_the_operating_state_but_never_the_seed():
+def test_hot_start_kwargs_carry_the_operating_state_by_name():
     result = {
         "dv": {"span": 2.0},
         "V_ms": 9.5,
         "alpha_deg": 5.0,
         "deflection_deg": -2.0,
         "rpm": 3600.0,
-        "_solver_seed": {"nx": 1, "ng": 0, "x": [1.0], "lam_g": []},
     }
 
     kwargs = solve._hot_start_kwargs(result)
@@ -174,23 +165,29 @@ def test_hot_start_kwargs_carry_the_operating_state_but_never_the_seed():
         "deflection_deg": -2.0,
         "prop_rev_s": 60.0,
     }
-    # The seed is recorded on the member but deliberately NOT replayed: it is a
-    # per-member ratio vector and a hot start is exactly when the basis moves.
-    assert "solver_seed" not in kwargs
+    # Physical values keyed by name is the ONLY thing that survives the basis
+    # move — see the scaling test above. Everything a hot start sends must be
+    # something `Opti.variable(init_guess=...)` can scale on the way in.
+    assert set(kwargs) == {"inits", "warm_start"}
+    assert not any(k.endswith("seed") for k in kwargs)
 
 
-def test_hot_start_asks_for_the_warm_start_options_the_seed_used_to_carry():
-    """`_solve_nlp` gates `WARM_START_OPTIONS` on `warm_start or hot_start_used`.
+def test_hot_start_asks_for_the_warm_start_options_and_solve_nlp_reads_them():
+    """`inits` without `WARM_START_OPTIONS` is a penalty, not a wash.
 
-    `hot_start_used` is now always False, because `_hot_start_kwargs` no longer
-    carries a seed for `_apply_solver_seed` to accept. Without `warm_start`
-    riding along, dropping the seed would also drop the options — leaving every
-    battery hot start in the seed-only configuration `WARM_START_OPTIONS`
-    measures at +27% against cold, since IPOPT's default `bound_push` shoves a
-    champion off the eight bounds it sits on before iteration 0.
+    `_solve_nlp` gates those options on `warm_start`, and §34.4 measured what
+    happens when a seed arrives without them: 52 iterations against 31 cold,
+    because IPOPT's default `bound_push` shoves the champion off the thirteen
+    bounds it sits on before iteration 0. With them, 13. The flag used to be
+    implied by a side effect of seeding (`hot_start_used`), which is how it went
+    missing when the seed was removed — so this pins the flag AND the parameter
+    it has to land in.
     """
     kwargs = solve._hot_start_kwargs({"dv": {"span": 2.0}})
 
     assert kwargs["warm_start"] is True
-    # and the flag has to be the one `_solve_nlp` actually reads
     assert "warm_start" in inspect.signature(solve._solve_nlp).parameters
+    # Every key it emits must be something `_solve_nlp` actually accepts;
+    # a stray kwarg would be a TypeError inside a forked worker.
+    accepted = inspect.signature(solve._solve_nlp).parameters
+    assert set(kwargs) <= set(accepted)

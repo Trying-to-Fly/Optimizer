@@ -963,29 +963,39 @@ def multistart_consensus(first: dict, second: dict) -> tuple[bool, dict]:
 def _hot_start_kwargs(result: dict) -> dict:
     """The champion's operating point, BY NAME, for a nearby re-solve.
 
-    **No `solver_seed`, deliberately** — see `_apply_solver_seed`. AeroSandbox
-    normalizes each variable by its own `init_guess`, so IPOPT's raw `x` is a
-    vector of RATIOS whose meaning is fixed by the member that produced it. A
-    hot start is precisely the case where `init_guess` differs (it becomes the
-    champion's value), so replaying those ratios applies the design twice. The
-    2026-08-10 rcv2 battery measured the result: every hot-started member —
-    `mass_bump` and all four `prop_choice` alternatives — died with
+    **BY NAME is the whole point — never by IPOPT's raw vectors.** AeroSandbox
+    normalizes each variable as `var = scale * raw`, taking `scale` from that
+    member's own `init_guess`, and scales constraint rows the same way
+    (`var/scale >= lower_bound/scale`). So `opti.x` and `lam_g` are RATIOS
+    against a per-member basis, not physical values, and a hot start is
+    precisely the case where that basis moves — `init_guess` becomes the
+    champion's value. Replaying the champion's ratios into it applies the design
+    twice. The 2026-08-10 rcv2 battery measured exactly that: every hot-started
+    member — `mass_bump` and all four `prop_choice` alternatives — died with
     `Invalid_Number_Detected` at iteration 0, sixteen constraint rows NaN, on
-    members that converge normally on main.
+    members that converge normally cold. Dimensions cannot catch it; two members
+    of one model have identical `nx`/`ng` and incompatible vectors.
+
+    Anything that wants to carry IPOPT's multipliers here must record the
+    per-variable and per-constraint scale factors alongside them. The functions
+    that used to try (`_apply_solver_seed`/`_capture_solver_seed`) recorded
+    neither and are gone; `tests/test_solver_graph.py` pins the scaling
+    behaviour that defeated them.
 
     `inits` is the part that was always sound: physical values keyed by name,
     which `Opti.variable(init_guess=...)` scales correctly on the way in. That
     alone reproduced main's `mass_bump` objective exactly (104.3996).
 
-    `warm_start` rides along because dropping the seed also dropped the solver
-    OPTIONS. `_solve_nlp` gates `WARM_START_OPTIONS` on `warm_start or
-    hot_start_used`, and `hot_start_used` was the flag the seed used to set — so
-    once the seed left, every battery hot start silently fell into the
-    seed-only configuration `WARM_START_OPTIONS` documents as +27% against cold.
-    A champion sits on eight declared bounds and IPOPT's default `bound_push`
-    of 0.01 shoves the starting point off all of them before iteration 0, which
-    throws away the one thing the seed is worth. The CLI `--warm-start` path
-    has always paired the two (see `run_m2`); this makes the battery path agree.
+    **`warm_start` is not optional company for `inits` — it is what makes the
+    seed worth having.** `_solve_nlp` gates `WARM_START_OPTIONS` on it, and
+    without them IPOPT's default `bound_push` of 0.01 shoves the starting point
+    1% off every bound before iteration 0, which is the one thing a champion is
+    good for: it sits on thirteen of them. Seeding without the options is not a
+    wash but a PENALTY — §34.4 measured this member at 52 iterations that way
+    against 31 cold, and 13 with them. The seed used to imply the options by a
+    side effect (it set `hot_start_used`, which the gate also read), so removing
+    the seed silently removed them too; sending the flag outright is what stops
+    that being re-discovered. The CLI `--warm-start` path always paired the two.
     """
     inits = dict(result.get("dv") or {})
     for source, target in (
@@ -1733,10 +1743,11 @@ M2_STATUS = "M3: full-vehicle optimization (wing + tail + balance + spars + trim
 #: `_solve_nlp` logs when a warm start is used.
 #:
 #: Why it cannot do better still: only the primal point is seeded, because a run
-#: artifact records `dv` and not IPOPT's multipliers, and the multipliers cannot
-#: simply be replayed (`_apply_solver_seed`). An interior-point method restarted
-#: without duals has to rebuild them, and on a problem sitting on this many
-#: active bounds that is much of the work.
+#: artifact records `dv` and not IPOPT's multipliers — and those cannot simply be
+#: replayed, since they are ratios against a basis a hot start moves
+#: (`_hot_start_kwargs`). An interior-point method restarted without duals has to
+#: rebuild them, and on a problem sitting on this many active bounds that is much
+#: of the work.
 WARM_START_OPTIONS = {
     "ipopt.warm_start_init_point": "yes",
     "ipopt.warm_start_bound_push": 1e-6,
@@ -1751,64 +1762,6 @@ WARM_START_OPTIONS = {
 # saved RAM but failed to converge after 871 iterations and 30 minutes. An
 # AeroSandbox or IPOPT default change must not silently reopen that decision.
 EXACT_HESSIAN_OPTIONS = {"ipopt.hessian_approximation": "exact"}
-
-
-def _apply_solver_seed(opti, seed: dict | None) -> bool:
-    """Restore a complete IPOPT primal/constraint-dual point when compatible.
-
-    **NOT WIRED IN — do not re-attach this to `_hot_start_kwargs` without first
-    fixing the scaling basis.** The dimension check below is necessary and NOT
-    sufficient, which is the whole defect. AeroSandbox builds every variable as
-    `var = scale * raw`, taking `scale` from that member's `init_guess`, and
-    scales constraint rows the same way (`var/scale >= lower_bound/scale`). So
-    `opti.x` and `lam_g` are RATIOS against a per-member basis, not physical
-    values. Two members of one model therefore have identical `nx`/`ng` and
-    incompatible vectors, and this function cannot tell the difference.
-
-    Measured, 2026-08-10 rcv2 battery: seeding `mass_bump` from the champion
-    left the initial point finite in `x` but NaN in sixteen rows of `g`, and
-    IPOPT stopped at iteration 0 with `Invalid_Number_Detected`. The champion's
-    own converged ratios were `[1.111, 1.25, 0.745, 1.929, ...]`; the correct
-    starting point for a member already seeded with `inits` is `[1.0, 1.0, ...]`,
-    because its scale IS the champion. Applying the former on top of the latter
-    doubles the design. Every hot-started member in that run failed identically.
-
-    A correct implementation must record the per-variable and per-constraint
-    scale factors alongside the vectors, or store physical values keyed by name.
-    The primal half of that is already available and already used: `inits`.
-    """
-    if not seed:
-        return False
-    try:
-        x = np.asarray(seed["x"], dtype=float).reshape(-1, 1)
-        lam_g = np.asarray(seed["lam_g"], dtype=float).reshape(-1, 1)
-        nx, ng = int(opti.x.numel()), int(opti.g.numel())
-        if (
-            int(seed["nx"]) != nx or int(seed["ng"]) != ng
-            or x.size != nx or lam_g.size != ng
-            or not np.all(np.isfinite(x)) or not np.all(np.isfinite(lam_g))
-        ):
-            return False
-        opti.set_initial(opti.x, x)
-        opti.set_initial(opti.lam_g, lam_g)
-        return True
-    except (KeyError, TypeError, ValueError, RuntimeError):
-        return False
-
-
-def _capture_solver_seed(opti, value) -> dict | None:
-    """The small, serialisable part of an IPOPT solution needed to hot-start."""
-    try:
-        x = np.asarray(value(opti.x), dtype=float).ravel()
-        lam_g = np.asarray(value(opti.lam_g), dtype=float).ravel()
-        if not np.all(np.isfinite(x)) or not np.all(np.isfinite(lam_g)):
-            return None
-        return {
-            "nx": int(x.size), "ng": int(lam_g.size),
-            "x": x.tolist(), "lam_g": lam_g.tolist(),
-        }
-    except (TypeError, ValueError, RuntimeError):
-        return None
 
 
 #: What IPOPT's own iteration log is read for, and what those numbers are called
@@ -1967,7 +1920,6 @@ def _solve_nlp(
     timeout_min: float = SOLVE_TIMEOUT_MIN,
     max_iter: int = SOLVE_MAX_ITER,
     warm_start: bool = False,
-    solver_seed: dict | None = None,
     frames=None,
 ) -> dict:
     """One NLP solve. Returns the champion design + state, all numeric.
@@ -2159,14 +2111,6 @@ def _solve_nlp(
     # Jacobian.
     labels.stop()
 
-    hot_start_used = _apply_solver_seed(opti, solver_seed)
-    if solver_seed is not None and not hot_start_used:
-        log.info(
-            "solver seed does not match this NLP shape (%d variables, %d "
-            "constraints); using declared primal guesses",
-            int(opti.x.numel()), int(opti.g.numel()),
-        )
-
     #: Was the iteration ceiling lowered on purpose? A run at the default 1000
     #: that exhausts it has genuinely failed; one at 3 has done exactly what was
     #: asked. The two want opposite treatment and only this tells them apart.
@@ -2209,7 +2153,7 @@ def _solve_nlp(
         **EXACT_HESSIAN_OPTIONS,
         "ipopt.max_wall_time": 60.0 * timeout_min,
     }
-    if warm_start or hot_start_used:
+    if warm_start:
         options |= WARM_START_OPTIONS
     callback = None
     if frames is not None:
@@ -2293,11 +2237,11 @@ def _solve_nlp(
         "return_status": str(stats.get("return_status", "Solve_Succeeded")),
         "iter_count": stats.get("iter_count"),
         "converged": True,
-        "hot_start_used": hot_start_used,
+        # Kept for the same reason as `iter_count`: §34.4 measured this member
+        # at 1.09 min warm against 2.11 cold, so which of the two a member got
+        # is now something a run artifact has to be able to answer.
+        "warm_started": warm_start,
     }
-    seed = _capture_solver_seed(opti, sol)
-    if seed is not None:
-        out["_solver_seed"] = seed
     return out
 
 
@@ -3233,7 +3177,7 @@ def optimize(
             # the winglet champion, `continuous_cant` from `off`, which is the
             # closer design of the two. Neither carries duals: a hot start moves
             # `init_guess`, and IPOPT's multipliers are ratios against that
-            # basis (`_apply_solver_seed`). Graph shape is no longer what
+            # basis (`_hot_start_kwargs`). Graph shape is no longer what
             # decides, so `off` differing in shape costs nothing here.
             off_result = batch(
                 "winglet study",

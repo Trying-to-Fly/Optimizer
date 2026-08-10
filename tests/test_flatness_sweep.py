@@ -200,9 +200,13 @@ def test_each_converged_fixed_span_hot_starts_the_next_member():
 
     The chaining is the point: member N+1 starts from member N's design rather
     than the aircraft's declared guesses. What it must NOT carry is the raw
-    IPOPT seed, which is a per-member ratio vector (see
-    `solve._apply_solver_seed`); the 2026-08-10 rcv2 battery failed every
-    hot-started member at iteration 0 on exactly that.
+    IPOPT seed, which is a per-member ratio vector (see `solve._hot_start_kwargs`
+    and the scaling test in `test_solver_graph.py`); the 2026-08-10 rcv2 battery
+    failed every hot-started member at iteration 0 on exactly that.
+
+    Nothing writes `_solver_seed` onto a result any more, so the stub below is
+    hypothetical — deliberately. It is the guard that catches someone
+    reintroducing a capture and letting it reach a member.
     """
     class _SeedBatch(_Batch):
         def __call__(self, label, jobs, **kw):

@@ -3095,3 +3095,16 @@ conclusion is now per-aeroplane, and the part that is not: a primal seed must
 always be paired with `WARM_START_OPTIONS`, which is why `_hot_start_kwargs`
 now returns `warm_start=True` alongside `inits` rather than relying on a seed
 to imply it.
+
+The seed machinery itself is gone as of this section. `_apply_solver_seed` and
+`_capture_solver_seed` were kept unwired by cf9d5b6 to carry the measurement,
+but neither records the scale factors a correct implementation would need, so
+they were a trap rather than a foundation — and `_capture_solver_seed` was still
+writing a full `x`/`lam_g` pair into every result, across the worker pipe and
+into every checkpoint at `indent=1`, read by nobody. `_solve_nlp` no longer takes
+`solver_seed` and gates `WARM_START_OPTIONS` on `warm_start` alone. What the
+functions knew is preserved where it is load-bearing: the scaling explanation in
+`_hot_start_kwargs`, and a test in `test_solver_graph.py` that pins AeroSandbox's
+`var = scale * raw` behaviour directly rather than through helpers that can be
+deleted. Results now record `warm_started` in place of `hot_start_used`, which
+is the flag that turned out to matter.

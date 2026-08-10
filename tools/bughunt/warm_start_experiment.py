@@ -10,6 +10,11 @@ with it, silently, and left every hot start in the configuration
 0, and the champion sits on eight of them, so the one thing the seed is worth
 is discarded before the first iteration.
 
+(`hot_start_used` and the seed machinery it came from were deleted once this
+measurement was in; `_solve_nlp` now gates on `warm_start` alone. The arms below
+still measure the right two configurations — `bump_inits_only` reproduces the
+old behaviour by dropping the flag, which is what the old code did by accident.)
+
 That predicts §34.3's own caveat — the corrected `mass_bump` took 11.93 min
 against main's cold 7.41-7.78 — is the seed-only penalty rather than evidence
 that champion-derived `inits` do not pay. This measures the difference instead
