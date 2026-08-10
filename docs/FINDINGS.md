@@ -3040,3 +3040,58 @@ already documents ("do not reach for `--warm-start` expecting speed"). Whether
 champion-derived `inits` pay for themselves anywhere in the battery is now an
 open question rather than an assumption, and it wants the same paired treatment
 the rows above got.
+
+### 34.4 The hot start was not slow, it was missing its options (2026-08-10)
+
+§34.3 left the open question above, and the answer is that dropping the seed
+dropped something else with it. `_solve_nlp` gates `WARM_START_OPTIONS` on
+`warm_start or hot_start_used`, and `hot_start_used` is set by
+`_apply_solver_seed` — so the seed was also the only thing switching those
+options on for a battery member. Removing it in cf9d5b6 silently left every hot
+start in the seed-only configuration `WARM_START_OPTIONS` was written to
+prevent: IPOPT's default `bound_push` of 0.01 shoves the starting point 1% off
+each bound before iteration 0, and the whole value of a champion seed is that it
+already sits ON those bounds.
+
+Measured with `tools/bughunt/warm_start_experiment.py` — four arms, one solve
+each, one process per arm, back to back on an M5/16 GB laptop, on the same
+`mass_bump` member (+20 g) that §34.3 reports. The cold control ran BEFORE both
+challengers, so machine drift over the sequence counts against the fix.
+
+| arm | wall | iterations | peak | vs cold |
+|---|---:|---:|---:|---:|
+| `champion` (cold, seed source) | 1.61 min | 22 | 4.08 GB | — |
+| `bump_cold` (control) | 2.11 min | 31 | 4.07 GB | — |
+| `bump_inits_only` (cf9d5b6) | 3.34 min | 52 | 4.08 GB | **+58.3%** |
+| `bump_inits_and_options` (fix) | 1.09 min | 13 | 4.08 GB | **-48.3%** |
+
+The iteration column is the finding. A primal seed WITHOUT the options costs
+more iterations than starting cold — 52 against 31 — so on this aeroplane it is
+not the "wash" §32 assumed but an active penalty; the solver is pushed off the
+champion and walks back from worse than a fresh start. The same seed WITH the
+options converges in 13. The champion here sits on thirteen declared bounds,
+against the eight `vtail_sample` was characterised on.
+
+**This reproduces §34.3's caveat and reinterprets it.** That entry recorded the
+corrected member at 11.93 min against main's cold 7.41-7.78, i.e. +53% to +61%,
+and read it as evidence that champion-derived `inits` may not pay. The +58.3%
+here, on a different machine at a quarter of the absolute wall-clock, lands
+inside that band — it was the missing options, not the seed being worthless.
+
+All three +20 g arms return the same design: objective spread 1.136e-07 on
+104.4 (~1e-9 relative), identical active-bound sets, `V_ms` agreeing to eight
+figures. So the comparison is about time only, as the 2026-07-31 measurement
+was. Nothing paged: swap flat at 3.00 GB across all four arms, every peak
+4.07-4.08 GB against 5.4-8.1 GB available.
+
+Two things this does NOT establish. One solve per arm is direction and rough
+magnitude, not a precision figure. And it is one member — `mass_bump` is a 20 g
+perturbation of the champion, the most favourable hot start in the battery; the
+`prop_choice` alternatives and the winglet study seed across bigger design
+changes and are not measured here.
+
+`vtail_sample` is unchanged and still a wash (5.35 / 6.78 / 5.58 min). The
+conclusion is now per-aeroplane, and the part that is not: a primal seed must
+always be paired with `WARM_START_OPTIONS`, which is why `_hot_start_kwargs`
+now returns `warm_start=True` alongside `inits` rather than relying on a seed
+to imply it.

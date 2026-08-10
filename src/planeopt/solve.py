@@ -976,6 +976,16 @@ def _hot_start_kwargs(result: dict) -> dict:
     `inits` is the part that was always sound: physical values keyed by name,
     which `Opti.variable(init_guess=...)` scales correctly on the way in. That
     alone reproduced main's `mass_bump` objective exactly (104.3996).
+
+    `warm_start` rides along because dropping the seed also dropped the solver
+    OPTIONS. `_solve_nlp` gates `WARM_START_OPTIONS` on `warm_start or
+    hot_start_used`, and `hot_start_used` was the flag the seed used to set — so
+    once the seed left, every battery hot start silently fell into the
+    seed-only configuration `WARM_START_OPTIONS` documents as +27% against cold.
+    A champion sits on eight declared bounds and IPOPT's default `bound_push`
+    of 0.01 shoves the starting point off all of them before iteration 0, which
+    throws away the one thing the seed is worth. The CLI `--warm-start` path
+    has always paired the two (see `run_m2`); this makes the battery path agree.
     """
     inits = dict(result.get("dv") or {})
     for source, target in (
@@ -987,7 +997,7 @@ def _hot_start_kwargs(result: dict) -> dict:
             inits[target] = result[source]
     if result.get("rpm") is not None:
         inits["prop_rev_s"] = float(result["rpm"]) / 60.0
-    return {"inits": inits}
+    return {"inits": inits, "warm_start": True}
 
 
 def airworthiness_price(
@@ -1699,15 +1709,34 @@ M2_STATUS = "M3: full-vehicle optimization (wing + tail + balance + spars + trim
 #:     warm, seed + these options            5.58 min   (+4%)
 #:
 #: All three return 120.12168 min to eight significant figures, so the seed is
-#: not changing WHERE it lands, only how long it takes to get there — and it
-#: does not get there faster. The fix is real (it recovers most of the loss the
-#: seed-only path was causing) and the honest conclusion is still: do not reach
-#: for `--warm-start` expecting speed. `_solve_nlp` logs that when it is used.
+#: not changing WHERE it lands, only how long it takes to get there.
 #:
-#: Why it cannot do better: only the primal point is seeded, because a run
-#: artifact records `dv` and not IPOPT's multipliers. An interior-point method
-#: restarted without duals has to rebuild them, and on a problem sitting on
-#: eight active bounds that is most of the work.
+#: **Measured again 2026-08-10 on `vtail_rcv2`, and there it PAYS.** Four paired
+#: arms, one solve each, back to back (`tools/bughunt/warm_start_experiment.py`,
+#: FINDINGS §34.4), on the `mass_bump` member §34.3 failed:
+#:
+#:     cold                                  2.11 min   31 iterations
+#:     warm, seed only                       3.34 min   52 iterations  (+58%)
+#:     warm, seed + these options            1.09 min   13 iterations  (-48%)
+#:
+#: Same objective across all three to 1.1e-07, same active set, so again it is
+#: only how long. The seed-only row is the important one: it costs MORE
+#: iterations than starting cold, so the primal seed is not a wash on this
+#: aeroplane but a penalty, and these options are what turn a 68% overshoot into
+#: a 58% saving. The champion sits on THIRTEEN declared bounds here rather than
+#: `vtail_sample`'s eight, which is the mechanism above with more to destroy.
+#:
+#: So the conclusion is now per-aeroplane: on `vtail_sample` warm starting is a
+#: wash and not worth reaching for; on `vtail_rcv2` it roughly halves a nearby
+#: re-solve. What is NOT optional either way is pairing the seed with these
+#: options — `_hot_start_kwargs` sends `warm_start=True` for exactly that reason.
+#: `_solve_nlp` logs when a warm start is used.
+#:
+#: Why it cannot do better still: only the primal point is seeded, because a run
+#: artifact records `dv` and not IPOPT's multipliers, and the multipliers cannot
+#: simply be replayed (`_apply_solver_seed`). An interior-point method restarted
+#: without duals has to rebuild them, and on a problem sitting on this many
+#: active bounds that is much of the work.
 WARM_START_OPTIONS = {
     "ipopt.warm_start_init_point": "yes",
     "ipopt.warm_start_bound_push": 1e-6,
@@ -3200,10 +3229,12 @@ def optimize(
 
         winglet_timeout = min(OPTIONAL_MEMBER_TIMEOUT_MIN, solve_timeout_min)
         if parallel == 1:
-            # `off` changes the graph shape relative to the winglet champion and
-            # therefore rejects its dual seed, but still uses its physical
-            # primal point. `continuous_cant` has the same winglet-free shape as
-            # `off`, so it can reuse the complete primal/dual solution.
+            # Both take the nearest available PRIMAL point by name — `off` from
+            # the winglet champion, `continuous_cant` from `off`, which is the
+            # closer design of the two. Neither carries duals: a hot start moves
+            # `init_guess`, and IPOPT's multipliers are ratios against that
+            # basis (`_apply_solver_seed`). Graph shape is no longer what
+            # decides, so `off` differing in shape costs nothing here.
             off_result = batch(
                 "winglet study",
                 [("off", _hot_start_kwargs(champion))],

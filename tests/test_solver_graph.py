@@ -1,5 +1,6 @@
 """The NLP's large symbolic subgraphs are shared rather than copied."""
 
+import inspect
 from types import SimpleNamespace
 
 import aerosandbox as asb
@@ -176,3 +177,20 @@ def test_hot_start_kwargs_carry_the_operating_state_but_never_the_seed():
     # The seed is recorded on the member but deliberately NOT replayed: it is a
     # per-member ratio vector and a hot start is exactly when the basis moves.
     assert "solver_seed" not in kwargs
+
+
+def test_hot_start_asks_for_the_warm_start_options_the_seed_used_to_carry():
+    """`_solve_nlp` gates `WARM_START_OPTIONS` on `warm_start or hot_start_used`.
+
+    `hot_start_used` is now always False, because `_hot_start_kwargs` no longer
+    carries a seed for `_apply_solver_seed` to accept. Without `warm_start`
+    riding along, dropping the seed would also drop the options — leaving every
+    battery hot start in the seed-only configuration `WARM_START_OPTIONS`
+    measures at +27% against cold, since IPOPT's default `bound_push` shoves a
+    champion off the eight bounds it sits on before iteration 0.
+    """
+    kwargs = solve._hot_start_kwargs({"dv": {"span": 2.0}})
+
+    assert kwargs["warm_start"] is True
+    # and the flag has to be the one `_solve_nlp` actually reads
+    assert "warm_start" in inspect.signature(solve._solve_nlp).parameters

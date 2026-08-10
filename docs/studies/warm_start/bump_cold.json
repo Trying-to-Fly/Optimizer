@@ -1,0 +1,426 @@
+{
+  "arm": "bump_cold",
+  "warm_start_options": false,
+  "seeded": false,
+  "extra_mass_kg": 0.02,
+  "minutes": 2.11,
+  "peak_gb": 4.07,
+  "status": "Solve_Succeeded",
+  "iter_count": 31.0,
+  "failed": null,
+  "objective_value": 104.39956802973543,
+  "auw_kg": 2.1918010452203647,
+  "V_ms": 9.612231591703999,
+  "static_margin": 0.07999999000127826,
+  "active_bounds": [
+    "ballast_kg",
+    "c_root",
+    "cs_frac",
+    "d_exp",
+    "le_shear",
+    "span",
+    "spar_od_outer",
+    "spar_wall_center",
+    "spar_wall_outer",
+    "t_sweep",
+    "t_taper",
+    "washout_tip",
+    "wl_taper",
+    "wl_toe"
+  ],
+  "machine_before": {
+    "ram_total_gb": 16.0,
+    "ram_available_gb": 7.04,
+    "swap_gb": 3.0,
+    "compressed_gb": 2.54
+  },
+  "machine_after": {
+    "ram_total_gb": 16.0,
+    "ram_available_gb": 6.06,
+    "swap_gb": 3.0,
+    "compressed_gb": 2.94
+  },
+  "result": {
+    "dv": {
+      "span": 2.0000000199983274,
+      "c_root": 0.27500000274943837,
+      "taper": 0.5030695919624466,
+      "fullness": 2.155219310014415,
+      "le_shear": 1.000000009978305,
+      "eta_break": 0.7343124155908979,
+      "washout_tip": 1.9976575560409483e-08,
+      "tail_arm": 1.0792184915877272,
+      "t_span": 0.4682706095456228,
+      "t_c_root": 0.09222942621467356,
+      "t_taper": 0.9999999978330109,
+      "t_sweep": 4.889921706253648e-08,
+      "cs_frac": 0.4000000039180908,
+      "spar_od_center": 0.016860113884638487,
+      "spar_wall_center": 0.0005999999900064602,
+      "spar_od_outer": 0.004999999922603309,
+      "spar_wall_outer": 0.0004999999900725242,
+      "ballast_kg": -6.994752952127908e-10,
+      "x_battery": 0.3155833552012483,
+      "pod_nose": 0.07407452478134893,
+      "pod_bay": 0.3452999300046451,
+      "pod_xs": 0.8744087100827324,
+      "pod_bay_end": 0.5888832952052557,
+      "pod_wh": 1.0017441033746415,
+      "dihedral_tip": 4.804456168326886,
+      "d_exp": -4.8608245806052236e-09,
+      "pod_tail": 0.12175385949789042,
+      "t_dihedral": 52.55988282682656,
+      "wl_len": 0.07781810256377351,
+      "wl_cant": 87.41209457605643,
+      "wl_cr": 0.6666666635885629,
+      "wl_taper": 1.000000009274729,
+      "wl_toe": -3.000000027973568,
+      "x_esc": 0.4205833453211141,
+      "x_flight_controller": 0.5088833252032475,
+      "x_gps_compass": 0.5170833447242987,
+      "x_airspeed_board": 0.5748833052045861,
+      "x_buzzer": 0.5360833377209421,
+      "x_companion_pi": 0.4230833452019139,
+      "x_bec_pi": 0.46873333520258037,
+      "x_receiver_elrs": 0.5498833152039166,
+      "x_telemetry_sik": 0.4170833453647016
+    },
+    "active_bounds": [
+      {
+        "variable": "ballast_kg",
+        "value": -6.994752952127908e-10,
+        "bound": 0.0,
+        "at": "lower",
+        "box": [
+          0.0,
+          0.2
+        ]
+      },
+      {
+        "variable": "c_root",
+        "value": 0.27500000274943837,
+        "bound": 0.275,
+        "at": "upper",
+        "box": [
+          0.16,
+          0.275
+        ]
+      },
+      {
+        "variable": "cs_frac",
+        "value": 0.4000000039180908,
+        "bound": 0.4,
+        "at": "upper",
+        "box": [
+          0.2,
+          0.4
+        ]
+      },
+      {
+        "variable": "d_exp",
+        "value": -4.8608245806052236e-09,
+        "bound": 0.0,
+        "at": "lower",
+        "box": [
+          0.0,
+          2.0
+        ]
+      },
+      {
+        "variable": "le_shear",
+        "value": 1.000000009978305,
+        "bound": 1.0,
+        "at": "upper",
+        "box": [
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "variable": "span",
+        "value": 2.0000000199983274,
+        "bound": 2.0,
+        "at": "upper",
+        "box": [
+          1.5,
+          2.0
+        ]
+      },
+      {
+        "variable": "spar_od_outer",
+        "value": 0.004999999922603309,
+        "bound": 0.005,
+        "at": "lower",
+        "box": [
+          0.005,
+          0.02
+        ]
+      },
+      {
+        "variable": "spar_wall_center",
+        "value": 0.0005999999900064602,
+        "bound": 0.0006,
+        "at": "lower",
+        "box": [
+          0.0006,
+          0.002
+        ]
+      },
+      {
+        "variable": "spar_wall_outer",
+        "value": 0.0004999999900725242,
+        "bound": 0.0005,
+        "at": "lower",
+        "box": [
+          0.0005,
+          0.0018
+        ]
+      },
+      {
+        "variable": "t_sweep",
+        "value": 4.889921706253648e-08,
+        "bound": 0.0,
+        "at": "lower",
+        "box": [
+          0.0,
+          25.0
+        ]
+      },
+      {
+        "variable": "t_taper",
+        "value": 0.9999999978330109,
+        "bound": 1.0,
+        "at": "upper",
+        "box": [
+          0.4,
+          1.0
+        ]
+      },
+      {
+        "variable": "washout_tip",
+        "value": 1.9976575560409483e-08,
+        "bound": 0.0,
+        "at": "upper",
+        "box": [
+          -4.0,
+          0.0
+        ]
+      },
+      {
+        "variable": "wl_taper",
+        "value": 1.000000009274729,
+        "bound": 1.0,
+        "at": "upper",
+        "box": [
+          0.5,
+          1.0
+        ]
+      },
+      {
+        "variable": "wl_toe",
+        "value": -3.000000027973568,
+        "bound": -3.0,
+        "at": "lower",
+        "box": [
+          -3.0,
+          3.0
+        ]
+      }
+    ],
+    "dv_bounds": {
+      "span": [
+        1.5,
+        2.0
+      ],
+      "c_root": [
+        0.16,
+        0.275
+      ],
+      "taper": [
+        0.35,
+        1.0
+      ],
+      "fullness": [
+        1.0,
+        4.0
+      ],
+      "le_shear": [
+        0.0,
+        1.0
+      ],
+      "eta_break": [
+        0.25,
+        0.85
+      ],
+      "washout_tip": [
+        -4.0,
+        0.0
+      ],
+      "tail_arm": [
+        0.4,
+        1.2
+      ],
+      "t_span": [
+        0.25,
+        1.2
+      ],
+      "t_c_root": [
+        0.06,
+        0.22
+      ],
+      "t_taper": [
+        0.4,
+        1.0
+      ],
+      "t_sweep": [
+        0.0,
+        25.0
+      ],
+      "cs_frac": [
+        0.2,
+        0.4
+      ],
+      "spar_od_center": [
+        0.006,
+        0.02
+      ],
+      "spar_wall_center": [
+        0.0006,
+        0.002
+      ],
+      "spar_od_outer": [
+        0.005,
+        0.02
+      ],
+      "spar_wall_outer": [
+        0.0005,
+        0.0018
+      ],
+      "ballast_kg": [
+        0.0,
+        0.2
+      ],
+      "x_battery": [
+        -0.1,
+        0.4
+      ],
+      "pod_nose": [
+        0.03,
+        0.25
+      ],
+      "pod_bay": [
+        0.2,
+        0.55
+      ],
+      "pod_xs": [
+        0.75,
+        1.3
+      ],
+      "pod_bay_end": [
+        0.4,
+        0.62
+      ],
+      "pod_wh": [
+        0.65,
+        1.55
+      ],
+      "dihedral_tip": [
+        0.0,
+        20.0
+      ],
+      "d_exp": [
+        0.0,
+        2.0
+      ],
+      "pod_tail": [
+        0.1,
+        0.45
+      ],
+      "t_dihedral": [
+        20.0,
+        55.0
+      ],
+      "wl_len": [
+        0.05,
+        0.3
+      ],
+      "wl_cant": [
+        55.0,
+        88.0
+      ],
+      "wl_cr": [
+        0.4,
+        0.95
+      ],
+      "wl_taper": [
+        0.5,
+        1.0
+      ],
+      "wl_toe": [
+        -3.0,
+        3.0
+      ],
+      "x_esc": [
+        -0.1,
+        1.6
+      ],
+      "x_flight_controller": [
+        -0.1,
+        1.6
+      ],
+      "x_gps_compass": [
+        -0.1,
+        1.6
+      ],
+      "x_airspeed_board": [
+        -0.1,
+        1.6
+      ],
+      "x_buzzer": [
+        -0.1,
+        1.6
+      ],
+      "x_companion_pi": [
+        -0.1,
+        1.6
+      ],
+      "x_bec_pi": [
+        -0.1,
+        1.6
+      ],
+      "x_receiver_elrs": [
+        -0.1,
+        1.6
+      ],
+      "x_telemetry_sik": [
+        -0.1,
+        1.6
+      ]
+    },
+    "V_ms": 9.612231591703999,
+    "alpha_deg": 5.951521626259558,
+    "deflection_deg": -4.217919237276778,
+    "rpm": 3765.4571877860135,
+    "objective_value": 104.39956802973543,
+    "auw_kg": 2.1918010452203647,
+    "x_cg_m": 0.49422438967605525,
+    "static_margin": 0.07999999000127826,
+    "P_elec_w": 24.218503425135307,
+    "motor_voltage": 4.317077172035807,
+    "motor_current_a": 5.329434090942795,
+    "throttle_frac": 0.2916944035159329,
+    "current_cap_a": 40.0,
+    "placard_speed_ms": null,
+    "drag_n": 1.0537588611507454,
+    "J": 0.5481903173475413,
+    "clmax_ab_used": [
+      1.0867661240406201,
+      0.018775628083191616
+    ],
+    "suspended_minutes": 2.5071492806697886e-05,
+    "return_status": "Solve_Succeeded",
+    "iter_count": 31.0,
+    "converged": true,
+    "hot_start_used": false
+  }
+}

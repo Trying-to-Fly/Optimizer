@@ -8,3 +8,5 @@ dist/
 build/
 data/props/_apc_cache/
 data/props/_uiuc_cache/
+# Finder drops these into every directory it opens; this repo is developed on macOS.
+.DS_Store
