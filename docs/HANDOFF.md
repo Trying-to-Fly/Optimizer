@@ -77,13 +77,18 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 identical to ten decimals, one objective different (`ttail`, +1.21, better).**
 That is the first time this branch is strictly ahead.
 
-> **DO NOT BUILD THE CURRENT rcv2 CHAMPION.** Its re-evaluated static margin is
-> **0.0572 against your declared [0.08, 0.15] window** — short of the floor by
-> 28% — and the NLP's own `sm_local_slopes` cross zero at α ≈ 6.2°, inside the
-> cruise range. Every rcv2 run since 2026-08-07 has this, main and branch
-> alike. User accepted 2026-08-11 that main calling it trustworthy is the
-> error (§37.5, §37.7). The 122.1 min figure is diagnostic, not a build
-> recommendation.
+> **DO NOT BUILD THE CURRENT rcv2 CHAMPION** — and §38 makes the reason
+> stronger than §37 did, not weaker. At CONVERGED mesh resolution **no
+> operating point in the sweep meets the [0.08, 0.15] floor**: the best is
+> 0.0777 at 10 m/s, and the reported champion is 0.0480, not the 0.0572 the
+> artifact says. Refining the mesh moves the margin DOWN by ~0.005, so every
+> static margin this project has ever reported is optimistic by about that.
+>
+> **But one of §37.5's three reasons does not survive.** The sign-consistency
+> failure is step-dependent — it vanishes at a 0.5° alpha step at one speed and
+> a 2.0° step at another — because `sm_local_slopes` differences a Cm that
+> moves 0.0024 across the whole window. The gate is currently rejecting
+> candidates on an unconverged number. See §38.3.
 
 **The thing to act on is not a bug.** `design_trustworthy` is False, and §37.5
 is why: the SM cross-check is IDENTICAL to main's (0.0571864, same per-mesh

@@ -3645,3 +3645,109 @@ solved on a machine in a different state from the rest of its run. And
 `design_trustworthy: False` says the champion is not airworthy by the declared
 window; nothing here says what to do about it, which is a design decision about
 the static-margin floor rather than a solver question.
+
+## 38. Reconciling the static-margin models: the margin is real, the sign check is not (2026-08-11)
+
+§37.5 left the rcv2 champion unbuildable and named "reconcile the two SM models"
+as the work. Measured, that request turns out to contain two different problems
+with opposite answers, and neither is the model disagreement it looked like.
+`tools/bughunt/sm_resolution_experiment.py`, results in
+`docs/studies/sm_resolution/`.
+
+### 38.1 The models were never far apart; the operating points were
+
+At 9.5 m/s LiftingLine reports 0.0572 and the independent VLM 0.0530 — 0.004
+apart, on methods that share neither discretization nor solution scheme. The
+NLP's 0.0800 is not a third opinion about the same point: it is the SAME
+estimator read at the NLP's cruise speed, and static margin on this aeroplane
+runs from +0.089 at 10 m/s down through zero by 14.5. `solve.py` already expects
+"a mystery 0.002" from that alpha difference; on rcv2 the gradient is steep
+enough to make it 0.023.
+
+So there is no estimator to fix. What there is, is an aeroplane whose margin
+depends strongly on where you fly it.
+
+### 38.2 Refining the mesh makes the margin WORSE, and every run has been optimistic
+
+Same champion, same alpha window, rising spanwise resolution:
+
+| V | default | 8 | 12 | 16 | 24 |
+|---|---|---|---|---|---|
+| 9.5 | 0.05229 | 0.04973 | 0.04893 | 0.04845 | **0.04804** |
+| 10.5 | 0.08027 | 0.07728 | 0.07622 | 0.07566 | **0.07516** |
+
+Monotone, converging, and **downward by about 0.005**. Every run to date used the
+default, so every reported static margin on this project is optimistic by
+roughly that much — including the ones that sat exactly on 0.0800.
+
+That flips a conclusion §37 relied on. The sweep's in-window points at 10.0-11.0
+m/s are not in-window once converged:
+
+| V | as reported | at res 24 | in [0.08, 0.15]? |
+|---|---|---|---|
+| 10.0 | 0.0890 | **0.0777** | no |
+| 10.5 | 0.0803 | **0.0752** | no |
+| 11.0 | 0.0747 | **0.0696** | no |
+
+**At converged resolution no operating point in the sweep meets the floor.** The
+best available is 0.0777 at 10 m/s, short by 0.0023. The window miss is real,
+it is worse than any run has reported, and it is not an artefact of anything.
+
+### 38.3 The sign-consistency check is a difference quotient below its noise floor
+
+The local slopes survive every resolution unchanged to three digits — so the
+flip is NOT panel noise, which is what the VLM disagreement suggested and what
+this experiment was built to test. It is something else. At fixed panel count
+(16), varying only the finite-difference step:
+
+| V | step | local dCm/dCL | Cm span |
+|---|---|---|---|
+| 9.5 | 0.5 deg | +0.0225 **-0.0308 -0.0291 -0.0093** | 0.0024 |
+| 9.5 | 1.0 deg | +0.1819 **-0.0034 -0.0195** +0.0301 | 0.0155 |
+| 9.5 | 2.0 deg | +0.0774 +0.0948 +0.0030 +0.1060 | 0.0364 |
+| 10.5 | 0.5 deg | +0.1551 +0.2043 +0.1660 +0.0654 | 0.0256 |
+| 10.5 | 1.0 deg | +0.0371 +0.1796 +0.1172 **-0.0208** | 0.0288 |
+| 10.5 | 2.0 deg | **-0.0169** +0.1090 +0.0519 +0.0108 | 0.0286 |
+
+**The verdict flips with the step.** It vanishes at 2.0 deg for one speed and at
+0.5 deg for the other, and appears at the steps between. `sm_local_slopes` is a
+two-point difference of a function that moves by 0.0024 across the whole window
+at 9.5 m/s — the numerator is at the noise floor of a LiftingLine+NeuralFoil
+evaluation, and refining panels cannot help a difference quotient whose signal
+is that small.
+
+`SM_DIAGNOSTIC_OFFSETS = (-1.0, 1.0)` is therefore not a neutral diagnostic
+choice: it selects the answer. A gate that rejects every candidate on it is
+rejecting on an unconverged number.
+
+### 38.4 What this means for the three trust failures of §37.5
+
+- **"reported operating point misses the static-margin window"** — REAL, and
+  understated. Converged, the champion is at 0.048, not 0.057.
+- **"static margin changes sign inside its evaluation window"** — NOT
+  established. Step-dependent, and absent at other equally arbitrary steps.
+- **"no airworthy operating point exists in the final sweep"** — reached partly
+  through the sign rule, so it inherits that. It happens to be TRUE anyway,
+  for the independent reason in §38.2: at converged resolution nothing clears
+  the floor.
+
+The §37.5 conclusion stands — main was wrong to call this design trustworthy —
+but one of the three reasons it was reached by does not survive scrutiny, and
+the branch's gate currently rejects candidates on a number that is not
+converged. Both need saying.
+
+### 38.5 What this does NOT establish, and what it asks for
+
+The step sweep shows the local-slope check is unreliable; it does NOT show
+Cm(alpha) is monotone. A converged answer needs a derivative that is not a bare
+two-point difference — a fit over the window with a residual, or a step chosen
+from a measured noise floor rather than declared. Nobody has run that.
+
+Whether 24 panels is converged is asserted from a monotone sequence of five,
+not proved; the trend is flat by 16-24 but a finer run would cost minutes.
+
+And the design question is now sharper rather than answered. The margin is
+short by 0.0023 at its best point, at converged resolution. That is close
+enough that it may be reachable by CG movement or tail sizing rather than by
+moving the floor — `RCV2_CAP_PRICING` prices the floor at 0.08->0.05 as +0.851
+min, which buys a legal number without buying margin. Nothing here chooses.
