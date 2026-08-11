@@ -186,12 +186,16 @@ def test_optional_members_are_seeded_and_use_phase_specific_budgets(
 #: `winglet off` is the slowest that matters most: it is a paired study's
 #: BASELINE, so losing it costs the comparison rather than one candidate.
 RCV2_CONVERGED_OPTIONAL_MIN = {
-    "winglet off": 12.38,
-    "priced_equipment_fit__airframe_only": 12.97,
-    "chain_eta_x0.90": 12.33,
-    "chain_eta_x1.10": 12.40,
-    "study_tail_type__ttail": 8.26,
-    "study_fuselage_topology__integrated": 5.81,
+    # main-code batteries
+    "winglet off (main)": 12.38,
+    "priced_equipment_fit__airframe_only (main)": 12.97,
+    "chain_eta_x0.90 (main)": 12.33,
+    # THIS code, both 2026-08-11 batteries — champion-seeded members take more
+    # iterations than main's cold ones, so main's numbers cannot size this cap.
+    "study_prop_choice__ancf_13x11": 15.79,
+    "study_tail_type__conventional": 15.72,
+    "winglet_study__continuous_cant": 15.02,
+    "study_prop_choice__ancf_14x9": 14.55,
 }
 
 
@@ -210,6 +214,12 @@ def test_the_optional_cap_clears_every_optional_member_that_has_converged():
     numbers so a third occurrence is a red test rather than a lost run.
     """
     slowest = max(RCV2_CONVERGED_OPTIONAL_MIN.values())
+    # Not just "above" — 16.0 sat 0.21 min above 15.79 and that counted as
+    # holding, which is how a cap gets called safe twice in a row (§37).
+    assert solve.OPTIONAL_MEMBER_TIMEOUT_MIN >= 1.2 * slowest, (
+        f"the cap leaves under 20% margin over {slowest:.2f} min, a member that "
+        "CONVERGES on this code; one slow run loses it"
+    )
     assert solve.OPTIONAL_MEMBER_TIMEOUT_MIN > slowest, (
         f"the cap is at or below {slowest:.2f} min, which is a member that "
         "CONVERGES on rcv2 — it will be failed, not saved"
@@ -294,3 +304,57 @@ def test_nothing_is_retried_when_every_member_converged():
 
     assert solve._cold_retry(batch, jobs, good, timeout_min=16.0) == {}
     assert calls == []
+
+
+def test_a_recovered_member_is_checkpointed_under_its_own_name():
+    """Otherwise the checkpoint set contradicts the artifact it produced.
+
+    `batch` keys checkpoints by (phase label, member key), so a cold retry lands
+    under "re-solve battery (cold retry)" while the member's own entry still
+    holds the seeded FAILURE. A reader auditing
+    `re-solve_battery__printed_mass_x0.90` then finds a timeout for a member the
+    report says converged at 127.8829.
+
+    Observed on the 2026-08-11 resume. It is NOT the cost first assumed — the
+    retry has its own checkpoint, so a resume replays it in 0.0 min rather than
+    re-solving — but two entries disagreeing about one member is the class of
+    defect `fingerprint.py` exists to prevent, one step further in.
+    """
+    class _Cache:
+        def __init__(self):
+            self.written = []
+
+        def put(self, label, key, result):
+            self.written.append((label, key, result.get("objective_value")))
+
+    def batch(label, jobs, prep=None, restore=None, timeout_min=None):
+        return {k: {"objective_value": 127.8829, "dv": {}} for k, _ in jobs}
+
+    jobs = [("printed_mass_x0.90", {"inits": {"span": 2.0}, "printed_scale": 0.90})]
+    failed = {"printed_mass_x0.90": {"failed": "Maximum_WallTime_Exceeded"}}
+    cache = _Cache()
+
+    solve._cold_retry(batch, jobs, failed, timeout_min=20.0, cache=cache)
+
+    assert cache.written == [("re-solve battery", "printed_mass_x0.90", 127.8829)]
+
+
+def test_a_retry_that_fails_does_not_overwrite_the_seeded_checkpoint():
+    """The seeded entry carries the convergence verdict; a bare second timeout
+    would replace an explained failure with an unexplained one."""
+    class _Cache:
+        def __init__(self):
+            self.written = []
+
+        def put(self, label, key, result):
+            self.written.append((label, key))
+
+    def batch(label, jobs, prep=None, restore=None, timeout_min=None):
+        return {k: {"failed": "Maximum_WallTime_Exceeded"} for k, _ in jobs}
+
+    jobs = [("printed_mass_x0.90", {"inits": {}, "printed_scale": 0.90})]
+    failed = {"printed_mass_x0.90": {"failed": "x", "convergence": {"verdict": "starved_corner"}}}
+    cache = _Cache()
+
+    assert solve._cold_retry(batch, jobs, failed, timeout_min=20.0, cache=cache) == {}
+    assert cache.written == []

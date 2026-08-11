@@ -1,0 +1,1119 @@
+{
+ "date": "2026-08-11",
+ "platform": "WSL2 (Linux), 25 GB, 16 cores (IPOPT single-threaded)",
+ "aircraft": "vtail_rcv2",
+ "mission": "rcv2_endurance",
+ "what_this_is": "The battery that measures FINDINGS 36's own two fixes \u2014 the unchained flatness sweep and the cold retry. 268.4 min, plus a 23.3 min repair run that re-solved one member lost to a lid-close suspend.",
+ "config_under_test": {
+  "hot_start_kwargs_sends_warm_start": false,
+  "flatness_spans_chained": false,
+  "cold_retry_on_failed_seeded_battery_member": true,
+  "FLATNESS_TIMEOUT_MIN": 20.0,
+  "OPTIONAL_MEMBER_TIMEOUT_MIN_during_run": 16.0
+ },
+ "wall_clock_minutes": {
+  "main_08_07": 333.5,
+  "main_08_08": 333.25,
+  "pre_fix": 181.45,
+  "post_fix": 261.02,
+  "validated": 244.77,
+  "validated_vs_main_08_08": 1.361
+ },
+ "outcomes": {
+  "main_solved_validated_failed": [],
+  "main_failed_validated_solved": [
+   "re-solve_battery__mass_bump",
+   "study_wing_dihedral_form__polyhedral2",
+   "winglet_study__continuous_cant"
+  ],
+  "objectives_differing_from_main": {
+   "study_tail_type__ttail": {
+    "validated": 111.86404813731961,
+    "main": 110.65550659707142,
+    "delta": 1.208542
+   }
+  },
+  "recovered_by_cold_retry": [
+   "re-solve_battery__printed_mass_x0.90"
+  ]
+ },
+ "lid_suspend_event": {
+  "member": "winglet_study__continuous_cant (first attempt)",
+  "suspended_minutes": 24.45,
+  "every_other_member_suspended_minutes_max": 9.7e-09,
+  "resolution": "checkpoint deleted, member re-solved in a 23.3 min resume"
+ },
+ "run_level": {
+  "champion_objective_min": 122.1,
+  "design_trustworthy": false,
+  "design_trust_failures": [
+   "no airworthy operating point exists in the final sweep",
+   "reported operating point misses the static-margin window",
+   "static margin changes sign inside its evaluation window"
+  ],
+  "note": "`design_trust_failures` does not exist on main (0 occurrences). The SM cross-check is IDENTICAL to main 08-07's \u2014 same ll_static_margin 0.0571864, same per-mesh [0.05073, 0.05522, 0.0419], both reliable. So main reported the same design as trustworthy; this branch's gate is what refuses it.",
+  "timelapse_seconds": 52.9,
+  "timelapse_frames": 1279
+ },
+ "per_member": {
+  "flatness_sweep__1.7": {
+   "main_08_07": {
+    "minutes": 22.32,
+    "objective": null,
+    "converged": false,
+    "iter_count": 206.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.052356719970703,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "main_08_08": {
+    "minutes": 22.44,
+    "objective": null,
+    "converged": false,
+    "iter_count": 207.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 4.74974513053894e-09,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "pre_fix": null,
+   "post_fix": null,
+   "validated": null
+  },
+  "flatness_sweep__1.76": {
+   "main_08_07": {
+    "minutes": 22.3,
+    "objective": null,
+    "converged": false,
+    "iter_count": 205.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.052356719970703,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "main_08_08": {
+    "minutes": 22.35,
+    "objective": null,
+    "converged": false,
+    "iter_count": 205.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 1.3977599640687306e-08,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "pre_fix": null,
+   "post_fix": {
+    "minutes": 21.23,
+    "objective": null,
+    "converged": false,
+    "iter_count": 125.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 14.903392791748047,
+    "verdict": "dual_blow_up",
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "validated": {
+    "minutes": 21.06,
+    "objective": null,
+    "converged": false,
+    "iter_count": 124.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.213462829589844,
+    "verdict": "dual_blow_up",
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   }
+  },
+  "flatness_sweep__1.82": {
+   "main_08_07": {
+    "minutes": 5.2,
+    "objective": 105.85697440184141,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 5.24,
+    "objective": 105.85697440184141,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 3.210637563218673e-09
+   },
+   "pre_fix": null,
+   "post_fix": {
+    "minutes": 6.57,
+    "objective": 50.648255378143176,
+    "converged": true,
+    "iter_count": 37.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.902824401855469,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 5.25,
+    "objective": 105.85697440184177,
+    "converged": true,
+    "iter_count": 30.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "flatness_sweep__1.88": {
+   "main_08_07": {
+    "minutes": 4.22,
+    "objective": 116.17897793455,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 4.29,
+    "objective": 116.17897793455,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 3.956423218672474e-09
+   },
+   "pre_fix": null,
+   "post_fix": {
+    "minutes": 7.77,
+    "objective": 116.17897771108301,
+    "converged": true,
+    "iter_count": 46.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.902824401855469,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 3.72,
+    "objective": 116.17897793455018,
+    "converged": true,
+    "iter_count": 20.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "flatness_sweep__1.94": {
+   "main_08_07": {
+    "minutes": 4.49,
+    "objective": 119.54606021598765,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 4.57,
+    "objective": 119.54606021598765,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": null,
+   "post_fix": {
+    "minutes": 2.21,
+    "objective": 119.54606008413165,
+    "converged": true,
+    "iter_count": 10.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.902824401855469,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 5.43,
+    "objective": 119.54606021598745,
+    "converged": true,
+    "iter_count": 23.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 1.9025416501487296e-09
+   }
+  },
+  "flatness_sweep__2.0": {
+   "main_08_07": {
+    "minutes": 6.39,
+    "objective": 122.12279273150756,
+    "converged": true,
+    "peak_rss_gb": 13.920501708984375
+   },
+   "main_08_08": {
+    "minutes": 6.43,
+    "objective": 122.12279273150756,
+    "converged": true,
+    "peak_rss_gb": 13.558540344238281,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 10.79,
+    "objective": null,
+    "converged": false,
+    "iter_count": 46.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 16.42182159423828,
+    "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+   },
+   "post_fix": {
+    "minutes": 9.04,
+    "objective": 122.05237806264135,
+    "converged": true,
+    "iter_count": 49.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.902824401855469,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 7.39,
+    "objective": 122.12279273150747,
+    "converged": true,
+    "iter_count": 41.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "multistart__mass_bump": {
+   "main_08_07": {
+    "minutes": 7.78,
+    "objective": 104.3995680297317,
+    "converged": true,
+    "peak_rss_gb": 12.0369873046875
+   },
+   "main_08_08": {
+    "minutes": 7.41,
+    "objective": 104.3995680297317,
+    "converged": true,
+    "peak_rss_gb": 11.674156188964844,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 3.81,
+    "objective": 104.3995679175085,
+    "converged": true,
+    "iter_count": 13.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.497055053710938,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 12.18,
+    "objective": 104.39956791612796,
+    "converged": true,
+    "iter_count": 52.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.470672607421875,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 12.48,
+    "objective": 104.39956791612796,
+    "converged": true,
+    "iter_count": 52.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.474067687988281,
+    "suspended_minutes": 0.0
+   }
+  },
+  "multistart__nominal": {
+   "main_08_07": {
+    "minutes": 5.69,
+    "objective": 105.81838501037146,
+    "converged": true,
+    "peak_rss_gb": 12.024246215820312
+   },
+   "main_08_08": {
+    "minutes": 5.83,
+    "objective": 105.81838501037146,
+    "converged": true,
+    "peak_rss_gb": 11.661415100097656,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 6.95,
+    "objective": 105.81838501037166,
+    "converged": true,
+    "iter_count": 22.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 5.928142547607422,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 5.5,
+    "objective": 105.81838501037166,
+    "converged": true,
+    "iter_count": 22.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 5.901630401611328,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 5.55,
+    "objective": 105.81838501037166,
+    "converged": true,
+    "iter_count": 22.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 5.905181884765625,
+    "suspended_minutes": 0.0
+   }
+  },
+  "multistart__perturbed_0": {
+   "main_08_07": {
+    "minutes": 8.22,
+    "objective": 105.81838500967153,
+    "converged": true,
+    "peak_rss_gb": 12.036087036132812
+   },
+   "main_08_08": {
+    "minutes": 8.23,
+    "objective": 105.81838500967153,
+    "converged": true,
+    "peak_rss_gb": 11.67352294921875,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 8.61,
+    "objective": 105.8183850097915,
+    "converged": true,
+    "iter_count": 36.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 10.214466094970703,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 8.54,
+    "objective": 105.8183850097915,
+    "converged": true,
+    "iter_count": 36.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 10.188106536865234,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 8.65,
+    "objective": 105.8183850097915,
+    "converged": true,
+    "iter_count": 36.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 10.191429138183594,
+    "suspended_minutes": 3.699824446812272e-09
+   }
+  },
+  "multistart__perturbed_1": {
+   "main_08_07": {
+    "minutes": 33.27,
+    "objective": null,
+    "converged": false,
+    "iter_count": 206.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.036903381347656,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 33.25,
+    "objective": null,
+    "converged": false,
+    "iter_count": 215.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.674003601074219,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "pre_fix": null,
+   "post_fix": null,
+   "validated": null
+  },
+  "priced_equipment_fit__airframe_only": {
+   "main_08_07": null,
+   "main_08_08": {
+    "minutes": 12.97,
+    "objective": 132.57063626948192,
+    "converged": true,
+    "peak_rss_gb": 13.557563781738281,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 12.84,
+    "objective": null,
+    "converged": false,
+    "iter_count": 56.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 14.933845520019531,
+    "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+   },
+   "post_fix": {
+    "minutes": 8.59,
+    "objective": 132.5706361871661,
+    "converged": true,
+    "iter_count": 36.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.901847839355469,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 8.24,
+    "objective": 132.5706361871661,
+    "converged": true,
+    "iter_count": 36.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.906333923339844,
+    "suspended_minutes": 1.0065074699620406e-10
+   }
+  },
+  "priced_equipment_fit__core": {
+   "main_08_07": {
+    "minutes": 12.62,
+    "objective": 132.57063626948192,
+    "converged": true,
+    "peak_rss_gb": 13.9195556640625
+   },
+   "main_08_08": null,
+   "pre_fix": null,
+   "post_fix": null,
+   "validated": null
+  },
+  "re-solve_battery__chain_eta_x0.90": {
+   "main_08_07": {
+    "minutes": 12.33,
+    "objective": 111.34610298362101,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 12.32,
+    "objective": 111.34610298362101,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 12.78,
+    "objective": null,
+    "converged": false,
+    "iter_count": 57.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.660343170166016,
+    "suspended_minutes": 1.9750617260190968e-08,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "post_fix": {
+    "minutes": 6.51,
+    "objective": 111.34610287462797,
+    "converged": true,
+    "iter_count": 38.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.903392791748047,
+    "suspended_minutes": 5.681916566876073e-09
+   },
+   "validated": {
+    "minutes": 6.9,
+    "objective": 111.34610287462797,
+    "converged": true,
+    "iter_count": 38.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "re-solve_battery__chain_eta_x1.10": {
+   "main_08_07": {
+    "minutes": 12.28,
+    "objective": 132.62513288271774,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 12.4,
+    "objective": 132.62513288271774,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 8.96,
+    "objective": 132.5800270065904,
+    "converged": true,
+    "iter_count": 34.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.660343170166016,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 11.39,
+    "objective": 132.62513275643573,
+    "converged": true,
+    "iter_count": 63.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.903392791748047,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 11.54,
+    "objective": 132.62513275643573,
+    "converged": true,
+    "iter_count": 63.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "re-solve_battery__mass_bump": {
+   "main_08_07": {
+    "minutes": 32.32,
+    "objective": null,
+    "converged": false,
+    "iter_count": 314.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.052356719970703,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 32.41,
+    "objective": null,
+    "converged": false,
+    "iter_count": 315.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 2.7010779983053606e-09,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "pre_fix": {
+    "minutes": 7.24,
+    "objective": 120.16277689207524,
+    "converged": true,
+    "iter_count": 30.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.660343170166016,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 7.23,
+    "objective": 120.44525756421488,
+    "converged": true,
+    "iter_count": 42.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.903392791748047,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 7.17,
+    "objective": 120.44525756421488,
+    "converged": true,
+    "iter_count": 42.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "re-solve_battery__printed_mass_x0.90": {
+   "main_08_07": {
+    "minutes": 4.51,
+    "objective": 127.8828949831413,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 4.6,
+    "objective": 127.8828949831413,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 12.95,
+    "objective": null,
+    "converged": false,
+    "iter_count": 57.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.660343170166016,
+    "suspended_minutes": 2.1796646857789407e-09,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "post_fix": {
+    "minutes": 16.59,
+    "objective": null,
+    "converged": false,
+    "iter_count": 102.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 14.903392791748047,
+    "verdict": "starved_corner",
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "validated": {
+    "minutes": 4.24,
+    "objective": 127.88289498314171,
+    "converged": true,
+    "iter_count": 23.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0,
+    "recovered_by_cold_retry": true
+   }
+  },
+  "re-solve_battery__printed_mass_x1.10": {
+   "main_08_07": {
+    "minutes": 6.91,
+    "objective": 114.97529792829005,
+    "converged": true,
+    "peak_rss_gb": 12.052356719970703
+   },
+   "main_08_08": {
+    "minutes": 6.99,
+    "objective": 114.97529792829005,
+    "converged": true,
+    "peak_rss_gb": 11.689445495605469,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 13.62,
+    "objective": null,
+    "converged": false,
+    "iter_count": 54.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 16.261474609375,
+    "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+   },
+   "post_fix": {
+    "minutes": 7.76,
+    "objective": 114.9752976807767,
+    "converged": true,
+    "iter_count": 45.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.903392791748047,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 7.57,
+    "objective": 114.9752976807767,
+    "converged": true,
+    "iter_count": 45.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.213462829589844,
+    "suspended_minutes": 0.0
+   }
+  },
+  "study_fuselage_topology__integrated": {
+   "main_08_07": {
+    "minutes": 5.81,
+    "objective": 116.71535328700611,
+    "converged": true,
+    "peak_rss_gb": 12.0413818359375
+   },
+   "main_08_08": {
+    "minutes": 5.73,
+    "objective": 116.71535328700611,
+    "converged": true,
+    "peak_rss_gb": 11.677509307861328,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 7.65,
+    "objective": 116.71535301457243,
+    "converged": true,
+    "iter_count": 31.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.398616790771484,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 10.22,
+    "objective": 116.71535301424204,
+    "converged": true,
+    "iter_count": 43.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.37179183959961,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 10.27,
+    "objective": 116.71535301424204,
+    "converged": true,
+    "iter_count": 43.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.375789642333984,
+    "suspended_minutes": 0.0
+   }
+  },
+  "study_prop_choice__ancf_12x10": {
+   "main_08_07": {
+    "minutes": 9.23,
+    "objective": 122.08072432109881,
+    "converged": true,
+    "peak_rss_gb": 12.037124633789062
+   },
+   "main_08_08": {
+    "minutes": 9.0,
+    "objective": 122.08072432109881,
+    "converged": true,
+    "peak_rss_gb": 11.674537658691406,
+    "suspended_minutes": 2.1116041655962664e-09
+   },
+   "pre_fix": {
+    "minutes": 4.52,
+    "objective": 122.08072419150123,
+    "converged": true,
+    "iter_count": 14.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.336784362792969,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 14.15,
+    "objective": 122.08072419124946,
+    "converged": true,
+    "iter_count": 55.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.31039047241211,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 14.0,
+    "objective": 122.08072419124946,
+    "converged": true,
+    "iter_count": 55.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.313671112060547,
+    "suspended_minutes": 7.227451230088869e-10
+   }
+  },
+  "study_prop_choice__ancf_12x9": {
+   "main_08_07": {
+    "minutes": 8.34,
+    "objective": 118.12856437672215,
+    "converged": true,
+    "peak_rss_gb": 12.037479400634766
+   },
+   "main_08_08": {
+    "minutes": 8.23,
+    "objective": 118.12856437672215,
+    "converged": true,
+    "peak_rss_gb": 11.674549102783203,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 7.71,
+    "objective": 118.12856425325475,
+    "converged": true,
+    "iter_count": 32.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.050655364990234,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 8.67,
+    "objective": 118.12856425555545,
+    "converged": true,
+    "iter_count": 35.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.02435302734375,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 8.68,
+    "objective": 118.12856425555545,
+    "converged": true,
+    "iter_count": 35.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.027511596679688,
+    "suspended_minutes": 9.666594754283626e-09
+   }
+  },
+  "study_prop_choice__ancf_13x11": {
+   "main_08_07": {
+    "minutes": 6.93,
+    "objective": 118.9980487008849,
+    "converged": true,
+    "peak_rss_gb": 12.037384033203125
+   },
+   "main_08_08": {
+    "minutes": 6.68,
+    "objective": 118.9980487008849,
+    "converged": true,
+    "peak_rss_gb": 11.67459487915039,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 6.81,
+    "objective": 118.99804856272365,
+    "converged": true,
+    "iter_count": 25.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.050533294677734,
+    "suspended_minutes": 4.048312500041599e-10
+   },
+   "post_fix": {
+    "minutes": 15.79,
+    "objective": 118.998048562186,
+    "converged": true,
+    "iter_count": 63.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.02410888671875,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 15.7,
+    "objective": 118.998048562186,
+    "converged": true,
+    "iter_count": 63.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.027389526367188,
+    "suspended_minutes": 0.0
+   }
+  },
+  "study_prop_choice__ancf_14x9": {
+   "main_08_07": {
+    "minutes": 8.82,
+    "objective": 119.98565475874298,
+    "converged": true,
+    "peak_rss_gb": 12.037384033203125
+   },
+   "main_08_08": {
+    "minutes": 8.63,
+    "objective": 119.98565475874298,
+    "converged": true,
+    "peak_rss_gb": 11.67459487915039,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 6.67,
+    "objective": 119.98565457632287,
+    "converged": true,
+    "iter_count": 27.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.050533294677734,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 14.55,
+    "objective": 119.98565457890182,
+    "converged": true,
+    "iter_count": 61.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.02410888671875,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 14.36,
+    "objective": 119.98565457890182,
+    "converged": true,
+    "iter_count": 61.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 11.027389526367188,
+    "suspended_minutes": 0.0
+   }
+  },
+  "study_tail_type__conventional": {
+   "main_08_07": {
+    "minutes": 7.27,
+    "objective": 115.27732299238188,
+    "converged": true,
+    "peak_rss_gb": 14.285144805908203
+   },
+   "main_08_08": {
+    "minutes": 7.05,
+    "objective": 115.27732299238188,
+    "converged": true,
+    "peak_rss_gb": 14.139896392822266,
+    "suspended_minutes": 0.0
+   },
+   "pre_fix": {
+    "minutes": 8.89,
+    "objective": 115.27732276545346,
+    "converged": true,
+    "iter_count": 28.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.297859191894531,
+    "suspended_minutes": 9.278922637652916e-09
+   },
+   "post_fix": {
+    "minutes": 15.52,
+    "objective": 115.27732276543139,
+    "converged": true,
+    "iter_count": 53.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.265388488769531,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 15.72,
+    "objective": 115.27732276543139,
+    "converged": true,
+    "iter_count": 53.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.269428253173828,
+    "suspended_minutes": 3.2487150747328996e-10
+   }
+  },
+  "study_tail_type__ttail": {
+   "main_08_07": {
+    "minutes": 8.26,
+    "objective": 110.65550659707142,
+    "converged": true,
+    "peak_rss_gb": 14.78591537475586
+   },
+   "main_08_08": {
+    "minutes": 8.05,
+    "objective": 110.65550659707142,
+    "converged": true,
+    "peak_rss_gb": 14.422927856445312,
+    "suspended_minutes": 2.6548756674552957e-09
+   },
+   "pre_fix": {
+    "minutes": 8.29,
+    "objective": 111.86404813845724,
+    "converged": true,
+    "iter_count": 28.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 13.236503601074219,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 12.7,
+    "objective": 111.86404813731961,
+    "converged": true,
+    "iter_count": 47.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 13.204055786132812,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 13.02,
+    "objective": 111.86404813731961,
+    "converged": true,
+    "iter_count": 47.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 13.207855224609375,
+    "suspended_minutes": 0.0
+   }
+  },
+  "study_wing_dihedral_form__polyhedral2": {
+   "main_08_07": {
+    "minutes": 33.28,
+    "objective": null,
+    "converged": false,
+    "iter_count": 209.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 14.27713394165039,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 33.35,
+    "objective": null,
+    "converged": false,
+    "iter_count": 212.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 13.914173126220703,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "pre_fix": {
+    "minutes": 9.95,
+    "objective": 118.69894403026726,
+    "converged": true,
+    "iter_count": 40.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.86483383178711,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 12.84,
+    "objective": 118.6989440302556,
+    "converged": true,
+    "iter_count": 53.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.83773422241211,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 12.78,
+    "objective": 118.6989440302556,
+    "converged": true,
+    "iter_count": 53.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.841461181640625,
+    "suspended_minutes": 0.0
+   }
+  },
+  "winglet_study__continuous_cant": {
+   "main_08_07": {
+    "minutes": 32.33,
+    "objective": null,
+    "converged": false,
+    "iter_count": 317.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 12.04526138305664,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "main_08_08": {
+    "minutes": 32.43,
+    "objective": null,
+    "converged": false,
+    "iter_count": 314.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 11.682197570800781,
+    "suspended_minutes": 1.6635264425228039e-09,
+    "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+   },
+   "pre_fix": {
+    "minutes": 8.96,
+    "objective": 122.12279341725845,
+    "converged": true,
+    "iter_count": 54.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.926643371582031,
+    "suspended_minutes": 0.0
+   },
+   "post_fix": {
+    "minutes": 15.02,
+    "objective": 122.1227934155551,
+    "converged": true,
+    "iter_count": 92.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 14.894767761230469,
+    "suspended_minutes": 8.171264198608696e-09
+   },
+   "validated": {
+    "minutes": 14.74,
+    "objective": 122.1227934155551,
+    "converged": true,
+    "iter_count": 92.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 4.401187896728516,
+    "suspended_minutes": 0.0
+   }
+  },
+  "winglet_study__off": {
+   "main_08_07": {
+    "minutes": 12.38,
+    "objective": 122.12279353362132,
+    "converged": true,
+    "peak_rss_gb": 13.912723541259766
+   },
+   "main_08_08": {
+    "minutes": 12.37,
+    "objective": 122.12279353362132,
+    "converged": true,
+    "peak_rss_gb": 13.54971694946289,
+    "suspended_minutes": 1.9574751301358145e-09
+   },
+   "pre_fix": {
+    "minutes": 13.45,
+    "objective": null,
+    "converged": false,
+    "iter_count": 74.0,
+    "return_status": "Maximum_WallTime_Exceeded",
+    "peak_rss_gb": 15.747028350830078,
+    "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+   },
+   "post_fix": {
+    "minutes": 10.45,
+    "objective": 122.12279341557401,
+    "converged": true,
+    "iter_count": 56.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.713851928710938,
+    "suspended_minutes": 0.0
+   },
+   "validated": {
+    "minutes": 10.31,
+    "objective": 122.12279341557401,
+    "converged": true,
+    "iter_count": 56.0,
+    "return_status": "Solve_Succeeded",
+    "peak_rss_gb": 15.717594146728516,
+    "suspended_minutes": 6.715708877891302e-10
+   }
+  }
+ }
+}

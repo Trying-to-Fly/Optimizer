@@ -1049,7 +1049,7 @@ def _hot_start_kwargs(result: dict) -> dict:
     return {"inits": inits}
 
 
-def _cold_retry(batch, jobs, results: dict, timeout_min: float) -> dict:
+def _cold_retry(batch, jobs, results: dict, timeout_min: float, cache=None) -> dict:
     """Re-solve any SEEDED member that failed, once, without its seed.
 
     FINDINGS §36.4 and the experiment that closed it
@@ -1099,7 +1099,23 @@ def _cold_retry(batch, jobs, results: dict, timeout_min: float) -> dict:
     # Keep the seeded failure when the cold retry fails too: it is the one that
     # carries a convergence verdict, and two identical-looking failures in an
     # artifact are worse than one explained failure.
-    return {label: r for label, r in retried.items() if "failed" not in r}
+    recovered = {label: r for label, r in retried.items() if "failed" not in r}
+    if recovered and cache is not None:
+        # Write the recovered member back under ITS OWN name. `batch` keys
+        # checkpoints by (phase label, member key), so the retry lands under
+        # "re-solve battery (cold retry)" while the member's own entry still
+        # holds the seeded FAILURE — and a reader auditing
+        # `re-solve_battery__printed_mass_x0.90` then finds a timeout for a
+        # member the report says converged.
+        #
+        # Observed on the 2026-08-11 resume, and NOT the cost first assumed:
+        # the retry phase has its own checkpoint, so a resume replays it in
+        # 0.0 min rather than re-solving. What is actually wrong is only that
+        # the two entries contradict each other, which is the class of defect
+        # `fingerprint.py` exists to prevent, one step further in.
+        for member, result in recovered.items():
+            cache.put("re-solve battery", member, result)
+    return recovered
 
 
 def airworthiness_price(
@@ -2715,22 +2731,32 @@ PROVEN_INFEASIBLE_STATUS = "Infeasible_Problem_Detected"
 #: minutes in members that ultimately timed out, and that half of the reasoning
 #: is unchanged.
 #:
-#: **16.0, raised from 12.0 (FINDINGS §35.3).** The 12 was justified here by
-#: "every optional member that did converge in that run landed inside 9.1
-#: minutes", citing the 2026-08-07 full run. That is a `vtail_sample` figure.
-#: On the rcv2 run it actually cites, four converged optional members took
-#: **12.28 to 12.97 minutes** — `winglet off` 12.37-12.38,
-#: `priced_equipment_fit__airframe_only` 12.97, `chain_eta_x0.90` 12.32-12.33,
-#: `chain_eta_x1.10` 12.28-12.40 — so a 12-minute cap sat below four members
-#: that converge, and the 2026-08-10 battery duly failed the two of them it
-#: reached. (§34.1 caught this same substitution of `vtail_sample`'s timings for
-#: rcv2's in the flatness cap; it was made twice in this constant block.)
+#: **20.0. Derived from THIS code's measured members, which is the correction**
+#: (FINDINGS §37). The history is two rounds of the same mistake:
 #:
-#: Sixteen clears all four with margin and still refuses an unselected
-#: alternative half an hour. It is deliberately NOT set from the worst measured
-#: member plus epsilon: `winglet off` is a paired study's BASELINE, so losing it
-#: costs the comparison rather than one candidate.
-OPTIONAL_MEMBER_TIMEOUT_MIN = 16.0
+#: - 12.0 was justified by "every optional member that did converge in that run
+#:   landed inside 9.1 minutes", citing a 2026-08-07 rcv2 run — but 9.1 is a
+#:   `vtail_sample` figure, and that rcv2 run has four converged optional
+#:   members at 12.28-12.97. §35.3 caught it, after the cap had already failed
+#:   `winglet off` and `priced_equipment_fit`.
+#: - 16.0 then came from main's slowest converged optional member (12.97) plus
+#:   margin — for code that is SLOWER than main, because champion-seeded members
+#:   take more iterations (§36.2). Measured across the two branch batteries, the
+#:   slowest converged optional member is `ancf_13x11` at **15.79 min** against
+#:   that 16.0 cap. **99% utilisation.** It held by twelve seconds, and four
+#:   members per run sit above 14.3.
+#:
+#: Both errors are the same one: sizing a budget from timings the code no longer
+#: produces. So this is set from the two batteries that ran THIS code — worst
+#: converged optional member 15.79, giving 27% margin at 20.0 — and
+#: `tests/test_phase_order.py` pins it against those measured members so a third
+#: round is a red test rather than a lost member.
+#:
+#: Twenty still does the job the cap exists for: an unselected alternative gets
+#: two thirds of the primary solve's entitlement, not all of it. If seeding is
+#: ever made conditional (§36.7 leaves that open), these members get faster and
+#: this should come back down — from measurement, not from main's numbers.
+OPTIONAL_MEMBER_TIMEOUT_MIN = 20.0
 
 #: Wall-clock ceiling for ONE FLATNESS MEMBER, minutes — well below
 #: `SOLVE_TIMEOUT_MIN`, because a span perturbation that is going to converge on
@@ -3566,7 +3592,7 @@ def optimize(
         "re-solve battery", battery_jobs, timeout_min=battery_timeout,
     )
     battery_results |= _cold_retry(batch, battery_jobs, battery_results,
-                                   battery_timeout)
+                                   battery_timeout, cache=cache)
     for label, r in battery_results.items():
         if label == "mass_bump":
             continue

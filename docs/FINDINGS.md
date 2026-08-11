@@ -3492,3 +3492,116 @@ undo. If a study member ever fails seeded, this is the shape of the fix.
 UNMEASURED: no battery has yet run with `_cold_retry` in place, and the
 experiment used the DECLARED champion rather than the battery's adopted one, so
 it reproduces the mechanism rather than that member exactly.
+
+## 37. §36's own fixes, measured — and the branch pulls ahead of main (2026-08-11)
+
+§36 applied two fixes and stated plainly that neither was measured. This is that
+battery: 268.4 min, plus a 23.3 min resume to repair one member a lid-close cost.
+Distilled results: `docs/studies/rcv2_validated_20260811.json`.
+
+**Nothing is lost against main any more.** For the first time on this branch:
+
+| | pre-fix §35 | post-fix §36 | **validated** |
+|---|---|---|---|
+| main solved, branch failed | 6 | 1 | **0** |
+| main never solved, branch solved | 3 | 3 | **3** |
+| flatness points | 0 | 4 (one WRONG) | **4, all exact** |
+| objectives differing from main | 2 | 3 | **1** |
+| wall clock | 181.5 | 261.0 | 244.8 |
+
+The one remaining difference is `ttail` at +1.21 min, a BETTER optimum both
+branch configurations find, which does not change the study's ranking.
+
+### 37.1 Unchaining the sweep reproduces main exactly
+
+| span | main x2 | chained (§36.3) | **unchained** |
+|---|---|---|---|
+| 2.00 | 122.122793 | 122.052378 | **122.122793** |
+| 1.94 | 119.546060 | 119.546060 | **119.546060** |
+| 1.88 | 116.178978 | 116.178978 | **116.178978** |
+| 1.82 | **105.856974** | **50.648255** | **105.856974** |
+| 1.76 | timeout | timeout | timeout `dual_blow_up` |
+| 1.70 | cascaded | cascaded | cascaded |
+
+The span that came back as a 50-minute aeroplane at 17.67 m/s now matches main
+to ten decimal places, with cruise and taper identical, in 5.25 min against
+main's 5.20-5.24. It is also FASTER than chained (7.39 vs 9.04 at 2.0 m),
+confirming a third time that the chaining cost time as well as correctness.
+
+### 37.2 The cold retry recovers the stranded member, at main's own speed
+
+`printed_mass_x0.90` failed seeded at 98 iterations — the same closest miss, now
+reproduced on the battery's REAL champion rather than the experiment's declared
+one, which is what §36.7 could not establish. The retry then converged in **4.24
+min at 127.882895**, against main's 4.51 min and 127.8829. The recovery is as
+fast as main because it is what main does.
+
+### 37.3 A cap called safe twice was at 99% utilisation
+
+§36.2 flagged `OPTIONAL_MEMBER_TIMEOUT_MIN = 16` as derived from main's timings
+for code that is slower than main, and said it "held by one minute". Measured
+across both branch batteries, the slowest converged optional member is
+`ancf_13x11` at **15.79 min**. It held by twelve SECONDS, with four members per
+run above 14.3.
+
+Raised to **20.0, derived from this code's own members** rather than main's, and
+`tests/test_phase_order.py` now requires 20% margin over the slowest measured
+member rather than merely exceeding it — "above" is what let 16 pass review.
+This is the third round of one mistake: sizing a budget from timings the code no
+longer produces (9.1 from `vtail_sample`, then 12.97 from main). If seeding is
+ever made conditional, these members get faster and this should come back down,
+from measurement.
+
+### 37.4 The checkpoint set disagreed with its own artifact
+
+`batch` keys checkpoints by (phase label, member key), so the cold retry landed
+under `re-solve battery (cold retry)` while `re-solve_battery__printed_mass_x0.90`
+kept the seeded FAILURE. An auditor reading that entry finds a timeout for a
+member the report says converged.
+
+**The cost first assumed was wrong and is corrected here.** The retry phase has
+its own checkpoint, so the 2026-08-11 resume replayed it in 0.0 min rather than
+re-solving — `phase_resumed` records "1 of 1 from checkpoint". Nothing was paid
+twice. What was actually wrong is only that two entries contradicted each other,
+which is the class of defect `fingerprint.py` exists to prevent, one step
+further in. `_cold_retry` now writes the recovered member back under its own
+name.
+
+### 37.5 The branch refuses a design main called airworthy
+
+`design_trustworthy` is False on both branch batteries and True on both main
+ones — and the SM cross-check behind it is IDENTICAL: `ll_static_margin`
+0.0571864 against main 08-07's 0.0571864, per-mesh [0.05073, 0.05522, 0.0419]
+in both, `reliable: True` in both. Same design, same numbers, opposite verdict.
+
+The difference is that **`design_trust_failures` does not exist on main** — zero
+occurrences. This branch's gate (§33) evaluates three conditions main never
+checked, and all three fire:
+
+- no airworthy operating point exists in the final sweep
+- reported operating point misses the static-margin window
+- static margin changes sign inside its evaluation window
+
+The second is arithmetic: the champion's static margin is 0.0572 against a
+declared window of [0.08, 0.15], missing the floor by 0.0228. That gap is a
+KNOWN open flag on this aeroplane, and main has been reporting the design as
+trustworthy across it. The run now inserts "DESIGN NOT TRUSTWORTHY FOR FLIGHT
+OR CONSTRUCTION" at the top of its notes.
+
+**This is the most consequential behavioural difference in the whole branch**,
+and it is in the branch's favour: the aeroplane has not changed, the honesty
+about it has. It also means the headline 122.1 min is a diagnostic number, not
+a build recommendation, until the static-margin gap is resolved.
+
+### 37.6 What this does NOT establish
+
+The cap raise to 20 and the checkpoint reconciliation in §37.3-37.4 are applied
+AFTER this battery and are themselves unmeasured — the same status §36 had, and
+the pattern so far is that each measured round finds something in the previous
+one. The lid-close cost one member 24.4 minutes of suspended clock; the sleep
+detector isolated it cleanly (every other member reads nanosecond jitter) and
+the repair was a checkpoint delete plus a 23.3 min resume, but that member was
+solved on a machine in a different state from the rest of its run. And
+`design_trustworthy: False` says the champion is not airworthy by the declared
+window; nothing here says what to do about it, which is a design decision about
+the static-margin floor rather than a solver question.

@@ -70,7 +70,33 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 - Adaptive multistart keeps the codex schedule but draws its perturbed starts
   from main's `multistart_inits()`.
 
-### READ FIRST (2026-08-11): the four fixes are MEASURED, and the sweep had a worse bug
+### READ FIRST (2026-08-11, latest): the branch now loses NOTHING to main
+
+**FINDINGS §37** measured §36's own fixes on a full battery. Against main:
+**0 members lost, 3 gained that main cannot solve at all, flatness curve
+identical to ten decimals, one objective different (`ttail`, +1.21, better).**
+That is the first time this branch is strictly ahead.
+
+**The thing to act on is not a bug.** `design_trustworthy` is False, and §37.5
+is why: the SM cross-check is IDENTICAL to main's (0.0571864, same per-mesh
+values, both reliable) but `design_trust_failures` does not exist on main at
+all. This branch's gate checks three conditions main never did, and the
+arithmetic one is plain — **the champion's static margin is 0.0572 against a
+declared window of [0.08, 0.15]**. Main has been calling that design
+trustworthy. So the 122.1 min headline is a diagnostic number, not a build
+recommendation, until the static-margin floor question is settled. That is a
+DESIGN decision (lower the floor, or make the estimator agree with the NLP) and
+it is yours, not the solver's.
+
+Applied after that battery and therefore UNMEASURED, same status §36 had:
+`OPTIONAL_MEMBER_TIMEOUT_MIN` 16 → 20 (it was at 99% utilisation — the slowest
+converged optional member is 15.79 min, so it held by twelve seconds), and
+`_cold_retry` now writes a recovered member back under its own checkpoint name.
+
+Every round of measurement so far has found something in the previous round.
+Assume this one will too.
+
+### The 2026-08-11 morning block (§36): the four fixes are MEASURED, and the sweep had a worse bug
 
 **FINDINGS §36** prices §35's four fixes on a full battery (269.8 min,
 `docs/studies/rcv2_post_fix_20260811.json`). Five of six member failures gone,
