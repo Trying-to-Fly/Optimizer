@@ -3801,3 +3801,106 @@ The remaining work is unchanged from §38.5: a noise floor measured rather than
 inferred from the same five points it judges. Nothing here changes the design
 conclusion — the margin is short by 0.0023 at its best point, and that is a CG
 or tail-sizing question.
+
+## 39. The gate certifies a design — and §38.2's numbers were for the wrong aeroplane (2026-08-11)
+
+The battery that measures §38.6's gate fix. **It is the first run in this
+project's history whose design the airworthiness gate certifies**, and it also
+caught a substantial error of my own in §38.2. Both matter; the error first,
+because §38.2 was used to tell the user not to build the aeroplane.
+
+### 39.1 CORRECTION: §38.2's absolute margins measured a different aircraft
+
+`tools/bughunt/sm_resolution_experiment.py` rebuilt the champion from
+`run.json`'s `design_vector`. A design vector carries the CONTINUOUS variables
+only — the discrete choices a battery ADOPTS live on the aircraft object, and
+`load_aircraft` returns the DECLARED defaults instead. `vtail_rcv2` declares
+`winglet = True` and `prop_choice = ancf_11x6`; the champion had the winglet
+REJECTED and `ancf_12x10` adopted.
+
+So the measurement carried 42 g of winglet the champion does not have, 2.9 mm
+aft — **0.0123 of static margin**, against a window the design clears by 0.0038.
+Same continuous design vector, different aeroplane, silently.
+
+Re-measured with the adopted configuration:
+
+| V | default | 24 panels | §38.2 published |
+|---|---|---|---|
+| 9.5 | 0.05719 | **0.05301** | 0.04804 |
+| 10.5 | 0.08645 | **0.08132** | 0.07516 |
+
+**What survives:** the resolution TREND, which was a relative comparison at
+fixed (if wrong) configuration. The default still overstates the margin, by
+0.0042 and 0.0051 — the ~0.005 §38.2 reported, and the reason
+`SM_REEVAL_SPANWISE` exists.
+
+**What does not:** every absolute number, and with them §38.2's conclusion that
+"at converged resolution no operating point in the sweep meets the floor". At
+10.0 and 10.5 m/s the converged margins are 0.0838 and 0.0813, INSIDE
+[0.08, 0.15]. That conclusion was wrong, it was the basis of a DO NOT BUILD
+warning in HANDOFF, and both are corrected here.
+
+The tool now refuses to run when its rebuilt `auw_kg` or `x_cg_m` disagrees
+with the artifact's, and takes `--set attr=value` to restore adoptions. A CG
+error of 2.9 mm is invisible by inspection and worth 3x the margin under test;
+nothing that measures static margin should be allowed to start without that
+check.
+
+### 39.2 The gate certifies, and it certifies the right point
+
+With §38.6's two changes in place the run reports:
+
+    design_trustworthy    True
+    design_trust_failures []
+    candidates_source     legal
+    static_margin         0.08382   against [0.08, 0.15]   gap +0.00382
+    reported point        V = 10.00 m/s, alpha 5.158, 121.15 min
+
+Against the same aeroplane's previous battery — **bit-identical, `x_cg` matching
+to sixteen digits and every design variable at 0.000%** — which reported 122.62
+min at 9.5 m/s with a margin of 0.0572 and `design_trustworthy: False`.
+
+So the aeroplane never changed. What changed is that the sweep can now SELECT a
+legal point instead of rejecting every candidate and falling back to the
+objective peak. It gives up **1.47 minutes of endurance to fly somewhere its
+margin is legal**, and the artifact says so in its own notes: "THE HEADLINE
+NUMBER IS SET BY AN AIRWORTHINESS FILTER, NOT BY THE AEROPLANE'S BEST POINT".
+
+The significance test is not hiding anything at that point. The four local
+slopes are +0.1635, +0.1742, **-0.0018**, **-0.0162** against uncertainties of
+0.107, 0.112, 0.126, 0.139 — the negatives are one and two orders of magnitude
+inside their own error bars, which is the §38.3 noise floor, not stability
+information.
+
+### 39.3 The rest of the battery
+
+`printed_mass_x0.90` failed seeded for the fourth consecutive battery, same
+closest miss, and the cold retry recovered it at 127.882895 in 4.2 min against
+main's 4.51. **§37.4's checkpoint contradiction is fixed**: both its entries now
+read `127.882895 / Solve_Succeeded` rather than the member's own checkpoint
+holding a timeout for a member the report calls converged.
+
+The flatness sweep reproduced main again — 122.1 / 119.5 / 116.2 / 105.9, with
+1.76 m stalling at 131 iterations on `dual_blow_up` and 1.70 m cascading. Third
+battery, third identical structure.
+
+**A cost the cap raise did not anticipate.** `printed_mass_x0.90` now burns the
+full 20-minute cap before failing, where it burned 16 before, so recovering it
+costs **20.4 + 4.2 = 24.6 minutes for an answer main reaches in 4.5**. The cap
+is right for members that converge and simply lets this one fail more slowly.
+Four batteries of evidence now say this member always fails seeded; §36.7's
+open question about conditional seeding is the lever, and it is unpriced.
+
+### 39.4 What this does NOT establish
+
+The certification rests on a margin of +0.0038 — about one part in twenty of the
+window — and on a static-margin model whose in-loop and re-evaluated values are
+read at different operating points and whose local-slope diagnostic is still
+step-dependent away from the production setting (§38.5). A 0.0038 margin is
+smaller than the 0.005 the mesh refinement moved, so it is inside the distance
+the model has already been shown to travel under a change of discretization.
+
+`design_trustworthy: True` means this run's rules were satisfied. It does not
+mean the aeroplane has been shown to fly, and the artifact's own mesh-dependence
+note (0.0890 at the in-loop resolution against 0.0843 at 16 panels) is still
+attached to the champion.

@@ -77,18 +77,26 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 identical to ten decimals, one objective different (`ttail`, +1.21, better).**
 That is the first time this branch is strictly ahead.
 
-> **DO NOT BUILD THE CURRENT rcv2 CHAMPION** — and §38 makes the reason
-> stronger than §37 did, not weaker. At CONVERGED mesh resolution **no
-> operating point in the sweep meets the [0.08, 0.15] floor**: the best is
-> 0.0777 at 10 m/s, and the reported champion is 0.0480, not the 0.0572 the
-> artifact says. Refining the mesh moves the margin DOWN by ~0.005, so every
-> static margin this project has ever reported is optimistic by about that.
+> **THE "DO NOT BUILD" WARNING THAT STOOD HERE IS WITHDRAWN — §39.1.** It rested
+> on §38.2's converged margins, and those were measured on the WRONG AEROPLANE:
+> the tool rebuilt the champion from `design_vector`, which carries continuous
+> variables only, so it used the DECLARED `winglet = True` and `ancf_11x6`
+> instead of the adopted winglet-off `ancf_12x10`. That is 42 g of winglet
+> 2.9 mm aft — 0.0123 of static margin, against a window the design clears by
+> 0.0038.
 >
-> **But one of §37.5's three reasons does not survive.** The sign-consistency
-> failure is step-dependent — it vanishes at a 0.5° alpha step at one speed and
-> a 2.0° step at another — because `sm_local_slopes` differences a Cm that
-> moves 0.0024 across the whole window. The gate is currently rejecting
-> candidates on an unconverged number. See §38.3.
+> **The current champion PASSES the gate** (§39.2): `design_trustworthy: True`,
+> no trust failures, `candidates_source: legal`, static margin **0.08382**
+> against [0.08, 0.15], at 10.0 m/s and 121.15 min. It is the same aeroplane as
+> the previous battery to sixteen digits of `x_cg`; what changed is that the
+> sweep can now select a legal point rather than falling back to the objective
+> peak at 9.5 m/s where the margin genuinely is 0.053.
+>
+> **Read that as "the rules were satisfied", not "it has been shown to fly".**
+> The margin is +0.0038, which is smaller than the 0.005 that mesh refinement
+> alone moves it, and §38.5's step-dependence away from the production setting
+> is unfixed. Before cutting foam this still wants the flow5 gate the equipment
+> notes already call for.
 
 **The thing to act on is not a bug.** `design_trustworthy` is False, and §37.5
 is why: the SM cross-check is IDENTICAL to main's (0.0571864, same per-mesh

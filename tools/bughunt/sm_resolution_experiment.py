@@ -91,16 +91,67 @@ def evaluate(airplane, V, alpha0, x_cg, c_ref, bodies, res):
 
 
 def main() -> None:
-    run_dir = Path(sys.argv[1])
-    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(
+    # `--set attr=value` restores the discrete choices the battery adopted, which
+    # the design vector does not carry. Values parse as JSON so `false`, numbers
+    # and strings all work:  --set winglet=false --set prop_choice='"ancf_12x10"'
+    positional, overrides, expecting = [], [], False
+    for arg in sys.argv[1:]:
+        if expecting:
+            overrides.append(arg)
+            expecting = False
+        elif arg == "--set":
+            expecting = True
+        elif arg.startswith("--set="):
+            overrides.append(arg.removeprefix("--set="))
+        else:
+            positional.append(arg)
+    if expecting:
+        raise SystemExit("--set needs attr=value")
+
+    run_dir = Path(positional[0])
+    out_path = Path(positional[1]) if len(positional) > 1 else Path(
         "docs/studies/sm_resolution/sm_resolution.json")
     run = json.loads((run_dir / "run.json").read_text())
 
     ac, _ = cli.load_aircraft(Path("aircraft/vtail_rcv2"))
+    for item in overrides:
+        attr, _, raw = item.partition("=")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        setattr(ac, attr, value)
+        print(f"set {attr} = {value!r}", flush=True)
+
     dv = run["design_vector"]
     airplane = ac.geometry(dv)
     bodies = ac.parasite_bodies(dv)
     totals = massmodel.totals(massmodel.build(ac, airplane, dv)[0])
+
+    # A `design_vector` carries the CONTINUOUS variables only. The discrete
+    # choices a battery adopts — prop, tail type, fuselage topology, and whether
+    # the winglet survived its study — live on the aircraft object, and
+    # `load_aircraft` hands back the DECLARED defaults instead. Rebuilding from
+    # dv alone therefore reconstructs a different aeroplane, silently.
+    #
+    # That is not hypothetical: FINDINGS §38.2's absolute margins were measured
+    # this way and were wrong. The declared default is `winglet = True` and
+    # `prop_choice = ancf_11x6`; the 2026-08-11 champion had the winglet
+    # REJECTED and `ancf_12x10` adopted, so the rebuild carried 42 g of winglet
+    # the champion does not have, 2.9 mm aft — worth 0.0123 of static margin,
+    # against a window the design clears by 0.0038.
+    #
+    # Mass is the cheap tell, so it is checked rather than assumed. Anything
+    # that moves the CG invalidates every number below it.
+    for field, mine in (("auw_kg", totals["auw_kg"]), ("x_cg_m", totals["x_cg_m"])):
+        theirs = (run.get("masses") or {}).get(field)
+        if theirs is not None and abs(mine - theirs) > 1e-6:
+            raise SystemExit(
+                f"rebuilt aeroplane does not match the artifact: {field} "
+                f"{mine:.6f} against {theirs:.6f}. The adopted discrete choices "
+                "are missing — set them on the aircraft before measuring, or "
+                "every static margin here is for a different aircraft."
+            )
     # `c_ref` is the AIRPLANE's, not the aircraft definition's — same source
     # `solve` uses for the re-evaluation (`aero.static_margin(..., airplane.c_ref)`).
     x_cg, c_ref = totals["x_cg_m"], airplane.c_ref
@@ -163,7 +214,12 @@ def main() -> None:
         spread = max(sms) - min(sms)
         print(f"\nV={V}: margin {min(sms):+.5f}..{max(sms):+.5f} (spread {spread:.5f})")
         if not flips:
-            print("  no sign flip at ANY resolution — the flip was discretization")
+            # Since §38.6 `sm_sign_flip` requires the negative slope to exceed
+            # its own uncertainty, so "no flip" now means "none that is
+            # distinguishable from noise" — NOT that refinement removed one.
+            # The raw slopes above still show negatives; read those for shape.
+            print("  no SIGNIFICANT flip at any resolution (the bare slopes may "
+                  "still go negative — they are inside their error bars)")
         elif len(flips) == len(rows):
             print("  sign flip survives every resolution — NOT panel noise")
         else:
