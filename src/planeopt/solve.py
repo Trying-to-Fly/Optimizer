@@ -3790,13 +3790,28 @@ def optimize(
             )
         elif smm.get("sign_flip_survives_refinement"):
             result.notes.append(
+                # The old wording ended "the nonlinearity is the VISCOUS Cm at
+                # this Reynolds number — treat it as a property of the
+                # aeroplane." §38.3 measured the third option that inference
+                # skips: the same champion flips at a 1 deg alpha step and not
+                # at 0.5 or 2.0, because `sm_local` differences a Cm that moves
+                # 0.0024 across the window. Refinement cannot fix a difference
+                # quotient at its own noise floor, so surviving refinement says
+                # nothing about the airframe — and a note telling a reader to
+                # treat noise as a property of their aeroplane is worse than no
+                # note.
                 "The static margin's sign change SURVIVES a "
                 f"{aero.LL_CHECK_RESOLUTION}-panel mesh "
                 f"({smm['in_loop']['static_margin']:.4f} → "
-                f"{smm['fine']['static_margin']:.4f}), so refinement does not "
-                "explain it. Combined with an inviscid VLM sweep that is monotone "
-                "over the same window, the nonlinearity is the VISCOUS Cm at this "
-                "Reynolds number — treat it as a property of the aeroplane."
+                f"{smm['fine']['static_margin']:.4f}), so the panel count does "
+                "not explain it. That does NOT make it the aeroplane: the local "
+                "slope is a two-point difference of a nearly-flat Cm, and "
+                "FINDINGS §38.3 measured the same window flipping or not "
+                "according to the alpha STEP chosen. Refining panels cannot fix "
+                "a difference quotient at its own noise floor. Read this as "
+                "'not the mesh', and see whether `sm_local_slopes` carries a "
+                "slope larger than its own `sm_local_uncertainty` before "
+                "treating it as stability information."
             )
         if smm and not smm.get("converged"):
             log.warning("champion static margin is MESH-DEPENDENT: %.4f vs %.4f",
