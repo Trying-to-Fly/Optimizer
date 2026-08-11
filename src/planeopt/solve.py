@@ -1255,13 +1255,30 @@ def sm_sign_flip(sm: dict) -> dict | None:
     and returns the per-alpha local slopes alongside it. A regression through
     points whose slope changes sign returns a confident positive margin for an
     aeroplane that is not positively stable at its own trim point. Returns the
-    most negative local slope when that has happened, else None.
+    most negative SIGNIFICANT local slope when that has happened, else None.
+
+    **Significant, since FINDINGS §38.3.** This used to flag any negative local
+    slope, and that made the gate a reader of its own noise: the same rcv2
+    champion flips sign at a 1 deg alpha step and does not at 0.5 or 2.0,
+    because `sm_local` differences a `Cm` that moves 0.0024 across the whole
+    window at 9.5 m/s. `SM_DIAGNOSTIC_OFFSETS` was therefore selecting the
+    verdict rather than observing it, and every candidate in the 2026-08-11
+    sweep was rejected on it. `aero.static_margin` now carries each slope's own
+    uncertainty, propagated from the residual scatter of the window's linear
+    fit, and `locally_unstable` is the comparison — a negative slope smaller
+    than the error on measuring it is not evidence of anything.
+
+    This does NOT establish that Cm is monotone here (§38.5); it establishes
+    that this diagnostic cannot tell, and stops it voting as though it could.
     """
     if sm.get("static_margin") is None or sm["static_margin"] <= 0:
         return None
     negative = [
         p for p in (sm.get("sm_local_slopes") or [])
-        if p.get("sm_local") is not None and p["sm_local"] < 0
+        if p.get("sm_local") is not None
+        # Fall back to the bare sign for readings produced before §38.3, so an
+        # old artifact re-read by a new tool is not silently re-judged.
+        and p.get("locally_unstable", p["sm_local"] < 0)
     ]
     return min(negative, key=lambda p: p["sm_local"]) if negative else None
 
@@ -1425,6 +1442,10 @@ def run(
             reading = aero.static_margin(
                 airplane, key, x_cg, airplane.c_ref,
                 alpha0=s["alpha_deg"], bodies=bodies,
+                # Converged, not default — the default overstates the margin by
+                # ~0.005 and this is the number the airworthiness rules below
+                # judge against (aero.SM_REEVAL_SPANWISE, FINDINGS §38.2).
+                spanwise_resolution=aero.SM_REEVAL_SPANWISE,
             )
             reading["sm_sign_consistent"] = sm_sign_flip(reading) is None
             sm_by_speed[key] = reading

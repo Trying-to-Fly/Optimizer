@@ -319,6 +319,28 @@ SM_ALPHA_OFFSETS = (-2.0, 0.0, 2.0)
 #: they never enter the regression above, so they cost the NLP nothing.
 SM_DIAGNOSTIC_OFFSETS = (-1.0, 1.0)
 
+#: Spanwise panels for the RE-EVALUATION's static margin, which is the number
+#: the airworthiness gate reads. Not a preference: at AeroSandbox's default the
+#: margin is OPTIMISTIC, and it converges downward (FINDINGS §38.2, same
+#: champion, same window):
+#:
+#:     V        default     8        12       16       24
+#:     9.5 m/s  0.05229  0.04973  0.04893  0.04845  0.04804
+#:    10.5 m/s  0.08027  0.07728  0.07622  0.07566  0.07516
+#:
+#: About 0.005 of margin, which is a quarter of the declared floor and the
+#: difference between "inside [0.08, 0.15]" and not: the 2026-08-11 sweep's
+#: in-window points at 10.0 and 10.5 m/s fall to 0.0777 and 0.0752 here. Every
+#: static margin this project reported before this constant existed is
+#: optimistic by roughly that much.
+#:
+#: 24 rather than 16 because the sequence is flat between them (0.0004-0.0005)
+#: and the cost is ~6 s per distinct sweep speed against a battery measured in
+#: hours. The NLP's IN-LOOP margin still runs at the graph's own resolution —
+#: refining that is a solve-time cost, not a diagnostic one, and the gate reads
+#: this number.
+SM_REEVAL_SPANWISE = 24
+
 
 def _slope(xs, ys):
     """Least-squares slope dy/dx, written as plain arithmetic so it is
@@ -344,6 +366,68 @@ def static_margin_from_polar(cls, cms, offsets_deg, bodies, s_ref, c_ref):
         cl_alpha_rad = _slope(offsets_deg, cls) * 180 / np.pi
         sm = sm - fuselage_cm_alpha(bodies, s_ref, c_ref) / cl_alpha_rad
     return sm
+
+
+def local_slopes_with_uncertainty(cls, cms, alphas) -> tuple[list[dict], float]:
+    """Per-interval -dCm/dCL, each with the error on measuring it.
+
+    Pure, and separate from `static_margin`, because the question it settles is
+    arithmetic rather than aerodynamic and should be answerable without a
+    LiftingLine run.
+
+    **Why the uncertainty exists at all — FINDINGS §38.3.** `sm_local` is a
+    two-point difference quotient, and on rcv2 its numerator is tiny: `Cm` moves
+    0.0024 across the entire +/-2 deg window at 9.5 m/s. Differenced at a 1 deg
+    step the same champion reports a sign flip; at 0.5 and 2.0 deg it does not.
+    The step was selecting the verdict. Since an airworthiness gate reads this,
+    a negative slope has to be distinguishable from the noise before it counts.
+
+    `sigma` is the residual scatter of a straight line through the WHOLE window
+    — what `Cm` does that a constant `-dCm/dCL` cannot explain. Both endpoints
+    of an interval carry it, so the difference carries `sigma*sqrt(2)`, and the
+    slope divides that by the `CL` interval. Narrow intervals therefore report
+    LARGER uncertainty, which is the point: that is where differencing is worst
+    conditioned.
+
+    **What this does NOT fix.** `sigma` is the residual of a straight line
+    through the window, so it measures departure from linearity rather than the
+    evaluation's noise floor, and the two coincide only when the window is wide
+    enough to contain some curvature. Narrow the window and a curve looks
+    straight: at half the production step `sigma` collapses from 5.2e-03 to
+    6.2e-04 and slopes that the production reading dismisses become
+    "significant" again. So this removes the false rejection at the setting the
+    gate uses; it does not make the diagnostic step-independent. §38.5 says what
+    would — a noise floor measured rather than inferred from the same five
+    points it is judging. `tests/test_sm_local_slopes.py` pins both halves.
+
+    Returns the per-alpha slopes and the sigma they were judged against.
+    """
+    cl = np.asarray(cls, dtype=float)
+    cm = np.asarray(cms, dtype=float)
+    slope, intercept = np.polyfit(cl, cm, 1)
+    residual = cm - (intercept + slope * cl)
+    # two degrees of freedom go to the fit; what is left estimates the scatter
+    dof = max(len(cl) - 2, 1)
+    sigma = float(np.sqrt(float((residual ** 2).sum()) / dof))
+
+    out = []
+    for i in range(len(cl) - 1):
+        d_cl = float(cl[i + 1] - cl[i])
+        if d_cl == 0.0:
+            sm_local, uncertainty = float("nan"), float("inf")
+        else:
+            sm_local = -float(cm[i + 1] - cm[i]) / d_cl
+            uncertainty = float(sigma * np.sqrt(2.0) / abs(d_cl))
+        out.append({
+            "alpha": float(alphas[i]),
+            "sm_local": sm_local,
+            "sm_local_uncertainty": uncertainty,
+            # "This alpha is unstable" is a claim, and the airworthiness gate
+            # acts on it. Only made when the negative slope is larger than the
+            # error on measuring it.
+            "locally_unstable": bool(sm_local < -uncertainty),
+        })
+    return out, sigma
 
 
 def static_margin(
@@ -379,20 +463,14 @@ def static_margin(
             c_ref,
         )
     )
-    local = [
-        {
-            "alpha": float(alphas[i]),
-            "sm_local": -float(
-                (cms[offsets[i + 1]] - cms[offsets[i]])
-                / (cls[offsets[i + 1]] - cls[offsets[i]])
-            ),
-        }
-        for i in range(len(offsets) - 1)
-    ]
+    local, sigma = local_slopes_with_uncertainty(
+        [cls[d] for d in offsets], [cms[d] for d in offsets], list(alphas)
+    )
     return {
         "static_margin": sm,
         "x_np_m": x_cg + sm * c_ref,
         "sm_local_slopes": local,
+        "sm_local_sigma": sigma,
         "sm_alpha_window_deg": [float(alpha0 + d) for d in SM_ALPHA_OFFSETS],
     }
 

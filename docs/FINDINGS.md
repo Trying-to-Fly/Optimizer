@@ -3751,3 +3751,53 @@ short by 0.0023 at its best point, at converged resolution. That is close
 enough that it may be reachable by CG movement or tail sizing rather than by
 moving the floor — `RCV2_CAP_PRICING` prices the floor at 0.08->0.05 as +0.851
 min, which buys a legal number without buying margin. Nothing here chooses.
+
+### 38.6 The gate's derivative, fixed — and what the fix does not reach
+
+Two changes, and the second is what keeps the first honest.
+
+**`sm_local` now carries its own uncertainty, and only a slope larger than that
+counts.** `aero.local_slopes_with_uncertainty` fits a straight line through the
+whole window, takes `sigma` as the residual scatter, and propagates it: both
+endpoints of an interval carry `sigma`, so the difference carries
+`sigma*sqrt(2)` and the slope divides by the `CL` interval it was taken over.
+Narrow intervals therefore report LARGER error bars, which is exactly where
+differencing is worst conditioned. `sm_sign_flip` reads `locally_unstable`
+rather than the bare sign, and falls back to the bare sign on artifacts written
+before this existed, so re-reading an old run does not silently re-judge it.
+
+On the production window the four measured slopes are +0.1809, **-0.0035**,
+**-0.0195**, +0.0297 against error bars of 0.088, 0.099, 0.110, 0.133 — both
+negatives are an order of magnitude inside their own uncertainty. The false
+rejection is gone.
+
+**The re-evaluation now runs at `SM_REEVAL_SPANWISE = 24`, and this is not
+optional company.** §38.2 measured the default as optimistic by ~0.005. Fixing
+only the derivative would have moved the gate from wrongly rejecting everything
+to wrongly ACCEPTING the 10.0-10.5 m/s points, which read 0.089 and 0.080 at the
+default and 0.078 and 0.075 converged. A false pass on airworthiness is worse
+than the false rejection it replaces. With both changes the champion is still
+refused, now for the reason that survives scrutiny: nothing clears the floor.
+
+Verified end to end on the champion — no flip at any sweep speed, and no speed
+in the window:
+
+| V | SM (res 24) | sigma | flip? | in [0.08, 0.15]? |
+|---|---|---|---|---|
+| 9.5 | 0.04804 | 5.3e-03 | ok | no |
+| 10.0 | 0.07773 | 6.5e-03 | ok | no |
+| 10.5 | 0.07516 | 4.7e-03 | ok | no |
+| 11.0 | 0.06963 | 5.0e-03 | ok | no |
+
+**What it does not reach.** `sigma` measures departure from LINEARITY, not the
+evaluation's noise floor, and the two coincide only when the window is wide
+enough to contain curvature. At half the production step `sigma` collapses from
+5.2e-03 to 6.2e-04 and two slopes become "significant" again. So the diagnostic
+is fixed at the setting the gate uses and is still step-dependent in general.
+`tests/test_sm_local_slopes.py` pins BOTH halves, including an assertion that
+fails if the half-step case is ever quietly fixed without the docs following.
+
+The remaining work is unchanged from §38.5: a noise floor measured rather than
+inferred from the same five points it judges. Nothing here changes the design
+conclusion — the margin is short by 0.0023 at its best point, and that is a CG
+or tail-sizing question.
