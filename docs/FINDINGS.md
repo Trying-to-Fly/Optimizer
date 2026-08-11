@@ -3593,6 +3593,46 @@ and it is in the branch's favour: the aeroplane has not changed, the honesty
 about it has. It also means the headline 122.1 min is a diagnostic number, not
 a build recommendation, until the static-margin gap is resolved.
 
+### 37.7 All three reasons are verifiable in MAIN's own artifact (2026-08-11)
+
+The user accepted that main is the wrong one, so this records what that
+commits us to. Every reason the gate fires on is computed by main too — main
+simply never evaluated them.
+
+**The window miss is arithmetic.** Re-evaluated static margin 0.0572 against a
+declared `[0.08, 0.15]`, i.e. short of the floor by 0.0228, or 28%. Present in
+`main 08-07`'s `constraints.static_margin_gap` as `-0.02281`.
+
+**The sign change is in main's own `sm_local_slopes`**, at the reported point,
+identical to six digits across both runs:
+
+    alpha 4.23    +0.198
+    alpha 5.23    +0.0016
+    alpha 6.23    -0.0153      <- crosses zero, inside the cruise range
+    alpha 7.23    +0.0375
+
+**`candidates_source` went `legal` -> `feasible_fallback` on an unchanged
+design**, because §33 tightened the definition. Main was selecting from a
+candidate set it should not have called legal.
+
+**Scope: every rcv2 run since 2026-08-07** — `20260807T061330`,
+`20260808T145834`, and all four branch batteries — carries SM 0.0572 against
+the same window. This is not one champion.
+
+**What this does NOT settle, and it is the important part.** Three sources
+disagree about one aeroplane: the NLP constraint says 0.0800 and is satisfied
+exactly (`static_margin_nlp` 0.07999999), the lifting-line re-evaluation says
+0.0572 and is uniform and sign-consistent across three meshes, and the NLP's own
+local slopes are non-monotone and cross zero. On `vtail_sample` the first two
+AGREE exactly (`20260731T050940`: re-eval 0.0800, gap 0.0), so the disagreement
+is specific to rcv2 rather than a property of the estimator.
+
+Lowering the floor to 0.05 — priced at +0.851 min in `RCV2_CAP_PRICING` — makes
+the reported number pass while leaving that disagreement in place. Reconciling
+the NLP's static-margin model with the re-evaluation is the answer that yields
+an aeroplane worth building. Neither is a solver decision and neither is taken
+here.
+
 ### 37.6 What this does NOT establish
 
 The cap raise to 20 and the checkpoint reconciliation in §37.3-37.4 are applied

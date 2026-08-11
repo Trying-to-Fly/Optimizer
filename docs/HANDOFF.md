@@ -77,6 +77,14 @@ as a sweep airworthiness rule, and the run-level `design_trustworthy` gate.
 identical to ten decimals, one objective different (`ttail`, +1.21, better).**
 That is the first time this branch is strictly ahead.
 
+> **DO NOT BUILD THE CURRENT rcv2 CHAMPION.** Its re-evaluated static margin is
+> **0.0572 against your declared [0.08, 0.15] window** — short of the floor by
+> 28% — and the NLP's own `sm_local_slopes` cross zero at α ≈ 6.2°, inside the
+> cruise range. Every rcv2 run since 2026-08-07 has this, main and branch
+> alike. User accepted 2026-08-11 that main calling it trustworthy is the
+> error (§37.5, §37.7). The 122.1 min figure is diagnostic, not a build
+> recommendation.
+
 **The thing to act on is not a bug.** `design_trustworthy` is False, and §37.5
 is why: the SM cross-check is IDENTICAL to main's (0.0571864, same per-mesh
 values, both reliable) but `design_trust_failures` does not exist on main at
