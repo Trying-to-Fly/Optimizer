@@ -197,9 +197,23 @@ def mesh_convergence_check(
         sm["converged"] = bool(abs(delta) <= LL_SM_MESH_TOL)
         # The diagnosis, and the reason this exists: does the pathology survive
         # a 4x finer mesh? If both meshes agree it is there, refinement is not
-        # the explanation and the nonlinearity is the model's — for this project
-        # that points at the viscous Cm, since the inviscid VLM sweep over the
-        # same window is monotone (`vlm_static_margin_check`).
+        # the explanation.
+        #
+        # These two flags deliberately still read the BARE sign, unlike the
+        # airworthiness gate (`solve.sm_sign_flip`, §38.6). Comparing bare flips
+        # across meshes is exactly what makes them a mesh test, and softening
+        # them would destroy the signal — §38.2 is the measurement that needed
+        # it, and found the flip stable to three digits from 8 to 24 panels.
+        #
+        # **But "not the mesh" does not mean "the airframe".** This comment used
+        # to conclude the nonlinearity was the model's, pointing at the viscous
+        # Cm because the inviscid VLM sweep is monotone. §38.3 found a third
+        # option and it is the one that held: `sm_local` is a two-point
+        # difference of a `Cm` that moves 0.0024 across the whole window, so at
+        # a 1 deg step it flips and at 0.5 and 2.0 it does not. Refinement
+        # cannot fix a difference quotient whose numerator is at the noise
+        # floor, which is why the flip looked so stable here. Read
+        # `sign_flip_survives_refinement` as "not the panel count", nothing more.
         sm["sign_flip_survives_refinement"] = bool(
             not sm["in_loop"]["sign_consistent"] and not sm["fine"]["sign_consistent"]
         )
