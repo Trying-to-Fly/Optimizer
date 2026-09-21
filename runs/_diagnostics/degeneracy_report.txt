@@ -1,0 +1,39 @@
+solve: (solve returned)
+n_x = 46, n_g = 167, last iterate finite: True
+
+VIOLATED rows at the last iterate (> 1e-6): 18   total violation 4.2170e-01   worst 2.6829e-01
+  g[ 92]  value -2.682879e-01  in [0, 0]  BY 2.683e-01   solve.py:1133 opti.subject_to(aero_run["L"] == weight_n)
+  g[ 96]  value  3.292852e-02  in [0.08, +inf]  BY 4.707e-02   solve.py:1157 opti.subject_to(sm >= mission.static_margin_range[0])
+  g[161]  value  1.023732e+00  in [-inf, 1]  BY 2.373e-02   structures.py:46 opti.subject_to(stress / (SIGMA_ALLOW / SAFETY_FACTOR) <= 1.0)
+  g[154]  value  9.822257e-01  in [1, +inf]  BY 1.777e-02   aircraft.py:1040 opti.subject_to(usable_nose / motor["length"] >= 1.0)
+  g[104]  value  9.823762e-01  in [1, +inf]  BY 1.762e-02   aircraft.py:881 opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 / 60e3 >= 1.0)
+  g[ 93]  value -1.634933e-02  in [0, 0]  BY 1.635e-02   solve.py:1134 opti.subject_to(aero_run["Cm"] == 0)  # pitch trim
+  g[ 98]  value  1.010122e+00  in [-inf, 1]  BY 1.012e-02   solve.py:1170 opti.subject_to(aero.smooth_max(ratios) <= 1.0)
+  g[116]  value  4.761342e-03  in [-inf, 0]  BY 4.761e-03   equipment.py:331 opti.subject_to(xi - half >= lane.x_lo + lane.end_margin_m)
+  g[115]  value  2.613029e-02  in [0.03, +inf]  BY 3.870e-03   aircraft.py:991 opti.subject_to(vv >= self.v_tail_volume_min)
+  g[159]  value  2.783433e-03  in [-inf, 0]  BY 2.783e-03   structures.py:49 opti.subject_to(tip_defl <= defl_frac * length)
+  g[155]  value  2.179601e-03  in [-inf, 0]  BY 2.180e-03   aircraft.py:1042 opti.subject_to(dv["pod_tail"] >= 1.8 * d_eq)
+  g[ 94]  value -2.121708e-03  in [0, 0]  BY 2.122e-03   solve.py:1135 opti.subject_to(pr["thrust_n"] == drag)
+  g[162]  value  1.811864e-03  in [-inf, 0]  BY 1.812e-03   structures.py:49 opti.subject_to(tip_defl <= defl_frac * length)
+  g[156]  value  1.001243e+00  in [-inf, 1]  BY 1.243e-03   aircraft.py:1057 opti.subject_to(p["length"] / (self.fineness_max * d_eq) <= 1.0)
+  g[158]  value  1.000916e+00  in [-inf, 1]  BY 9.158e-04   structures.py:46 opti.subject_to(stress / (SIGMA_ALLOW / SAFETY_FACTOR) <= 1.0)
+
+active rows at the last iterate (|slack|/scale < 0.0001): 3
+  g[  3]  value  1.249947e+00  slack 5.26e-05   solve.py:392 var = real(*a, **kw)
+  g[ 55]  value  1.447263e+00  slack 1.06e-04   solve.py:392 var = real(*a, **kw)
+  g[151]  value -7.040978e-06  slack 7.04e-06   aircraft.py:1002 opti.subject_to(p["bay_end"] >= WING_X_LE + self.SADDLE_CHORD_FRAC * dv["c_root"])
+
+singular values of the active-row Jacobian (3x46):
+  1.010e+00  1.000e+00  4.058e-01
+  condition number: 2.490e+00
+
+--- direction of the 1st-smallest singular value (4.058e-01); rows with weight > 0.15:
+   weight -0.988   g[151]   aircraft.py:1002 opti.subject_to(p["bay_end"] >= WING_X_LE + self.SADDLE_CHORD_FRAC * dv["c_root"])
+   weight +0.156   g[  3]   solve.py:392 var = real(*a, **kw)
+
+--- direction of the 2nd-smallest singular value (1.000e+00); rows with weight > 0.15:
+   weight -1.000   g[ 55]   solve.py:392 var = real(*a, **kw)
+
+--- direction of the 3rd-smallest singular value (1.010e+00); rows with weight > 0.15:
+   weight -0.988   g[  3]   solve.py:392 var = real(*a, **kw)
+   weight -0.156   g[151]   aircraft.py:1002 opti.subject_to(p["bay_end"] >= WING_X_LE + self.SADDLE_CHORD_FRAC * dv["c_root"])

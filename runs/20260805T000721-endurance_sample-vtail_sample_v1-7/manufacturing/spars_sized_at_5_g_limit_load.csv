@@ -1,0 +1,3 @@
+part,qty,od_mm,wall_mm,bore_mm,length_mm,mass_g,root_moment_Nm,stress_MPa,stress_allow_MPa,stress_margin_pct,tip_defl_mm,defl_allow_mm,defl_margin_pct,stock_length_mm
+centre carry-through,1,10.0,1.0,8.0,350.0,15.8,16.73,288.7,200.0,-30.7,21.4,17.5,-18.4,700.0
+outer panel,2,8.0,1.0,6.0,467.5,16.4,5.79,168.5,200.0,18.7,27.9,23.4,-16.2,467.5

@@ -1,0 +1,49 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 56 iterations; closest miss aircraft.py:1150 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 56.0,
+ "violations": [
+  {
+   "row": 132.0,
+   "by": 0.12105561538043674,
+   "value": 0.8789443846195633,
+   "what": "aircraft.py:1150 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)"
+  },
+  {
+   "row": 84.0,
+   "by": 0.005842121275570378,
+   "value": -0.005842121275570378,
+   "what": "solve.py:2012 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 85.0,
+   "by": 0.0023858008665700787,
+   "value": 0.0023858008665700787,
+   "what": "solve.py:2013 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+  },
+  {
+   "row": 86.0,
+   "by": 0.0009195895285810662,
+   "value": 0.0009195895285810662,
+   "what": "solve.py:2014 opti.subject_to(pr[\"thrust_n\"] == drag)"
+  },
+  {
+   "row": 103.0,
+   "by": 1.158349850760576e-08,
+   "value": -1.158349850760576e-08,
+   "what": "aircraft.py:1075 opti.subject_to("
+  }
+ ],
+ "convergence": {
+  "iterations_recorded": 57.0,
+  "inf_pr_final": 0.18297161154298336,
+  "inf_pr_min": 0.0006277647597840996,
+  "inf_du_final": 0.4640102707395459,
+  "inf_du_max": 4765.61805157542,
+  "mu_final": 0.03337186559136532,
+  "inf_pr_progress_last_25": 0.13652548702150058,
+  "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+ },
+ "solve_minutes": 12.84,
+ "peak_rss_gb": 14.933845520019531
+}

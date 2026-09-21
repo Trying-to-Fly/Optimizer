@@ -1,0 +1,40 @@
+{
+ "failed": "Invalid_Number_Detected after 0 iterations; closest miss aircraft.py:1086 opti.subject_to(deflection_deg >= -limit)",
+ "return_status": "Invalid_Number_Detected",
+ "iter_count": 0.0,
+ "suspended_minutes": 8.58635758049786e-09,
+ "violations": [
+  {
+   "row": 114.0,
+   "by": 11.356696347541494,
+   "value": 11.356696347541494,
+   "what": "aircraft.py:1086 opti.subject_to(deflection_deg >= -limit)"
+  },
+  {
+   "row": 64.0,
+   "by": 2.0000000355904275,
+   "value": -3.000000026692821,
+   "what": "solve.py:625 var = real(*a, **kw)"
+  },
+  {
+   "row": 37.0,
+   "by": 1.5572271106604527,
+   "value": 2.799628136699988,
+   "what": "solve.py:625 var = real(*a, **kw)"
+  },
+  {
+   "row": 100.0,
+   "by": 1.2588503098565909,
+   "value": 8.24114969014341,
+   "what": "solve.py:2041 opti.subject_to(V >= mission.v_min_ms)"
+  },
+  {
+   "row": 146.0,
+   "by": 0.7006778249195458,
+   "value": 0.2993221750804542,
+   "what": "equipment.py:389 opti.subject_to((xb - xa) / sep.min_m >= 1.0)"
+  }
+ ],
+ "solve_minutes": 1.57,
+ "peak_rss_gb": 13.99057388305664
+}

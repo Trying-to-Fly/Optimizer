@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>planeopt — endurance_sample / vtail_sample_v1.2</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+  table { border-collapse: collapse; margin: .5rem 0; }
+  td, th { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: .3rem .7rem; text-align: left; }
+  .status { padding: .6rem 1rem; border-radius: .5rem; background: color-mix(in srgb, orange 18%, transparent); }
+  .meta { opacity: .7; font-size: .85rem; }
+  code { font-size: .9em; }
+</style>
+</head>
+<body>
+<h1>planeopt run — endurance_sample / vtail_sample_v1.2</h1>
+<p class="meta">objective: <b>endurance</b> (min,
+wind mode: constraint) · created 2026-07-23T00:53:30</p>
+<p class="status">M0 scaffold: fixed-design echo — no aero/propulsion models, no optimizer</p>
+
+<h2>Geometry</h2>
+<table>
+<tr><th>name</th><td>vtail_sample_v1.2</td></tr><tr><th>span_m</th><td>1.8015085584827923</td></tr><tr><th>area_m2</th><td>0.3577790833193166</td></tr><tr><th>aspect_ratio</th><td>9.071053165481478</td></tr><tr><th>mean_chord_m</th><td>0.19859971335392024</td></tr><tr><th>n_wings</th><td>2</td></tr>
+</table>
+
+<h2>Masses</h2>
+
+<table>
+<tr><th>auw_kg</th><td>0.8580</td></tr><tr><th>x_cg_m</th><td>0.4689</td></tr>
+</table>
+
+
+<table>
+<tr><th>fixed equipment</th><th>kg</th></tr>
+<tr><td>battery</td><td>0.430</td></tr><tr><td>motor_prop</td><td>0.190</td></tr><tr><td>esc_wiring</td><td>0.080</td></tr><tr><td>servos_aileron</td><td>0.024</td></tr><tr><td>servos_ruddervator</td><td>0.024</td></tr><tr><td>fc_gps_rx</td><td>0.060</td></tr><tr><td>hardware_misc</td><td>0.050</td></tr>
+</table>
+
+
+<h2>Performance</h2>
+<table>
+<tr><th>usable_energy_wh</th><td>47.36000000000001</td></tr>
+</table>
+
+<h2>Mission constraints</h2>
+<table>
+<tr><th>v_min_ms</th><td>9.5</td></tr><tr><th>v_stall_max_ms</th><td>8.0</td></tr>
+</table>
+
+
+<h2>Notes</h2>
+<ul><li>Structure mass, aero, propulsion, and trim are not evaluated at M0.</li><li>fixed_totals CG covers fixed equipment only — not an aircraft CG.</li></ul>
+
+</body>
+</html>

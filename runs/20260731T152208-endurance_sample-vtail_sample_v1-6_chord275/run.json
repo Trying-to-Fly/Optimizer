@@ -1,0 +1,1163 @@
+{
+  "aircraft": "vtail_sample_v1.6_chord275",
+  "mission": "endurance_sample",
+  "objective": "endurance",
+  "status": "M3: full-vehicle optimization (wing + tail + balance + spars + trim) + numeric re-evaluation",
+  "created": "2026-07-31T15:22:08",
+  "geometry": {
+    "name": "vtail_sample_v1.6_chord275",
+    "span_m": 2.000000019995465,
+    "span_projected_m": 1.998624326474207,
+    "area_m2": 0.4056079566580257,
+    "aspect_ratio": 9.861739678233977,
+    "mean_chord_m": 0.20280397630143296,
+    "n_wings": 2,
+    "surfaces": {
+      "wing": {
+        "airfoil": "sd7037",
+        "span_m": 2.0,
+        "area_m2": 0.40561,
+        "root_chord_m": 0.2511,
+        "tip_chord_m": 0.14
+      },
+      "vtail": {
+        "airfoil": "naca0009",
+        "span_m": 0.4215,
+        "area_m2": 0.03933,
+        "root_chord_m": 0.0936,
+        "tip_chord_m": 0.093
+      }
+    }
+  },
+  "masses": {
+    "components": {
+      "battery": 0.43,
+      "motor_prop": 0.2005,
+      "esc_wiring": 0.08,
+      "servos_aileron": 0.024,
+      "servos_tail": 0.024,
+      "fc_gps_rx": 0.06,
+      "hardware_misc": 0.05,
+      "wing_spars_joiners": 0.1015,
+      "pod": 0.1504,
+      "boom": 0.0438,
+      "nose_ballast": -0.0,
+      "printed_wing": 0.5461,
+      "printed_vtail": 0.0778
+    },
+    "printed_breakdown": {
+      "wing": {
+        "skin_kg": 0.2245,
+        "ribs_kg": 0.1645,
+        "joints_kg": 0.0711,
+        "overhead_kg": 0.06,
+        "finish_factor": 1.05,
+        "profile": "lwpla_a1_single_perimeter",
+        "calibrated": false
+      },
+      "vtail": {
+        "skin_kg": 0.0218,
+        "ribs_kg": 0.0073,
+        "joints_kg": 0.015,
+        "overhead_kg": 0.03,
+        "finish_factor": 1.05,
+        "profile": "lwpla_a1_tail",
+        "calibrated": false
+      }
+    },
+    "auw_kg": 1.7880122682860509,
+    "x_cg_m": 0.5009505380372972,
+    "wing_loading_g_dm2": 44.08227794686857
+  },
+  "performance": {
+    "objective_units": "min",
+    "best": {
+      "V_ms": 9.5,
+      "alpha_deg": 5.68067013142184,
+      "deflection_deg": -3.005201389887784,
+      "CL": 0.7823115321997417,
+      "CD_surfaces": 0.034980835550955026,
+      "CD_bodies": 0.002138953920176967,
+      "CD_total": 0.037119789471131995,
+      "L_over_D": 21.075322445137903,
+      "drag_n": 0.8322719805377433,
+      "P_elec_w": 16.999168478709343,
+      "rpm": 2499.7567807950063,
+      "J": 0.7481042773940323,
+      "J_peak_eta": 0.6861360251256282,
+      "re_75": 41316.34241070714,
+      "re_in_range": true,
+      "thrust_n": 0.8322719805377433,
+      "torque_nm": 0.0396636254103877,
+      "motor_voltage": 2.9159627498696827,
+      "motor_current_a": 5.538208626120343,
+      "throttle_frac": 0.1970245101263299,
+      "eta_prop": 0.7615003339428202,
+      "eta_motor": 0.6429356351367616,
+      "eta_chain": 0.46511591581736395,
+      "objective_value": 142.08590737285417
+    },
+    "usable_energy_wh": 47.36000000000001,
+    "watts_per_kg": 9.50729968704542,
+    "wh_per_km_airspeed": 0.584771008149396,
+    "sweep": [
+      {
+        "V_ms": 8.0,
+        "infeasible": "trim failed at V=8.0: The iteration is not making good progress, as measured by the \n improvement from the last ten iterations. / least-squares residual too large"
+      },
+      {
+        "V_ms": 8.5,
+        "alpha_deg": 9.10078399148248,
+        "deflection_deg": -3.7251877550414068,
+        "CL": 0.9772126751698892,
+        "CD_surfaces": 0.05227965045539194,
+        "CD_bodies": 0.0021870683940299175,
+        "CD_total": 0.054466718849421863,
+        "L_over_D": 17.94146399513217,
+        "drag_n": 0.9776459912437994,
+        "P_elec_w": 17.378709322738697,
+        "rpm": 2424.0652381836176,
+        "J": 0.6902571432897837,
+        "J_peak_eta": 0.6906476281407036,
+        "re_75": 39791.623784662166,
+        "re_in_range": true,
+        "thrust_n": 0.9776459912437994,
+        "torque_nm": 0.04260852064670988,
+        "motor_voltage": 2.8387997817870443,
+        "motor_current_a": 5.815758463320982,
+        "throttle_frac": 0.19181079606669219,
+        "eta_prop": 0.768300599317441,
+        "eta_motor": 0.6551311551319201,
+        "eta_chain": 0.47817077616341247,
+        "objective_value": 139.43964531793603
+      },
+      {
+        "V_ms": 9.0,
+        "alpha_deg": 6.950412673894263,
+        "deflection_deg": -2.9066210266950714,
+        "CL": 0.8716495775435238,
+        "CD_surfaces": 0.04161842949331674,
+        "CD_bodies": 0.002162208885690463,
+        "CD_total": 0.043780638379007204,
+        "L_over_D": 19.90947619351022,
+        "drag_n": 0.8810076257859416,
+        "P_elec_w": 16.87000005224242,
+        "rpm": 2447.487451630523,
+        "J": 0.7238662417357059,
+        "J_peak_eta": 0.6906476281407036,
+        "re_75": 40334.17444166511,
+        "re_in_range": true,
+        "thrust_n": 0.8810076257859416,
+        "torque_nm": 0.04036767538133355,
+        "motor_voltage": 2.8595445961270634,
+        "motor_current_a": 5.60456377261485,
+        "throttle_frac": 0.19321247271128805,
+        "eta_prop": 0.7663714976887116,
+        "eta_motor": 0.6455711937913267,
+        "eta_chain": 0.470009994518021,
+        "objective_value": 143.00956177799873
+      },
+      {
+        "V_ms": 9.5,
+        "alpha_deg": 5.68067013142184,
+        "deflection_deg": -3.005201389887784,
+        "CL": 0.7823115321997417,
+        "CD_surfaces": 0.034980835550955026,
+        "CD_bodies": 0.002138953920176967,
+        "CD_total": 0.037119789471131995,
+        "L_over_D": 21.075322445137903,
+        "drag_n": 0.8322719805377433,
+        "P_elec_w": 16.999168478709343,
+        "rpm": 2499.7567807950063,
+        "J": 0.7481042773940323,
+        "J_peak_eta": 0.6861360251256282,
+        "re_75": 41316.34241070714,
+        "re_in_range": true,
+        "thrust_n": 0.8322719805377433,
+        "torque_nm": 0.0396636254103877,
+        "motor_voltage": 2.9159627498696827,
+        "motor_current_a": 5.538208626120343,
+        "throttle_frac": 0.1970245101263299,
+        "eta_prop": 0.7615003339428202,
+        "eta_motor": 0.6429356351367616,
+        "eta_chain": 0.46511591581736395,
+        "objective_value": 142.08590737285417
+      },
+      {
+        "V_ms": 10.0,
+        "alpha_deg": 4.704748970798733,
+        "deflection_deg": -3.1876363045337093,
+        "CL": 0.7060361578104587,
+        "CD_surfaces": 0.030210172099649848,
+        "CD_bodies": 0.002117123289506169,
+        "CD_total": 0.03232729538915602,
+        "L_over_D": 21.840248288982874,
+        "drag_n": 0.8031227539084044,
+        "P_elec_w": 17.40982653946922,
+        "rpm": 2564.4219383237587,
+        "J": 0.7676209236825481,
+        "J_peak_eta": 0.6816244221105529,
+        "re_75": 42487.59652154106,
+        "re_in_range": true,
+        "thrust_n": 0.8031227539084044,
+        "torque_nm": 0.039637165474388454,
+        "motor_voltage": 2.9877505801462174,
+        "motor_current_a": 5.535714835903852,
+        "throttle_frac": 0.20187503919906874,
+        "eta_prop": 0.7545034659817097,
+        "eta_motor": 0.6435801518307138,
+        "eta_chain": 0.46130428243364313,
+        "objective_value": 139.22705293476244
+      },
+      {
+        "V_ms": 10.5,
+        "alpha_deg": 3.9137176856307754,
+        "deflection_deg": -3.343654536824983,
+        "CL": 0.640395607991169,
+        "CD_surfaces": 0.026617698615670517,
+        "CD_bodies": 0.002096564799275126,
+        "CD_total": 0.028714263414945644,
+        "L_over_D": 22.30235192652882,
+        "drag_n": 0.7864820898562702,
+        "P_elec_w": 18.022808764918548,
+        "rpm": 2636.9787454612797,
+        "J": 0.7838247226739423,
+        "J_peak_eta": 0.6816244221105529,
+        "re_75": 43779.061049862044,
+        "re_in_range": true,
+        "thrust_n": 0.7864820898562702,
+        "torque_nm": 0.0400871739333378,
+        "motor_voltage": 3.06942956219498,
+        "motor_current_a": 5.578127133964508,
+        "throttle_frac": 0.20739388933749864,
+        "eta_prop": 0.7459976312484643,
+        "eta_motor": 0.6465388224136076,
+        "eta_chain": 0.45820060852918665,
+        "objective_value": 135.16747603878088
+      },
+      {
+        "V_ms": 11.0,
+        "alpha_deg": 3.249785652913348,
+        "deflection_deg": -3.5062577249546667,
+        "CL": 0.583500956867973,
+        "CD_surfaces": 0.023814350124184713,
+        "CD_bodies": 0.002077148817067333,
+        "CD_total": 0.025891498941252047,
+        "L_over_D": 22.536391507959422,
+        "drag_n": 0.7783145028205185,
+        "P_elec_w": 18.794034979672567,
+        "rpm": 2714.8182995196307,
+        "J": 0.7976056191649389,
+        "J_peak_eta": 0.6771128190954775,
+        "re_75": 45150.932479363066,
+        "re_in_range": true,
+        "thrust_n": 0.7783145028205185,
+        "torque_nm": 0.04089236596039484,
+        "motor_voltage": 3.157815144610846,
+        "motor_current_a": 5.654014694672452,
+        "throttle_frac": 0.21336588814938146,
+        "eta_prop": 0.7364379890929368,
+        "eta_motor": 0.6511304246006719,
+        "eta_chain": 0.45554132150364146,
+        "objective_value": 130.384300229415
+      },
+      {
+        "V_ms": 11.5,
+        "alpha_deg": 2.6751206534115184,
+        "deflection_deg": -3.5978297773095567,
+        "CL": 0.5338647696107172,
+        "CD_surfaces": 0.021568711036514532,
+        "CD_bodies": 0.0020587640763635876,
+        "CD_total": 0.02362747511287812,
+        "L_over_D": 22.595083353605354,
+        "drag_n": 0.776292792435543,
+        "P_elec_w": 19.699686307703853,
+        "rpm": 2796.406368301441,
+        "J": 0.8095316736580359,
+        "J_peak_eta": 0.672601216080402,
+        "re_75": 46579.820756272275,
+        "re_in_range": true,
+        "thrust_n": 0.776292792435543,
+        "torque_nm": 0.04198021837880391,
+        "motor_voltage": 3.251031746242811,
+        "motor_current_a": 5.7565423696483675,
+        "throttle_frac": 0.2196643071785683,
+        "eta_prop": 0.7261892245320678,
+        "eta_motor": 0.6568870163907835,
+        "eta_chain": 0.4531730593861064,
+        "objective_value": 125.18234664042974
+      },
+      {
+        "V_ms": 12.0,
+        "alpha_deg": 2.1673512484965554,
+        "deflection_deg": -3.5539547520517303,
+        "CL": 0.490302887368254,
+        "CD_surfaces": 0.01974487211017258,
+        "CD_bodies": 0.0020413144057912324,
+        "CD_total": 0.021786186515963812,
+        "L_over_D": 22.50521847910303,
+        "drag_n": 0.779392582576965,
+        "P_elec_w": 20.733567042077876,
+        "rpm": 2880.975759314656,
+        "J": 0.8199321763718639,
+        "J_peak_eta": 0.672601216080402,
+        "re_75": 48053.96346690715,
+        "re_in_range": true,
+        "thrust_n": 0.779392582576965,
+        "torque_nm": 0.043320968434781275,
+        "motor_voltage": 3.348156804152113,
+        "motor_current_a": 5.882905085433125,
+        "throttle_frac": 0.22622681109135898,
+        "eta_prop": 0.7156013243248166,
+        "eta_motor": 0.6635425051618425,
+        "eta_chain": 0.45109030066763994,
+        "objective_value": 119.72915807228014
+      },
+      {
+        "V_ms": 12.5,
+        "alpha_deg": 1.7131832242414684,
+        "deflection_deg": -3.422139044255755,
+        "CL": 0.4518631409985666,
+        "CD_surfaces": 0.018268646463263444,
+        "CD_bodies": 0.0020247161502829304,
+        "CD_total": 0.020293362613546376,
+        "L_over_D": 22.266548408144818,
+        "drag_n": 0.787746714505166,
+        "P_elec_w": 21.907951344289433,
+        "rpm": 2968.3688237499036,
+        "J": 0.8289501970147226,
+        "J_peak_eta": 0.6680896130653267,
+        "re_75": 49570.767193517815,
+        "re_in_range": true,
+        "thrust_n": 0.787746714505166,
+        "torque_nm": 0.044927262483693164,
+        "motor_voltage": 3.4490449502678406,
+        "motor_current_a": 6.034294732940123,
+        "throttle_frac": 0.23304357772080003,
+        "eta_prop": 0.7050828917969121,
+        "eta_motor": 0.6710131998245421,
+        "eta_chain": 0.449463930997878,
+        "objective_value": 114.08405134256395
+      },
+      {
+        "V_ms": 13.0,
+        "alpha_deg": 1.303405806898223,
+        "deflection_deg": -3.2493518435966613,
+        "CL": 0.41777287444393735,
+        "CD_surfaces": 0.017076032403581236,
+        "CD_bodies": 0.0020088961164323876,
+        "CD_total": 0.019084928520013623,
+        "L_over_D": 21.890198541002402,
+        "drag_n": 0.8012901444923551,
+        "P_elec_w": 23.23171021658847,
+        "rpm": 3058.360003493489,
+        "J": 0.8367409707121108,
+        "J_peak_eta": 0.6680896130653267,
+        "re_75": 51126.679968991906,
+        "re_in_range": true,
+        "thrust_n": 0.8012901444923551,
+        "torque_nm": 0.04680110357092859,
+        "motor_voltage": 3.5534502840281754,
+        "motor_current_a": 6.210900094749729,
+        "throttle_frac": 0.24009799216406588,
+        "eta_prop": 0.6949600442614221,
+        "eta_motor": 0.6791544179714912,
+        "eta_chain": 0.4483859251551175,
+        "objective_value": 108.32690573880397
+      },
+      {
+        "V_ms": 13.5,
+        "alpha_deg": 0.9321304529358577,
+        "deflection_deg": -3.0508853654650436,
+        "CL": 0.3873998122415657,
+        "CD_surfaces": 0.016101621874528713,
+        "CD_bodies": 0.0019937899197712667,
+        "CD_total": 0.01809541179429998,
+        "L_over_D": 21.40873148648631,
+        "drag_n": 0.8193105865687583,
+        "P_elec_w": 24.70119492459271,
+        "rpm": 3150.4679366016285,
+        "J": 0.8435192385507093,
+        "J_peak_eta": 0.6635780100502513,
+        "re_75": 52714.40154249374,
+        "re_in_range": true,
+        "thrust_n": 0.8193105865687583,
+        "torque_nm": 0.04891528507960576,
+        "motor_voltage": 3.6607738547481206,
+        "motor_current_a": 6.410157007630196,
+        "throttle_frac": 0.2473495847802784,
+        "eta_prop": 0.6853841614805126,
+        "eta_motor": 0.6877121588593774,
+        "eta_chain": 0.4477796702727981,
+        "objective_value": 102.58041242391569
+      },
+      {
+        "V_ms": 14.0,
+        "alpha_deg": 0.600986256845701,
+        "deflection_deg": -2.834083318735461,
+        "CL": 0.3602225294956256,
+        "CD_surfaces": 0.01528408598450894,
+        "CD_bodies": 0.001979340643616149,
+        "CD_total": 0.01726342662812509,
+        "L_over_D": 20.86622414282233,
+        "drag_n": 0.8406120931059257,
+        "P_elec_w": 26.30161681724555,
+        "rpm": 3244.055403452338,
+        "J": 0.8495247981517755,
+        "J_peak_eta": 0.6635780100502513,
+        "re_75": 54324.37160013975,
+        "re_in_range": true,
+        "thrust_n": 0.8406120931059257,
+        "torque_nm": 0.051220229653340686,
+        "motor_voltage": 3.770190826731519,
+        "motor_current_a": 6.627392915823514,
+        "throttle_frac": 0.25474262342780535,
+        "eta_prop": 0.6763403021296711,
+        "eta_motor": 0.6963897182229402,
+        "eta_chain": 0.44744661080175485,
+        "objective_value": 96.97758378737547
+      },
+      {
+        "V_ms": 14.5,
+        "alpha_deg": 0.32039864557008374,
+        "deflection_deg": -2.6250980251595153,
+        "CL": 0.33580792285882266,
+        "CD_surfaces": 0.014582236032607665,
+        "CD_bodies": 0.0019654977418976493,
+        "CD_total": 0.016547733774505316,
+        "L_over_D": 20.293287735641094,
+        "drag_n": 0.8643449292393567,
+        "P_elec_w": 28.02237283765389,
+        "rpm": 3338.69077684244,
+        "J": 0.8549251486419164,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 55950.12020612812,
+        "re_in_range": true,
+        "thrust_n": 0.8643449292393567,
+        "torque_nm": 0.053679159419427434,
+        "motor_voltage": 3.8811349583760335,
+        "motor_current_a": 6.859141586488456,
+        "throttle_frac": 0.26223884853892115,
+        "eta_prop": 0.6677971618031071,
+        "eta_motor": 0.7049884622821487,
+        "eta_chain": 0.44724982950515796,
+        "objective_value": 91.59840915041043
+      },
+      {
+        "V_ms": 15.0,
+        "alpha_deg": 0.0948878350387272,
+        "deflection_deg": -2.45612881895635,
+        "CL": 0.31379384791561277,
+        "CD_surfaces": 0.013976884982720423,
+        "CD_bodies": 0.0019522161348358587,
+        "CD_total": 0.015929101117556282,
+        "L_over_D": 19.6994071165613,
+        "drag_n": 0.8904024495811765,
+        "P_elec_w": 29.866189520017798,
+        "rpm": 3434.283612129653,
+        "J": 0.8597880195691705,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 57590.25462152412,
+        "re_in_range": true,
+        "thrust_n": 0.8904024495811765,
+        "torque_nm": 0.05628549161543236,
+        "motor_voltage": 3.993490245366109,
+        "motor_current_a": 7.1047826088819654,
+        "throttle_frac": 0.26983042198419654,
+        "eta_prop": 0.6598061602602678,
+        "eta_motor": 0.7134405950459507,
+        "eta_chain": 0.4471958746115159,
+        "objective_value": 86.4596730408698
+      },
+      {
+        "V_ms": 15.5,
+        "alpha_deg": -0.08619819689823824,
+        "deflection_deg": -2.333547235753899,
+        "CL": 0.29387561199179935,
+        "CD_surfaces": 0.013454119994251541,
+        "CD_bodies": 0.0019394554583662832,
+        "CD_total": 0.015393575452617825,
+        "L_over_D": 19.09079621536678,
+        "drag_n": 0.9187883079370168,
+        "P_elec_w": 31.83774339614478,
+        "rpm": 3530.796108864885,
+        "J": 0.8641623612027626,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 59244.171161056074,
+        "re_in_range": true,
+        "thrust_n": 0.9187883079370168,
+        "torque_nm": 0.0590368265696144,
+        "motor_voltage": 4.107209033109417,
+        "motor_current_a": 7.364089819270658,
+        "throttle_frac": 0.27751412385874435,
+        "eta_prop": 0.6524134356125303,
+        "eta_motor": 0.7217027804933738,
+        "eta_chain": 0.4473061609871579,
+        "objective_value": 81.5667067665025
+      },
+      {
+        "V_ms": 16.0,
+        "alpha_deg": -0.23832849670207584,
+        "deflection_deg": -2.245657348398109,
+        "CL": 0.2757953741446276,
+        "CD_surfaces": 0.013000376644624698,
+        "CD_bodies": 0.0019271794371338762,
+        "CD_total": 0.014927556081758574,
+        "L_over_D": 18.47558787480616,
+        "drag_n": 0.9493825295705242,
+        "P_elec_w": 33.938865088377675,
+        "rpm": 3628.1469841360463,
+        "J": 0.8681032805407689,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 60910.630494876976,
+        "re_in_range": true,
+        "thrust_n": 0.9493825295705242,
+        "torque_nm": 0.061925244175123004,
+        "motor_voltage": 4.22218234594707,
+        "motor_current_a": 7.636316765169616,
+        "throttle_frac": 0.2852825909423696,
+        "eta_prop": 0.6456244956904906,
+        "eta_motor": 0.7297268023724254,
+        "eta_chain": 0.4475730238348549,
+        "objective_value": 76.92710626602528
+      },
+      {
+        "V_ms": 16.5,
+        "alpha_deg": -0.374134144973999,
+        "deflection_deg": -2.1798055412264237,
+        "CL": 0.25933375860770763,
+        "CD_surfaces": 0.012605592830468387,
+        "CD_bodies": 0.0019153553575427002,
+        "CD_total": 0.014520948188011088,
+        "L_over_D": 17.859285444033265,
+        "drag_n": 0.982144577219198,
+        "P_elec_w": 36.17272521498861,
+        "rpm": 3726.2921253018776,
+        "J": 0.8716524058885642,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 62588.94982610405,
+        "re_in_range": true,
+        "thrust_n": 0.982144577219198,
+        "torque_nm": 0.06494587833859705,
+        "motor_voltage": 4.338349704370858,
+        "motor_current_a": 7.921004828084189,
+        "throttle_frac": 0.2931317367818147,
+        "eta_prop": 0.6394436161447481,
+        "eta_motor": 0.737483446752217,
+        "eta_chain": 0.44800012793622385,
+        "objective_value": 72.54026837307512
+      }
+    ],
+    "optimization": {
+      "champion": {
+        "dv": {
+          "span": 2.0000000199954657,
+          "c_root": 0.2510781651487904,
+          "taper": 0.5575097215740041,
+          "fullness": 1.1587822211623868,
+          "le_shear": 1.00000000976478,
+          "eta_break": 0.5775001941444494,
+          "washout_tip": 1.961236821385689e-08,
+          "tail_arm": 0.9422875075083958,
+          "t_span": 0.4215051833687553,
+          "t_c_root": 0.09360420494559836,
+          "t_taper": 0.9939064043671588,
+          "t_sweep": 0.15506631788188197,
+          "cs_frac": 0.4000000035701506,
+          "spar_od_center": 0.014000000139737045,
+          "spar_wall_center": 0.000702856661347215,
+          "spar_od_outer": 0.007254199683117955,
+          "spar_wall_outer": 0.0004999999900973521,
+          "ballast_kg": -6.983915014347164e-10,
+          "x_battery": 0.4000000039941196,
+          "pod_nose": 0.06143000680592613,
+          "pod_bay": 0.2086468751049634,
+          "pod_xs": 0.7941176370653457,
+          "pod_bay_end": 0.5406468890942165,
+          "dihedral_tip": 2.1252419101896813,
+          "d_exp": -4.3011598687494e-09,
+          "pod_tail": 0.1105740202510295,
+          "t_dihedral": 54.09886741126352
+        },
+        "V_ms": 9.499999890088128,
+        "alpha_deg": 5.680677562780499,
+        "deflection_deg": -3.0051997552472347,
+        "rpm": 2499.756881163809,
+        "objective_value": 142.0858855501861,
+        "auw_kg": 1.7880122682860509,
+        "x_cg_m": 0.5009505380372972,
+        "static_margin": 0.0799999900394518,
+        "P_elec_w": 16.999171550338968,
+        "motor_voltage": 2.9159628802192192,
+        "motor_current_a": 5.53820937926615,
+        "throttle_frac": 0.19702451893373102,
+        "current_cap_a": 40,
+        "placard_speed_ms": null,
+        "drag_n": 0.8322722026399673,
+        "J": 0.7481042387012592,
+        "clmax_ab_used": [
+          1.0867661240406215,
+          0.01877562808319164
+        ],
+        "solve_minutes": 3.56,
+        "peak_rss_gb": 14.448501586914062,
+        "discrete": {
+          "motor_mount": "puller",
+          "prop_choice": "cam_12x10",
+          "fuselage_topology": "pod_boom",
+          "tail_type": "vtail",
+          "wing_dihedral_form": "curve",
+          "winglet": false
+        }
+      },
+      "resolve_battery": {
+        "printed_mass_x1.10": {
+          "objective_value": 115.24382776080635,
+          "delta": -4.877849135746189,
+          "span": 2.0000000199939643,
+          "static_margin": 0.07999999009329671,
+          "ballast_kg": -6.993172388761105e-10
+        },
+        "printed_mass_x0.90": {
+          "objective_value": 124.40737446742004,
+          "delta": 4.285697570867498,
+          "span": 1.9997529487805104,
+          "static_margin": 0.0799999900039542,
+          "ballast_kg": -6.990594301171108e-10
+        },
+        "chain_eta_x0.90": {
+          "objective_value": 109.49813877567705,
+          "delta": -10.623538120875494,
+          "span": 2.0000000199898196,
+          "static_margin": 0.07999999000271199,
+          "ballast_kg": -6.99192866249081e-10
+        },
+        "chain_eta_x1.10": {
+          "objective_value": 130.47913873111588,
+          "delta": 10.357461834563338,
+          "span": 2.000000019988822,
+          "static_margin": 0.07999999000448256,
+          "ballast_kg": -6.991128121408649e-10
+        }
+      },
+      "discrete_studies": {
+        "motor_mount": {
+          "baseline": "puller",
+          "alternatives": {
+            "pusher": {
+              "objective_value": 110.65819688920315,
+              "V_ms": 9.499999893247512,
+              "auw_kg": 1.9361640423163693,
+              "delta_objective": -9.46348000734939
+            }
+          },
+          "adopted": "puller"
+        },
+        "prop_choice": {
+          "baseline": "cam_11x6",
+          "alternatives": {
+            "cam_11x10": {
+              "objective_value": 133.8524308341547,
+              "V_ms": 9.499999890068935,
+              "auw_kg": 1.8357862055876861,
+              "delta_objective": 13.730753937602145
+            },
+            "cam_12x9": {
+              "objective_value": 136.20486650811623,
+              "V_ms": 9.499999890038776,
+              "auw_kg": 1.8535226334698758,
+              "delta_objective": 2.352435673961537
+            },
+            "cam_12x10": {
+              "objective_value": 141.43063187217436,
+              "V_ms": 9.499999890060828,
+              "auw_kg": 1.8535226334643207,
+              "delta_objective": 5.225765364058134
+            },
+            "cam_13x10": {
+              "objective_value": 132.9688108928606,
+              "V_ms": 9.499999890053921,
+              "auw_kg": 1.8735865189033545,
+              "delta_objective": -8.461820979313757
+            },
+            "cam_13x11": {
+              "objective_value": 137.3793970031357,
+              "V_ms": 9.499999890051255,
+              "auw_kg": 1.8735865188780803,
+              "delta_objective": -4.051234869038666
+            },
+            "cam_14x9": {
+              "objective_value": 138.21166419464114,
+              "V_ms": 9.499999890046784,
+              "auw_kg": 1.8961621854719288,
+              "delta_objective": -3.2189676775332146
+            },
+            "cam_14x12": {
+              "objective_value": 134.4513390337798,
+              "V_ms": 9.499999890109745,
+              "auw_kg": 1.896162182527834,
+              "delta_objective": -6.979292838394571
+            }
+          },
+          "adopted": "cam_12x10"
+        },
+        "fuselage_topology": {
+          "baseline": "pod_boom",
+          "alternatives": {
+            "integrated": {
+              "objective_value": 133.38921374050537,
+              "V_ms": 9.499999890118227,
+              "auw_kg": 1.9510983633259409,
+              "delta_objective": -8.04141813166899
+            }
+          },
+          "adopted": "pod_boom"
+        },
+        "tail_type": {
+          "baseline": "vtail",
+          "alternatives": {
+            "conventional": {
+              "objective_value": 135.63287075207387,
+              "V_ms": 9.499999890156005,
+              "auw_kg": 1.9471975495172464,
+              "delta_objective": -5.797761120100489
+            },
+            "ttail": {
+              "objective_value": 131.642561436417,
+              "V_ms": 9.620322367185732,
+              "auw_kg": 1.9721662957148054,
+              "delta_objective": -9.788070435757362
+            }
+          },
+          "adopted": "vtail"
+        },
+        "wing_dihedral_form": {
+          "baseline": "curve",
+          "alternatives": {
+            "polyhedral2": {
+              "objective_value": 138.5732502332387,
+              "V_ms": 9.49999989008062,
+              "auw_kg": 1.9076284809902015,
+              "delta_objective": -2.8573816389356637
+            }
+          },
+          "adopted": "curve"
+        }
+      },
+      "winglet_study": {
+        "off": {
+          "objective_value": 142.0858855501861,
+          "V_ms": 9.499999890088128,
+          "auw_kg": 1.7880122682860509,
+          "span": 2.0000000199954657
+        },
+        "delta_objective": -0.6552536780117464,
+        "winglet_rejected": true,
+        "vlm_check": {
+          "winglet_on": {
+            "k_induced": -0.5034914745868033,
+            "cd0_inviscid": -0.37149829366529413,
+            "e_projected_span": -0.067342700295186
+          },
+          "winglet_off": {
+            "k_induced": -0.5223688931004697,
+            "cd0_inviscid": -0.3696936317005501,
+            "e_projected_span": -0.06490906315847364
+          }
+        },
+        "continuous_cant": {
+          "objective_value": 142.08588554683942,
+          "tip_dihedral_deg": 2.1252419839243895,
+          "d_exp": -4.301159900431083e-09,
+          "span": 2.0000000199954657,
+          "caveat": "Schrenk stall stations include the canted region \u2014 indicative only; the spar-fit constraint also binds high cant"
+        }
+      },
+      "tripped_polars": {
+        "dcd_total": 0.006068476860027164,
+        "objective_tripped": 110.62013571948147,
+        "delta": -31.4657716533727
+      },
+      "multistart": [
+        {
+          "start": "nominal",
+          "dv": {
+            "span": 2.0000000199898196,
+            "c_root": 0.2533369664695,
+            "taper": 0.5525388572223382,
+            "fullness": 1.3185498175642258,
+            "le_shear": 1.0000000099563702,
+            "eta_break": 0.30954328575626755,
+            "washout_tip": 1.9565075391241852e-08,
+            "tail_arm": 0.9010786785361744,
+            "t_span": 0.44414618059645833,
+            "t_c_root": 0.09522846909026679,
+            "t_taper": 0.9598973469978983,
+            "t_sweep": 0.9851986275081073,
+            "cs_frac": 0.40000000373452577,
+            "spar_od_center": 0.014000000139736114,
+            "spar_wall_center": 0.000725138915113926,
+            "spar_od_outer": 0.012000000118669552,
+            "spar_wall_outer": 0.0004999999900187165,
+            "ballast_kg": -6.99192866249081e-10,
+            "x_battery": 0.4000000039958081,
+            "pod_nose": 0.06143000680260059,
+            "pod_bay": 0.21000215589086668,
+            "pod_xs": 0.7941176370619583,
+            "pod_bay_end": 0.542002169884002,
+            "dihedral_tip": 4.65222292982088,
+            "d_exp": -4.810841505461206e-09,
+            "pod_tail": 0.11057402024270499,
+            "t_dihedral": 55.000000547021884,
+            "wl_len": 0.06509693711201246,
+            "wl_cant": 87.09895260239219,
+            "wl_cr": 0.6666666633860602,
+            "wl_taper": 1.0000000098769566,
+            "wl_toe": -2.6936532039694145
+          },
+          "V_ms": 9.499999890011264,
+          "alpha_deg": 5.619040556222718,
+          "deflection_deg": -2.5263608648236353,
+          "rpm": 3594.2581616637162,
+          "objective_value": 120.12167680722236,
+          "auw_kg": 1.8357862055732406,
+          "x_cg_m": 0.5016051531143205,
+          "static_margin": 0.07999999000271038,
+          "P_elec_w": 20.656013431783432,
+          "motor_voltage": 4.112898663995401,
+          "motor_current_a": 4.771139374761946,
+          "throttle_frac": 0.27789855837806765,
+          "current_cap_a": 40,
+          "placard_speed_ms": null,
+          "drag_n": 0.8295806815089671,
+          "J": 0.5675958105885383,
+          "clmax_ab_used": [
+            1.0867661240406215,
+            0.01877562808319164
+          ],
+          "solve_minutes": 5.57,
+          "peak_rss_gb": 11.694282531738281
+        },
+        {
+          "start": "perturbed_0",
+          "dv": {
+            "span": 2.000000019989843,
+            "c_root": 0.2533369663931009,
+            "taper": 0.552538856516464,
+            "fullness": 1.3185498204183221,
+            "le_shear": 1.0000000099564699,
+            "eta_break": 0.30954328572945194,
+            "washout_tip": 1.9560689398459236e-08,
+            "tail_arm": 0.9010786802432666,
+            "t_span": 0.44414618040992404,
+            "t_c_root": 0.09522847278973202,
+            "t_taper": 0.9598972661724076,
+            "t_sweep": 0.9852006128886087,
+            "cs_frac": 0.4000000037339301,
+            "spar_od_center": 0.01400000013973626,
+            "spar_wall_center": 0.000725138915032491,
+            "spar_od_outer": 0.012000000118669103,
+            "spar_wall_outer": 0.000499999990018695,
+            "ballast_kg": -6.991933502533231e-10,
+            "x_battery": 0.40000000399580055,
+            "pod_nose": 0.06143000680260258,
+            "pod_bay": 0.21000215584503143,
+            "pod_xs": 0.7941176370619557,
+            "pod_bay_end": 0.5420021698381596,
+            "dihedral_tip": 4.652222868752329,
+            "d_exp": -4.810967866967631e-09,
+            "pod_tail": 0.11057402024269329,
+            "t_dihedral": 55.00000054703501,
+            "wl_len": 0.06509693696149367,
+            "wl_cant": 87.09895267187935,
+            "wl_cr": 0.6666666633860354,
+            "wl_taper": 1.0000000098770088,
+            "wl_toe": -2.693653209761339
+          },
+          "V_ms": 9.499999905011247,
+          "alpha_deg": 5.61904052370733,
+          "deflection_deg": -2.5263608652346896,
+          "rpm": 3594.2581642597497,
+          "objective_value": 120.12167674120923,
+          "auw_kg": 1.8357862053663403,
+          "x_cg_m": 0.5016051530168921,
+          "static_margin": 0.07999999000744919,
+          "P_elec_w": 20.656013444783646,
+          "motor_voltage": 4.112898666871541,
+          "motor_current_a": 4.771139374428298,
+          "throttle_frac": 0.27789855857240137,
+          "current_cap_a": 40,
+          "placard_speed_ms": null,
+          "drag_n": 0.8295806801677981,
+          "J": 0.5675958110747825,
+          "clmax_ab_used": [
+            1.0867661240406215,
+            0.01877562808319164
+          ],
+          "solve_minutes": 5.26,
+          "peak_rss_gb": 11.70541000366211
+        },
+        {
+          "start": "perturbed_1",
+          "dv": {
+            "span": 2.0000000199896286,
+            "c_root": 0.2533369662901383,
+            "taper": 0.5525388587477492,
+            "fullness": 1.318549820651338,
+            "le_shear": 1.0000000099555741,
+            "eta_break": 0.3095432859029344,
+            "washout_tip": 1.9554832120615524e-08,
+            "tail_arm": 0.9010786766042903,
+            "t_span": 0.444146180813789,
+            "t_c_root": 0.09522847237398588,
+            "t_taper": 0.9598972821093276,
+            "t_sweep": 0.9852002225825198,
+            "cs_frac": 0.4000000037291359,
+            "spar_od_center": 0.014000000139731086,
+            "spar_wall_center": 0.0007251389152848111,
+            "spar_od_outer": 0.012000000118643148,
+            "spar_wall_outer": 0.0004999999900190687,
+            "ballast_kg": -6.991774911068488e-10,
+            "x_battery": 0.40000000399572333,
+            "pod_nose": 0.061430006802693275,
+            "pod_bay": 0.210002155783429,
+            "pod_xs": 0.7941176370620177,
+            "pod_bay_end": 0.5420021697764281,
+            "dihedral_tip": 4.652222991960198,
+            "d_exp": -4.807290671377886e-09,
+            "pod_tail": 0.11057402024282721,
+            "t_dihedral": 55.000000546972416,
+            "wl_len": 0.0650969373717858,
+            "wl_cant": 87.09895253642117,
+            "wl_cr": 0.6666666633870687,
+            "wl_taper": 1.0000000098746014,
+            "wl_toe": -2.6936531988202783
+          },
+          "V_ms": 9.499999870511186,
+          "alpha_deg": 5.619040596985183,
+          "deflection_deg": -2.5263608792111287,
+          "rpm": 3594.258158257061,
+          "objective_value": 120.12167689655254,
+          "auw_kg": 1.8357862059078296,
+          "x_cg_m": 0.5016051528507027,
+          "static_margin": 0.07999999000669603,
+          "P_elec_w": 20.656013414191303,
+          "motor_voltage": 4.1128986602181845,
+          "motor_current_a": 4.771139375080238,
+          "throttle_frac": 0.2778985581228503,
+          "current_cap_a": 40,
+          "placard_speed_ms": null,
+          "drag_n": 0.8295806831742124,
+          "J": 0.5675958099614387,
+          "clmax_ab_used": [
+            1.0867661240406215,
+            0.01877562808319164
+          ],
+          "solve_minutes": 5.32,
+          "peak_rss_gb": 11.705516815185547
+        }
+      ],
+      "multistart_objective_spread": 1.5534331510025368e-07,
+      "shadow_price_obj_per_gram": -0.06661589471476645,
+      "flatness_span": [
+        {
+          "span": 1.5,
+          "objective_value": null,
+          "failed": "Maximum_WallTime_Exceeded after 88 iterations; closest miss solve.py:576 opti.subject_to(sm >= mission.static_margin_range[0])",
+          "return_status": "Maximum_WallTime_Exceeded",
+          "iter_count": 88,
+          "violations": [
+            {
+              "row": 77,
+              "by": 0.04610858642739956,
+              "value": 0.03389141357260044,
+              "what": "solve.py:576 opti.subject_to(sm >= mission.static_margin_range[0])"
+            },
+            {
+              "row": 107,
+              "by": 0.03446937812482842,
+              "value": 1.0344693781248284,
+              "what": "structures.py:46 opti.subject_to(stress / (SIGMA_ALLOW / SAFETY_FACTOR) <= 1.0)"
+            },
+            {
+              "row": 79,
+              "by": 0.029971529116188167,
+              "value": 1.0299715291161882,
+              "what": "solve.py:589 opti.subject_to(aero.smooth_max(ratios) <= 1.0)"
+            },
+            {
+              "row": 74,
+              "by": 0.018586389228586006,
+              "value": -0.018586389228586006,
+              "what": "solve.py:554 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+            },
+            {
+              "row": 73,
+              "by": 0.015481053834296432,
+              "value": -0.015481053834296432,
+              "what": "solve.py:553 opti.subject_to(aero_run[\"L\"] == weight_n)"
+            }
+          ],
+          "solve_minutes": 14.8
+        },
+        {
+          "span": 1.6,
+          "objective_value": null,
+          "failed": "Maximum_WallTime_Exceeded after 87 iterations; closest miss solve.py:553 opti.subject_to(aero_run[\"L\"] == weight_n)",
+          "return_status": "Maximum_WallTime_Exceeded",
+          "iter_count": 87,
+          "violations": [
+            {
+              "row": 73,
+              "by": 0.027167728957181225,
+              "value": -0.027167728957181225,
+              "what": "solve.py:553 opti.subject_to(aero_run[\"L\"] == weight_n)"
+            },
+            {
+              "row": 74,
+              "by": 0.023799274957254164,
+              "value": -0.023799274957254164,
+              "what": "solve.py:554 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+            },
+            {
+              "row": 92,
+              "by": 0.01925269298534571,
+              "value": 0.9807473070146543,
+              "what": "aircraft.py:710 opti.subject_to(1.225 * V * t_c_mean / 1.81e-5 / 60e3 >= 1.0)"
+            },
+            {
+              "row": 77,
+              "by": 0.018066018321515824,
+              "value": 0.06193398167848418,
+              "what": "solve.py:576 opti.subject_to(sm >= mission.static_margin_range[0])"
+            },
+            {
+              "row": 91,
+              "by": 0.012381347227330173,
+              "value": -0.012381347227330173,
+              "what": "aircraft.py:705 opti.subject_to("
+            }
+          ],
+          "solve_minutes": 14.69
+        },
+        {
+          "span": 1.7,
+          "objective_value": 111.28313006813484,
+          "solve_minutes": 4.79
+        },
+        {
+          "span": 1.8,
+          "objective_value": 116.72766365124787,
+          "solve_minutes": 4.62
+        },
+        {
+          "span": 1.9,
+          "objective_value": 119.32863325786131,
+          "solve_minutes": 6.02
+        },
+        {
+          "span": 2.0,
+          "objective_value": 120.121676707437,
+          "solve_minutes": 5.1
+        }
+      ],
+      "nlp_vs_reeval_gap": -2.1822668060167416e-05
+    }
+  },
+  "constraints": {
+    "v_min_ms": 9.5,
+    "v_min_active": true,
+    "v_stall_max_ms": 8.0,
+    "v_stall_ms": 7.720474858922444,
+    "stall_ok": true,
+    "static_margin": 0.08000015643190436,
+    "static_margin_range": [
+      0.08,
+      0.15
+    ],
+    "sm_in_range": true,
+    "trim_deflection_deg": -3.005201389887784,
+    "static_margin_nlp": 0.0799999900394518,
+    "static_margin_gap": 1.6639245256633295e-07
+  },
+  "diagnostics": {
+    "wind_mode": "constraint",
+    "stall_detail": {
+      "v_stall_ms": 7.720474858922444,
+      "stations_y": [
+        0.14427574206920302,
+        0.28855148413840603,
+        0.4328272262085474,
+        0.5771029682786888,
+        0.7263764606958268,
+        0.8756499531129649,
+        0.9374810581750341,
+        0.9993121632371035
+      ],
+      "ratios_at_stall": [
+        0.9857778363101722,
+        0.9949808425510425,
+        1.000000000001366,
+        0.9877386049717092,
+        0.9531028900879625,
+        0.8522910620401898,
+        0.7674073787273537,
+        0.5147023573414891
+      ],
+      "critical_y": 0.4328272262085474,
+      "clmax_ab": [
+        1.0867661240406215,
+        0.01877562808319164
+      ],
+      "cl_max_3d": 1.1736153340374984
+    },
+    "neutral_point_m": 0.5171748878664241,
+    "sm_local_slopes": [
+      {
+        "alpha": 3.6806701314218397,
+        "sm_local": 0.18643904371995842
+      },
+      {
+        "alpha": 4.68067013142184,
+        "sm_local": 0.13857232555539153
+      },
+      {
+        "alpha": 5.68067013142184,
+        "sm_local": -0.02188652573593858
+      },
+      {
+        "alpha": 6.68067013142184,
+        "sm_local": -0.019163511187936074
+      }
+    ],
+    "J_vs_peak": {
+      "J_cruise": 0.7481042773940323,
+      "J_peak_eta": 0.6861360251256282
+    },
+    "uncalibrated_construction": [
+      "wing",
+      "vtail"
+    ],
+    "peak_rss_gb": 14.45,
+    "parallel_width": 1,
+    "solve_timeout_min": 30.0,
+    "phase_minutes": {
+      "multistart": 21.5,
+      "flatness sweep": 50.0,
+      "re-solve battery": 22.3,
+      "study motor_mount": 4.6,
+      "study prop_choice": 40.1,
+      "study fuselage_topology": 5.2,
+      "study tail_type": 29.3,
+      "study wing_dihedral_form": 5.5,
+      "winglet study": 7.1,
+      "re-eval + artifacts": 3.0
+    }
+  },
+  "notes": [
+    "Stall via wing-level CLmax knockdown; critical-section method arrives at M2/M3.",
+    "Smooth polars only; tripped-polar dual evaluation arrives at M2.",
+    "Propulsion chain is uncalibrated (no measurement path) \u2014 rankings over absolutes.",
+    "M3 NLP: trimmed (explicit deflection), SM window, gust margin, spar stress/deflection sizing, ballast cap, battery-position balance."
+  ]
+}

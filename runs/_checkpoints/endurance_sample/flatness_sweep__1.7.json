@@ -1,0 +1,39 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 224 iterations; closest miss solve.py:553 opti.subject_to(aero_run[\"L\"] == weight_n)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 224.0,
+ "violations": [
+  {
+   "row": 73.0,
+   "by": 0.16793334654823866,
+   "value": -0.16793334654823866,
+   "what": "solve.py:553 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 107.0,
+   "by": 0.03994671262998395,
+   "value": 1.039946712629984,
+   "what": "structures.py:46 opti.subject_to(stress / (SIGMA_ALLOW / SAFETY_FACTOR) <= 1.0)"
+  },
+  {
+   "row": 79.0,
+   "by": 0.020855412923873384,
+   "value": 1.0208554129238734,
+   "what": "solve.py:589 opti.subject_to(aero.smooth_max(ratios) <= 1.0)"
+  },
+  {
+   "row": 77.0,
+   "by": 0.015397603977735916,
+   "value": 0.06460239602226409,
+   "what": "solve.py:576 opti.subject_to(sm >= mission.static_margin_range[0])"
+  },
+  {
+   "row": 108.0,
+   "by": 0.010570424958466135,
+   "value": 0.010570424958466135,
+   "what": "structures.py:49 opti.subject_to(tip_defl <= defl_frac * length)"
+  }
+ ],
+ "solve_minutes": 32.75,
+ "peak_rss_gb": 12.078269958496094
+}

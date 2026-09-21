@@ -1,0 +1,39 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 174 iterations; closest miss solve.py:1002 opti.subject_to(pr[\"thrust_n\"] == drag)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 174.0,
+ "violations": [
+  {
+   "row": 100.0,
+   "by": 0.0368227006665105,
+   "value": -0.0368227006665105,
+   "what": "solve.py:1002 opti.subject_to(pr[\"thrust_n\"] == drag)"
+  },
+  {
+   "row": 168.0,
+   "by": 0.012385286736082746,
+   "value": 1.0123852867360827,
+   "what": "structures.py:46 opti.subject_to(stress / (SIGMA_ALLOW / SAFETY_FACTOR) <= 1.0)"
+  },
+  {
+   "row": 161.0,
+   "by": 0.007297970282133193,
+   "value": 0.9927020297178668,
+   "what": "aircraft.py:1040 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)"
+  },
+  {
+   "row": 104.0,
+   "by": 0.004410433312650008,
+   "value": 1.00441043331265,
+   "what": "solve.py:1037 opti.subject_to(aero.smooth_max(ratios) <= 1.0)"
+  },
+  {
+   "row": 102.0,
+   "by": 0.0035634508728137892,
+   "value": 0.07643654912718621,
+   "what": "solve.py:1024 opti.subject_to(sm >= mission.static_margin_range[0])"
+  }
+ ],
+ "solve_minutes": 33.78,
+ "peak_rss_gb": 14.798896789550781
+}

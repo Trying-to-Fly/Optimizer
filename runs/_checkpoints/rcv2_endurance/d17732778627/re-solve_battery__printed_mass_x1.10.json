@@ -1,0 +1,49 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 54 iterations; closest miss solve.py:2012 opti.subject_to(aero_run[\"L\"] == weight_n)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 54.0,
+ "violations": [
+  {
+   "row": 92.0,
+   "by": 0.9850538578206809,
+   "value": -0.9850538578206809,
+   "what": "solve.py:2012 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 104.0,
+   "by": 0.1494225025045216,
+   "value": 0.8505774974954784,
+   "what": "aircraft.py:990 opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 / 60e3 >= 1.0)"
+  },
+  {
+   "row": 96.0,
+   "by": 0.04865271240008102,
+   "value": 0.031347287599918984,
+   "what": "solve.py:2027 opti.subject_to(sm >= mission.static_margin_range[0])"
+  },
+  {
+   "row": 94.0,
+   "by": 0.025674994114633032,
+   "value": -0.025674994114633032,
+   "what": "solve.py:2014 opti.subject_to(pr[\"thrust_n\"] == drag)"
+  },
+  {
+   "row": 93.0,
+   "by": 0.02150348637119691,
+   "value": -0.02150348637119691,
+   "what": "solve.py:2013 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+  }
+ ],
+ "convergence": {
+  "iterations_recorded": 56.0,
+  "inf_pr_final": 1.8136914710578316,
+  "inf_pr_min": 0.08969412275431032,
+  "inf_du_final": 624385226466.1177,
+  "inf_du_max": 624385226466.1177,
+  "mu_final": 1529.6104282936435,
+  "inf_pr_progress_last_25": -1.2350603916255258,
+  "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+ },
+ "solve_minutes": 13.62,
+ "peak_rss_gb": 16.261474609375
+}

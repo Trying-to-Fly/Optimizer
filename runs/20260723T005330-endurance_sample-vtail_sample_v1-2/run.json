@@ -1,0 +1,45 @@
+{
+  "aircraft": "vtail_sample_v1.2",
+  "mission": "endurance_sample",
+  "objective": "endurance",
+  "status": "M0 scaffold: fixed-design echo \u2014 no aero/propulsion models, no optimizer",
+  "created": "2026-07-23T00:53:30",
+  "geometry": {
+    "name": "vtail_sample_v1.2",
+    "span_m": 1.8015085584827923,
+    "area_m2": 0.3577790833193166,
+    "aspect_ratio": 9.071053165481478,
+    "mean_chord_m": 0.19859971335392024,
+    "n_wings": 2
+  },
+  "masses": {
+    "fixed_equipment": {
+      "battery": 0.43,
+      "motor_prop": 0.19,
+      "esc_wiring": 0.08,
+      "servos_aileron": 0.024,
+      "servos_ruddervator": 0.024,
+      "fc_gps_rx": 0.06,
+      "hardware_misc": 0.05
+    },
+    "fixed_totals": {
+      "auw_kg": 0.858,
+      "x_cg_m": 0.46891608391608397
+    }
+  },
+  "performance": {
+    "usable_energy_wh": 47.36000000000001
+  },
+  "constraints": {
+    "v_min_ms": 9.5,
+    "v_stall_max_ms": 8.0
+  },
+  "diagnostics": {
+    "objective_units": "min",
+    "wind_mode": "constraint"
+  },
+  "notes": [
+    "Structure mass, aero, propulsion, and trim are not evaluated at M0.",
+    "fixed_totals CG covers fixed equipment only \u2014 not an aircraft CG."
+  ]
+}

@@ -1,0 +1,12 @@
+feature,Z_mm
+nosecone tip (outer mould line),23.075
+propeller disc,18.075
+"bulkhead face — ORIGIN, motor front",0.0
+motor can centre of mass,-25.5
+motor can aft face = pod bay start,-51.0
+wing root LE,-172.209
+main spar line,-254.709
+pod bay end (wing saddle joint),-396.3
+wing TE,-447.209
+pod aft end / boom socket,-518.054
+tail block / ruddervator servos,-1311.637

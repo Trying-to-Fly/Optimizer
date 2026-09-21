@@ -1,0 +1,39 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 224 iterations; closest miss solve.py:589 opti.subject_to(aero.smooth_max(ratios) <= 1.0)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 224.0,
+ "violations": [
+  {
+   "row": 79.0,
+   "by": 0.11793325976786884,
+   "value": 1.1179332597678688,
+   "what": "solve.py:589 opti.subject_to(aero.smooth_max(ratios) <= 1.0)"
+  },
+  {
+   "row": 73.0,
+   "by": 4.380488619304401e-05,
+   "value": 4.380488619304401e-05,
+   "what": "solve.py:553 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 75.0,
+   "by": 4.073482048116972e-06,
+   "value": -4.073482048116972e-06,
+   "what": "solve.py:555 opti.subject_to(pr[\"thrust_n\"] == drag)"
+  },
+  {
+   "row": 95.0,
+   "by": 1.963670819022517e-06,
+   "value": 0.029998036329180976,
+   "what": "aircraft.py:716 opti.subject_to(vv >= self.v_tail_volume_min)"
+  },
+  {
+   "row": 74.0,
+   "by": 1.907181242051603e-07,
+   "value": -1.907181242051603e-07,
+   "what": "solve.py:554 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+  }
+ ],
+ "solve_minutes": 32.7,
+ "peak_rss_gb": 12.078506469726562
+}

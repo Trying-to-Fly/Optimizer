@@ -1,0 +1,330 @@
+{
+ "dv": {
+  "span": 2.0000000199987804,
+  "c_root": 0.2750000027486954,
+  "taper": 0.4949579280412512,
+  "fullness": 1.7595707799181397,
+  "le_shear": 1.000000009974265,
+  "eta_break": 0.850000008488745,
+  "washout_tip": -3.646993587229652e-11,
+  "tail_arm": 1.0966542569699405,
+  "t_span": 0.465856330742071,
+  "t_c_root": 0.09102950301465457,
+  "t_taper": 0.9936896216920295,
+  "t_sweep": 0.14129842228090644,
+  "cs_frac": 0.4000000038700993,
+  "spar_od_center": 0.017535809844930098,
+  "spar_wall_center": 0.0005999999940062632,
+  "spar_od_outer": 0.0049999999509413,
+  "spar_wall_outer": 0.0004999999951176625,
+  "ballast_kg": 6.1292115942884e-13,
+  "x_battery": 0.3338086849151734,
+  "pod_nose": 0.07407452478126633,
+  "pod_bay": 0.34529993000516024,
+  "pod_xs": 0.8744087100843292,
+  "pod_bay_end": 0.6071086249196244,
+  "pod_wh": 1.0017441033742,
+  "dihedral_tip": 2.0016281844935335,
+  "d_exp": 3.854463785014458e-10,
+  "pod_tail": 0.12175385949834214,
+  "t_dihedral": 51.37601350818658,
+  "x_esc": 0.43880867505290105,
+  "x_flight_controller": 0.5271086549173939,
+  "x_gps_compass": 0.535308674516167,
+  "x_airspeed_board": 0.5931086349188806,
+  "x_buzzer": 0.5543086679593596,
+  "x_companion_pi": 0.44130867491591264,
+  "x_bec_pi": 0.48695866491665296,
+  "x_receiver_elrs": 0.5681086449181371,
+  "x_telemetry_sik": 0.4353086751029839
+ },
+ "active_bounds": [
+  {
+   "variable": "ballast_kg",
+   "value": 6.1292115942884e-13,
+   "bound": 0.0,
+   "at": "lower",
+   "box": [
+    0.0,
+    0.2
+   ]
+  },
+  {
+   "variable": "c_root",
+   "value": 0.2750000027486954,
+   "bound": 0.275,
+   "at": "upper",
+   "box": [
+    0.16,
+    0.275
+   ]
+  },
+  {
+   "variable": "cs_frac",
+   "value": 0.4000000038700993,
+   "bound": 0.4,
+   "at": "upper",
+   "box": [
+    0.2,
+    0.4
+   ]
+  },
+  {
+   "variable": "d_exp",
+   "value": 3.854463785014458e-10,
+   "bound": 0.0,
+   "at": "lower",
+   "box": [
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "variable": "eta_break",
+   "value": 0.850000008488745,
+   "bound": 0.85,
+   "at": "upper",
+   "box": [
+    0.25,
+    0.85
+   ]
+  },
+  {
+   "variable": "le_shear",
+   "value": 1.000000009974265,
+   "bound": 1.0,
+   "at": "upper",
+   "box": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "variable": "span",
+   "value": 2.0000000199987804,
+   "bound": 2.0,
+   "at": "upper",
+   "box": [
+    1.5,
+    2.0
+   ]
+  },
+  {
+   "variable": "spar_od_outer",
+   "value": 0.0049999999509413,
+   "bound": 0.005,
+   "at": "lower",
+   "box": [
+    0.005,
+    0.02
+   ]
+  },
+  {
+   "variable": "spar_wall_center",
+   "value": 0.0005999999940062632,
+   "bound": 0.0006,
+   "at": "lower",
+   "box": [
+    0.0006,
+    0.002
+   ]
+  },
+  {
+   "variable": "spar_wall_outer",
+   "value": 0.0004999999951176625,
+   "bound": 0.0005,
+   "at": "lower",
+   "box": [
+    0.0005,
+    0.0018
+   ]
+  },
+  {
+   "variable": "washout_tip",
+   "value": -3.646993587229652e-11,
+   "bound": 0.0,
+   "at": "upper",
+   "box": [
+    -4.0,
+    0.0
+   ]
+  }
+ ],
+ "dv_bounds": {
+  "span": [
+   1.5,
+   2.0
+  ],
+  "c_root": [
+   0.16,
+   0.275
+  ],
+  "taper": [
+   0.35,
+   1.0
+  ],
+  "fullness": [
+   1.0,
+   4.0
+  ],
+  "le_shear": [
+   0.0,
+   1.0
+  ],
+  "eta_break": [
+   0.25,
+   0.85
+  ],
+  "washout_tip": [
+   -4.0,
+   0.0
+  ],
+  "tail_arm": [
+   0.4,
+   1.2
+  ],
+  "t_span": [
+   0.25,
+   1.2
+  ],
+  "t_c_root": [
+   0.06,
+   0.22
+  ],
+  "t_taper": [
+   0.4,
+   1.0
+  ],
+  "t_sweep": [
+   0.0,
+   25.0
+  ],
+  "cs_frac": [
+   0.2,
+   0.4
+  ],
+  "spar_od_center": [
+   0.006,
+   0.02
+  ],
+  "spar_wall_center": [
+   0.0006,
+   0.002
+  ],
+  "spar_od_outer": [
+   0.005,
+   0.02
+  ],
+  "spar_wall_outer": [
+   0.0005,
+   0.0018
+  ],
+  "ballast_kg": [
+   0.0,
+   0.2
+  ],
+  "x_battery": [
+   -0.1,
+   0.4
+  ],
+  "pod_nose": [
+   0.03,
+   0.25
+  ],
+  "pod_bay": [
+   0.2,
+   0.55
+  ],
+  "pod_xs": [
+   0.75,
+   1.3
+  ],
+  "pod_bay_end": [
+   0.4,
+   0.62
+  ],
+  "pod_wh": [
+   0.65,
+   1.55
+  ],
+  "dihedral_tip": [
+   0.0,
+   20.0
+  ],
+  "d_exp": [
+   0.0,
+   2.0
+  ],
+  "pod_tail": [
+   0.1,
+   0.45
+  ],
+  "t_dihedral": [
+   20.0,
+   55.0
+  ],
+  "x_esc": [
+   -0.1,
+   1.6
+  ],
+  "x_flight_controller": [
+   -0.1,
+   1.6
+  ],
+  "x_gps_compass": [
+   -0.1,
+   1.6
+  ],
+  "x_airspeed_board": [
+   -0.1,
+   1.6
+  ],
+  "x_buzzer": [
+   -0.1,
+   1.6
+  ],
+  "x_companion_pi": [
+   -0.1,
+   1.6
+  ],
+  "x_bec_pi": [
+   -0.1,
+   1.6
+  ],
+  "x_receiver_elrs": [
+   -0.1,
+   1.6
+  ],
+  "x_telemetry_sik": [
+   -0.1,
+   1.6
+  ]
+ },
+ "V_ms": 9.76976254087048,
+ "alpha_deg": 5.6489305641092065,
+ "deflection_deg": -3.386924097219385,
+ "rpm": 2649.869090278135,
+ "objective_value": 120.44525756421488,
+ "auw_kg": 2.1392622626364797,
+ "x_cg_m": 0.5007977609756381,
+ "static_margin": 0.07999999000237697,
+ "P_elec_w": 20.592460653629416,
+ "motor_voltage": 3.1019639242110237,
+ "motor_current_a": 6.306597400523832,
+ "throttle_frac": 0.20959215704128537,
+ "current_cap_a": 40.0,
+ "placard_speed_ms": null,
+ "drag_n": 1.0418080181306595,
+ "J": 0.725764759319374,
+ "clmax_ab_used": [
+  1.0867661240406215,
+  0.01877562808319164
+ ],
+ "suspended_minutes": 0.0,
+ "return_status": "Solve_Succeeded",
+ "iter_count": 42.0,
+ "converged": true,
+ "warm_started": false,
+ "solve_minutes": 7.23,
+ "peak_rss_gb": 14.903392791748047
+}

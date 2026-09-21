@@ -1,0 +1,43 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 46 iterations; closest miss solve.py:2012 opti.subject_to(aero_run[\"L\"] == weight_n)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 46.0,
+ "violations": [
+  {
+   "row": 93.0,
+   "by": 1.5575700906822476e-05,
+   "value": 1.5575700906822476e-05,
+   "what": "solve.py:2012 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 112.0,
+   "by": 5.179379196816429e-06,
+   "value": -5.179379196816429e-06,
+   "what": "aircraft.py:1075 opti.subject_to("
+  },
+  {
+   "row": 94.0,
+   "by": 2.520844304526646e-06,
+   "value": -2.520844304526646e-06,
+   "what": "solve.py:2013 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+  },
+  {
+   "row": 95.0,
+   "by": 4.4591636783053445e-07,
+   "value": 4.4591636783053445e-07,
+   "what": "solve.py:2014 opti.subject_to(pr[\"thrust_n\"] == drag)"
+  }
+ ],
+ "convergence": {
+  "iterations_recorded": 47.0,
+  "inf_pr_final": 0.00017623735274696628,
+  "inf_pr_min": 3.767977005963985e-06,
+  "inf_du_final": 0.00021230633855094704,
+  "inf_du_max": 9794.03551903586,
+  "mu_final": 5.124931789537014e-05,
+  "inf_pr_progress_last_25": 0.06309946085862461,
+  "reading": "still converging when the clock stopped \u2014 the one case where a larger --solve-timeout-min may actually pay"
+ },
+ "solve_minutes": 10.79,
+ "peak_rss_gb": 16.42182159423828
+}

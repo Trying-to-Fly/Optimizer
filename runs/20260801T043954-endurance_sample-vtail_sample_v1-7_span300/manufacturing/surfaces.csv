@@ -1,0 +1,4 @@
+surface,airfoil,span_mm,area_m2,root_chord_mm,tip_chord_mm,sections,mirrored
+wing,sd7037,2497.0,0.44621,217.4,140.0,5,True
+vtail,naca0009,448.6,0.05098,118.8,108.5,2,True
+winglet,sd7037,168.2,0.01569,94.3,92.4,2,True

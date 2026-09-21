@@ -1,0 +1,2 @@
+surface,control,from_station,to_station,hinge_frac_chord,x_in_m,y_in_m,z_in_m,x_out_m,y_out_m,z_out_m,control_chord_in_m,control_chord_out_m,hinge_length_m,symmetric_pair
+vtail,ruddervator,0,1,0.6,1.388592,0.0,0.0,1.38998,0.128933,0.181897,0.038022,0.036634,0.222962,True

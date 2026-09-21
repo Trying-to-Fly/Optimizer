@@ -1,0 +1,1355 @@
+{
+  "aircraft": "vtail_sample_v1.7_rcv2",
+  "mission": "rcv2_endurance",
+  "objective": "endurance",
+  "status": "M1: fixed-design evaluation (Phase 1 gate pipeline) \u2014 no optimizer",
+  "created": "2026-08-08T14:58:34",
+  "design_vector": {
+    "span": 2.0000000199970884,
+    "c_root": 0.27500000274553776,
+    "taper": 0.4963891492137836,
+    "fullness": 1.6143566128195086,
+    "le_shear": 1.0000000099323005,
+    "dihedral_tip": 2.0016281870153128,
+    "d_exp": -4.147925959222668e-09,
+    "eta_break": 0.850000008460271,
+    "dihedral_inner": 3.0,
+    "dihedral_outer": 3.0,
+    "washout_tip": 1.9902095628869357e-08,
+    "wl_len": 0.12,
+    "wl_cant": 75.0,
+    "wl_cr": 0.8,
+    "wl_taper": 0.7,
+    "wl_toe": -1.0,
+    "pod_nose": 0.07407452478025416,
+    "pod_bay": 0.3452999300118205,
+    "pod_tail": 0.12175385950304404,
+    "pod_xs": 0.8744087101037857,
+    "pod_wh": 1.0017441033665313,
+    "pod_bay_end": 0.6140908858803085,
+    "tail_arm": 1.089178070704565,
+    "t_span": 0.4582454968893455,
+    "t_c_root": 0.09108791088457499,
+    "t_taper": 0.998172473394849,
+    "t_sweep": 0.04162726789874289,
+    "t_dihedral": 51.499187267980915,
+    "cs_frac": 0.40000000370740857,
+    "fin_height": 0.18,
+    "fin_c_root": 0.12,
+    "fin_taper": 0.7,
+    "fin_sweep": 15.0,
+    "spar_od_center": 0.01744442033076381,
+    "spar_wall_center": 0.0005999999900146181,
+    "spar_od_outer": 0.00499999992218503,
+    "spar_wall_outer": 0.0004999999902731289,
+    "ballast_kg": -6.985776618186752e-10,
+    "x_battery": 0.34079094587011316,
+    "x_esc": 0.44579093618754906,
+    "x_telemetry_sik": 0.44229093630298044,
+    "x_companion_pi": 0.44829093587180646,
+    "x_bec_pi": 0.4939409258735023,
+    "x_flight_controller": 0.5340909158751997,
+    "x_receiver_elrs": 0.5750909058769019,
+    "x_airspeed_board": 0.6000908958786049,
+    "x_gps_compass": 0.5422909362552886,
+    "x_buzzer": 0.5612909341911884
+  },
+  "geometry": {
+    "name": "vtail_sample_v1.7_rcv2",
+    "span_m": 2.0000000199970884,
+    "span_projected_m": 1.998779689713664,
+    "area_m2": 0.4639313439273212,
+    "aspect_ratio": 8.621965582508665,
+    "mean_chord_m": 0.2319656696443416,
+    "n_wings": 2,
+    "surfaces": {
+      "wing": {
+        "airfoil": "sd7037",
+        "span_m": 2.0,
+        "area_m2": 0.46393,
+        "root_chord_m": 0.275,
+        "tip_chord_m": 0.1365
+      },
+      "vtail": {
+        "airfoil": "naca0009",
+        "span_m": 0.4582,
+        "area_m2": 0.0417,
+        "root_chord_m": 0.0911,
+        "tip_chord_m": 0.0909
+      }
+    }
+  },
+  "masses": {
+    "components": {
+      "motor": {
+        "mass_kg": 0.17,
+        "station_mm": 243.3
+      },
+      "propeller": {
+        "mass_kg": 0.0555,
+        "station_mm": 199.7
+      },
+      "esc": {
+        "mass_kg": 0.075,
+        "station_mm": 445.8
+      },
+      "battery": {
+        "mass_kg": 0.46,
+        "station_mm": 340.8
+      },
+      "servo_aileron_left": {
+        "mass_kg": 0.014,
+        "station_mm": 574.3
+      },
+      "servo_aileron_right": {
+        "mass_kg": 0.014,
+        "station_mm": 574.3
+      },
+      "servo_ruddervator_left": {
+        "mass_kg": 0.014,
+        "station_mm": 1529.4
+      },
+      "servo_ruddervator_right": {
+        "mass_kg": 0.014,
+        "station_mm": 1529.4
+      },
+      "flight_controller": {
+        "mass_kg": 0.04,
+        "station_mm": 534.1
+      },
+      "sd_card_fc": {
+        "mass_kg": 0.001,
+        "station_mm": 534.1
+      },
+      "gps_compass": {
+        "mass_kg": 0.022,
+        "station_mm": 542.3
+      },
+      "airspeed_board": {
+        "mass_kg": 0.006,
+        "station_mm": 600.1
+      },
+      "pitot_probe": {
+        "mass_kg": 0.009,
+        "station_mm": 400.6
+      },
+      "buzzer": {
+        "mass_kg": 0.003,
+        "station_mm": 561.3
+      },
+      "companion_pi": {
+        "mass_kg": 0.02,
+        "station_mm": 448.3
+      },
+      "bec_pi": {
+        "mass_kg": 0.012,
+        "station_mm": 493.9
+      },
+      "sd_card_pi": {
+        "mass_kg": 0.001,
+        "station_mm": 448.3
+      },
+      "receiver_elrs": {
+        "mass_kg": 0.005,
+        "station_mm": 575.1
+      },
+      "telemetry_sik": {
+        "mass_kg": 0.03,
+        "station_mm": 442.3
+      },
+      "wiring_pod": {
+        "mass_kg": 0.024,
+        "station_mm": 441.4
+      },
+      "wiring_boom": {
+        "mass_kg": 0.016,
+        "station_mm": 1132.6
+      },
+      "wing_spars_joiners": {
+        "mass_kg": 0.1242,
+        "station_mm": 472.5
+      },
+      "pod": {
+        "mass_kg": 0.2138,
+        "station_mm": 470.7
+      },
+      "boom": {
+        "mass_kg": 0.0472,
+        "station_mm": 1132.6
+      },
+      "nose_ballast": {
+        "mass_kg": -0.0,
+        "station_mm": 209.7
+      },
+      "printed_wing": {
+        "mass_kg": 0.6333,
+        "station_mm": 494.4
+      },
+      "printed_vtail": {
+        "mass_kg": 0.0808,
+        "station_mm": 1594.3
+      }
+    },
+    "printed_breakdown": {
+      "wing": {
+        "skin_kg": 0.2568,
+        "ribs_kg": 0.2152,
+        "joints_kg": 0.0711,
+        "overhead_kg": 0.06,
+        "finish_factor": 1.05,
+        "profile": "lwpla_a1_single_perimeter",
+        "calibrated": false
+      },
+      "vtail": {
+        "skin_kg": 0.0231,
+        "ribs_kg": 0.0076,
+        "joints_kg": 0.0163,
+        "overhead_kg": 0.03,
+        "finish_factor": 1.05,
+        "profile": "lwpla_a1_tail",
+        "calibrated": false
+      }
+    },
+    "auw_kg": 2.1048456541301164,
+    "x_cg_m": 0.5032382886886039,
+    "wing_loading_g_dm2": 45.36976605874378,
+    "equipment": {
+      "basis_solved": "max",
+      "fit": "full",
+      "totals_est": {
+        "basis": "est",
+        "groups_kg": {
+          "Actuation": 0.054,
+          "Autopilot core": 0.051,
+          "Companion compute": 0.02,
+          "Propulsion": 0.7005,
+          "RC link": 0.0046,
+          "Support": 0.03,
+          "Telemetry / GCS": 0.02
+        },
+        "total_kg": 0.8801,
+        "n_items": 21
+      },
+      "totals_max": {
+        "basis": "max",
+        "groups_kg": {
+          "Actuation": 0.056,
+          "Autopilot core": 0.081,
+          "Companion compute": 0.033,
+          "Propulsion": 0.7605,
+          "RC link": 0.005,
+          "Support": 0.04,
+          "Telemetry / GCS": 0.03
+        },
+        "total_kg": 1.0055,
+        "n_items": 21
+      },
+      "placements_mm": {
+        "motor": 243.3,
+        "propeller": 199.7,
+        "esc": 445.8,
+        "battery": 340.8,
+        "servo_aileron_left": 574.3,
+        "servo_aileron_right": 574.3,
+        "servo_ruddervator_left": 1529.4,
+        "servo_ruddervator_right": 1529.4,
+        "flight_controller": 534.1,
+        "sd_card_fc": 534.1,
+        "gps_compass": 542.3,
+        "airspeed_board": 600.1,
+        "pitot_probe": 400.6,
+        "buzzer": 561.3,
+        "companion_pi": 448.3,
+        "bec_pi": 493.9,
+        "sd_card_pi": 448.3,
+        "receiver_elrs": 575.1,
+        "telemetry_sik": 442.3,
+        "wiring_pod": 441.4,
+        "wiring_boom": 1132.6
+      },
+      "rows": [
+        {
+          "item": "motor",
+          "group": "Propulsion",
+          "example part": "D3548 900 kV brushless outrunner",
+          "station_mm": 243.3,
+          "mass_g": 170.0,
+          "mass_basis": "max",
+          "max_g": 170.0,
+          "size_mm": "",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Bolts to the motor plate; prop plane 50-65 mm behind the ruddervator TE (pusher). HARD limit \u2014 the farthest-aft mass on the aircraft.",
+          "not checked here": "0 deg thrust line with +-2 deg shim provision | mount must match the 19/25 mm M3 cross on the tail-block plate, or use a <=10 g adapter | open-sided venting around the can | UNDER A PULLER this row's pusher geometry does not apply \u2014 the can sits inside the nose, sized by the motor-fit constraint"
+        },
+        {
+          "item": "propeller",
+          "group": "Propulsion",
+          "example part": "",
+          "station_mm": 199.7,
+          "mass_g": 55.5,
+          "mass_basis": "max",
+          "max_g": 55.5,
+          "size_mm": "",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "On the shaft, at the spinner.",
+          "not checked here": ""
+        },
+        {
+          "item": "esc",
+          "group": "Propulsion",
+          "example part": "Hobbywing Skywalker 60A V2 (or AM32 equivalent, no BEC)",
+          "station_mm": 445.8,
+          "mass_g": 75.0,
+          "mass_basis": "max",
+          "max_g": 75.0,
+          "size_mm": "60.0 x 8.0 x 25.0",
+          "lane": "bay_left",
+          "status": "placed",
+          "requirement": "Left sidewall, aft of the battery. May overlap the FC-tray zone lengthwise \u2014 different wall.",
+          "not checked here": "must sit in the nose-inlet -> tail-exit cooling stream | battery leads <=100 mm; phase wires exit rear into the LEFT boom channel, twisted + heat-shrunk every ~100 mm"
+        },
+        {
+          "item": "battery",
+          "group": "Propulsion",
+          "example part": "4S 4,000 mAh 30C LiPo",
+          "station_mm": 340.8,
+          "mass_g": 460.0,
+          "mass_basis": "max",
+          "max_g": 460.0,
+          "size_mm": "138.0 x 44.0 x 32.0",
+          "lane": "bay_floor",
+          "status": "placed",
+          "requirement": "Battery bay, hard against the F1 crash bulkhead via printed spacer blocks. Its station IS the balance variable.",
+          "not checked here": "2 velcro straps through floor slots + 3 mm foam | must be rigidly retained \u2014 belly lander; a loose pack through F1 is the crash mode"
+        },
+        {
+          "item": "servo_aileron_left",
+          "group": "Actuation",
+          "example part": "MG90S metal gear (9 g class)",
+          "station_mm": 574.3,
+          "mass_g": 14.0,
+          "mass_basis": "max",
+          "max_g": 14.0,
+          "size_mm": "22.8 x 12.2 x 28.5",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Wing, 65% semi-span, direct linkage.",
+          "not checked here": "body must fit the printed 23.2 x 12.4 mm pocket, lugs outboard"
+        },
+        {
+          "item": "servo_aileron_right",
+          "group": "Actuation",
+          "example part": "MG90S metal gear (9 g class)",
+          "station_mm": 574.3,
+          "mass_g": 14.0,
+          "mass_basis": "max",
+          "max_g": 14.0,
+          "size_mm": "22.8 x 12.2 x 28.5",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Wing, 65% semi-span, direct linkage.",
+          "not checked here": "body must fit the printed 23.2 x 12.4 mm pocket, lugs outboard"
+        },
+        {
+          "item": "servo_ruddervator_left",
+          "group": "Actuation",
+          "example part": "MG90S metal gear (9 g class)",
+          "station_mm": 1529.4,
+          "mass_g": 14.0,
+          "mass_basis": "max",
+          "max_g": 14.0,
+          "size_mm": "22.8 x 12.2 x 28.5",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Bay in the tail root block, 70 mm x 2 mm pushrod.",
+          "not checked here": "counts against the <=120 g tail-group budget \u2014 NO heavier substitutes at the tail, ever"
+        },
+        {
+          "item": "servo_ruddervator_right",
+          "group": "Actuation",
+          "example part": "MG90S metal gear (9 g class)",
+          "station_mm": 1529.4,
+          "mass_g": 14.0,
+          "mass_basis": "max",
+          "max_g": 14.0,
+          "size_mm": "22.8 x 12.2 x 28.5",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Bay in the tail root block, 70 mm x 2 mm pushrod.",
+          "not checked here": "counts against the <=120 g tail-group budget \u2014 NO heavier substitutes at the tail, ever"
+        },
+        {
+          "item": "flight_controller",
+          "group": "Autopilot core",
+          "example part": "Matek H743-WING V3 (spec minimum: F405-Wing class)",
+          "station_mm": 534.1,
+          "mass_g": 40.0,
+          "mass_basis": "max",
+          "max_g": 40.0,
+          "size_mm": "54.0 x 36.0 x 13.0",
+          "lane": "bay_shelf",
+          "status": "placed",
+          "requirement": "FC tray on the avionics shelf, aft of the battery.",
+          "not checked here": "30.5 x 30.5 mm pattern, arrow FORWARD and level | soft-mount (foam tape / grommets) \u2014 pusher prop vibration comes down the boom | keep off the ESC wall (heat) | USB port reachable through the hatch for bench work"
+        },
+        {
+          "item": "sd_card_fc",
+          "group": "Autopilot core",
+          "example part": "32 GB class-10",
+          "station_mm": 534.1,
+          "mass_g": 1.0,
+          "mass_basis": "max",
+          "max_g": 1.0,
+          "size_mm": "15.0 x 11.0 x 1.0",
+          "lane": "rides flight_controller",
+          "status": "placed",
+          "requirement": "FC card slot (no freedom of its own).",
+          "not checked here": "slot must face somewhere reachable through the hatch"
+        },
+        {
+          "item": "gps_compass",
+          "group": "Autopilot core",
+          "example part": "Matek M10Q-5883 (M10 GNSS + QMC5883L mag)",
+          "station_mm": 542.3,
+          "mass_g": 22.0,
+          "mass_basis": "max",
+          "max_g": 22.0,
+          "size_mm": "20.0 x 20.0 x 12.4",
+          "lane": "bay_deck",
+          "status": "placed",
+          "requirement": "Top deck, highest point in the pod. >=80 mm from the battery leads and from the ESC.",
+          "not checked here": "directly under the LW-PLA hatch skin \u2014 RF-transparent, no carbon or metal above it | all high-current wiring routed below the deck shelf | sky view unobstructed"
+        },
+        {
+          "item": "airspeed_board",
+          "group": "Autopilot core",
+          "example part": "Matek ASPD-4525 (MS4525DO / DLVR based)",
+          "station_mm": 600.1,
+          "mass_g": 6.0,
+          "mass_basis": "max",
+          "max_g": 6.0,
+          "size_mm": "22.0 x 16.0 x 8.0",
+          "lane": "bay_shelf",
+          "status": "placed",
+          "requirement": "Within 300 mm of the FC \u2014 this is an I2C run, not a bus.",
+          "not checked here": "tubing kink-free"
+        },
+        {
+          "item": "pitot_probe",
+          "group": "Autopilot core",
+          "example part": "",
+          "station_mm": 400.6,
+          "mass_g": 9.0,
+          "mass_basis": "max",
+          "max_g": 9.0,
+          "size_mm": "",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Clean air: outer wing LE at ~2/3 semi-span, protruding >=40 mm ahead of the surface, clear of the fuselage boundary layer.",
+          "not checked here": "a handling hazard on a hand launch \u2014 position away from the grip | its own parasite drag is NOT in the buildup at this fidelity"
+        },
+        {
+          "item": "buzzer",
+          "group": "Autopilot core",
+          "example part": "Passive buzzer on FC BUZ pads",
+          "station_mm": 561.3,
+          "mass_g": 3.0,
+          "mass_basis": "max",
+          "max_g": 3.0,
+          "size_mm": "12.0 x 12.0 x 9.5",
+          "lane": "bay_deck",
+          "status": "placed",
+          "requirement": "Anywhere in the pod \u2014 no structural requirement.",
+          "not checked here": "unobstructed sound path \u2014 near the hatch seam or a cooling exit"
+        },
+        {
+          "item": "companion_pi",
+          "group": "Companion compute",
+          "example part": "Raspberry Pi Zero 2 W",
+          "station_mm": 448.3,
+          "mass_g": 20.0,
+          "mass_basis": "max",
+          "max_g": 20.0,
+          "size_mm": "65.0 x 30.0 x 13.0",
+          "lane": "bay_shelf",
+          "status": "placed",
+          "requirement": "Nose bay preferred, flat against the F1 bulkhead face (max forward moment). Fallback: beside the FC tray \u2014 which is where a PULLER puts it, the nose being full of motor.",
+          "not checked here": "keep the WiFi antenna end clear of carbon | common ground with the FC | verify nose-cap internal clearance in CAD"
+        },
+        {
+          "item": "bec_pi",
+          "group": "Companion compute",
+          "example part": "Matek mini BEC / Pololu D24V22F5, 5 V / 3 A",
+          "station_mm": 493.9,
+          "mass_g": 12.0,
+          "mass_basis": "max",
+          "max_g": 12.0,
+          "size_mm": "20.3 x 17.8 x 5.0",
+          "lane": "bay_shelf",
+          "status": "placed",
+          "requirement": "Within ~50 mm of the Pi; twisted input pair from the PDB tap.",
+          "not checked here": "common ground with the FC"
+        },
+        {
+          "item": "sd_card_pi",
+          "group": "Companion compute",
+          "example part": "32 GB A1",
+          "station_mm": 448.3,
+          "mass_g": 1.0,
+          "mass_basis": "max",
+          "max_g": 1.0,
+          "size_mm": "15.0 x 11.0 x 1.0",
+          "lane": "rides companion_pi",
+          "status": "placed",
+          "requirement": "Pi card slot (no freedom of its own).",
+          "not checked here": "orient the slot toward the hatch"
+        },
+        {
+          "item": "receiver_elrs",
+          "group": "RC link",
+          "example part": "RadioMaster RP3 V2 (ELRS 2.4 GHz diversity)",
+          "station_mm": 575.1,
+          "mass_g": 5.0,
+          "mass_basis": "max",
+          "max_g": 5.0,
+          "size_mm": "22.0 x 13.0 x 4.0",
+          "lane": "bay_shelf",
+          "status": "placed",
+          "requirement": "Behind the FC tray.",
+          "not checked here": "THE ANTENNAS ARE THE REAL CONSTRAINT, NOT THE BOARD: tips 90 deg apart and >=30 mm from ANY carbon (boom, wing spar), from the phase wires and from the GPS puck"
+        },
+        {
+          "item": "telemetry_sik",
+          "group": "Telemetry / GCS",
+          "example part": "Holybro SiK Radio V3, 915 MHz 100 mW (air unit)",
+          "station_mm": 442.3,
+          "mass_g": 30.0,
+          "mass_basis": "max",
+          "max_g": 30.0,
+          "size_mm": "53.0 x 10.7 x 28.0",
+          "lane": "bay_right",
+          "status": "placed",
+          "requirement": "RIGHT sidewall, opposite the ESC. >=100 mm from the GPS puck (desense).",
+          "not checked here": "antenna vertical; do not lay it along the boom | >=100 mm from the ELRS antennas"
+        },
+        {
+          "item": "wiring_pod",
+          "group": "Support",
+          "example part": "",
+          "station_mm": 441.4,
+          "mass_g": 24.0,
+          "mass_basis": "max",
+          "max_g": 24.0,
+          "size_mm": "",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Distributed through the bay; charged at the bay centroid.",
+          "not checked here": "keep every harness clear of the RX antennas"
+        },
+        {
+          "item": "wiring_boom",
+          "group": "Support",
+          "example part": "",
+          "station_mm": 1132.6,
+          "mass_g": 16.0,
+          "mass_basis": "max",
+          "max_g": 16.0,
+          "size_mm": "",
+          "lane": "derived from structure",
+          "status": "placed",
+          "requirement": "Motor phase wires in the LEFT boom channel, servo leads in the RIGHT; charged at the boom's midpoint.",
+          "not checked here": "zip-tie slots at both boom ends | aileron leads pass through the wing saddle"
+        },
+        {
+          "item": "transmitter",
+          "group": "RC link",
+          "example part": "RadioMaster Boxer ELRS 2.4 GHz",
+          "station_mm": "",
+          "mass_g": "",
+          "mass_basis": "",
+          "max_g": "",
+          "size_mm": "",
+          "lane": "",
+          "status": "ground/bench \u2014 no airframe constraint",
+          "requirement": "Ground item \u2014 no airframe constraint.",
+          "not checked here": ""
+        },
+        {
+          "item": "ground_station",
+          "group": "Telemetry / GCS",
+          "example part": "Laptop + Mission Planner / QGroundControl",
+          "station_mm": "",
+          "mass_g": "",
+          "mass_basis": "",
+          "max_g": "",
+          "size_mm": "",
+          "lane": "",
+          "status": "ground/bench \u2014 no airframe constraint",
+          "requirement": "Ground item \u2014 no airframe constraint.",
+          "not checked here": ""
+        },
+        {
+          "item": "charger",
+          "group": "Support",
+          "example part": "ISDT / ToolkitRC >=100 W balance charger",
+          "station_mm": "",
+          "mass_g": "",
+          "mass_basis": "",
+          "max_g": "",
+          "size_mm": "",
+          "lane": "",
+          "status": "ground/bench \u2014 no airframe constraint",
+          "requirement": "Bench item \u2014 no airframe constraint.",
+          "not checked here": ""
+        },
+        {
+          "item": "lipo_checker",
+          "group": "Support",
+          "example part": "Any cell-voltage checker",
+          "station_mm": "",
+          "mass_g": "",
+          "mass_basis": "",
+          "max_g": "",
+          "size_mm": "",
+          "lane": "",
+          "status": "ground/bench \u2014 no airframe constraint",
+          "requirement": "Field-box item \u2014 no airframe constraint.",
+          "not checked here": ""
+        }
+      ],
+      "placement_activity": {
+        "tolerance_mm": 0.05,
+        "n_placed": 10,
+        "n_determined": 7,
+        "n_at_forward_stop": 10,
+        "items": [
+          {
+            "item": "battery",
+            "lane": "bay_floor",
+            "station_mm": 340.79,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 201.3,
+            "determined": false,
+            "pinned_by": [
+              "lane bay_floor front"
+            ]
+          },
+          {
+            "item": "telemetry_sik",
+            "lane": "bay_right",
+            "station_mm": 442.29,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "lane bay_right front",
+              "separation to gps_compass"
+            ]
+          },
+          {
+            "item": "esc",
+            "lane": "bay_left",
+            "station_mm": 445.79,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 16.5,
+            "determined": false,
+            "pinned_by": [
+              "lane bay_left front"
+            ]
+          },
+          {
+            "item": "companion_pi",
+            "lane": "bay_shelf",
+            "station_mm": 448.29,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "gap ahead of bec_pi",
+              "lane bay_shelf front"
+            ]
+          },
+          {
+            "item": "bec_pi",
+            "lane": "bay_shelf",
+            "station_mm": 493.94,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "gap ahead of flight_controller",
+              "gap behind companion_pi"
+            ]
+          },
+          {
+            "item": "flight_controller",
+            "lane": "bay_shelf",
+            "station_mm": 534.09,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "gap ahead of receiver_elrs",
+              "gap behind bec_pi"
+            ]
+          },
+          {
+            "item": "gps_compass",
+            "lane": "bay_deck",
+            "station_mm": 542.29,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "gap ahead of buzzer",
+              "separation from telemetry_sik"
+            ]
+          },
+          {
+            "item": "buzzer",
+            "lane": "bay_deck",
+            "station_mm": 561.29,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 43.8,
+            "determined": false,
+            "pinned_by": [
+              "gap behind gps_compass"
+            ]
+          },
+          {
+            "item": "receiver_elrs",
+            "lane": "bay_shelf",
+            "station_mm": 575.09,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "gap ahead of airspeed_board",
+              "gap behind flight_controller"
+            ]
+          },
+          {
+            "item": "airspeed_board",
+            "lane": "bay_shelf",
+            "station_mm": 600.09,
+            "room_fwd_mm": 0.0,
+            "room_aft_mm": 0.0,
+            "determined": true,
+            "pinned_by": [
+              "gap behind receiver_elrs",
+              "lane bay_shelf aft"
+            ]
+          }
+        ],
+        "verdict": "all 10 placed items sit on their FORWARD stop; 3 of them still have room aft, held forward by the objective rather than by a row, so derived packing would reproduce the layout but would stop pricing that choice"
+      },
+      "closure": {
+        "solved_basis": "max",
+        "est": {
+          "equipment_kg": 0.8801,
+          "auw_kg": 1.9794,
+          "x_cg_m": 0.50611
+        },
+        "max": {
+          "equipment_kg": 1.0055,
+          "auw_kg": 2.1048,
+          "x_cg_m": 0.50324
+        },
+        "delta": {
+          "equipment_kg": 0.1254,
+          "auw_kg": 0.1254,
+          "x_cg_m": -0.00287
+        }
+      },
+      "tail_group": {
+        "budget_kg": 0.12,
+        "cut_station_mm": 1529.4,
+        "tail_block_mm": 1529.4,
+        "parts_kg": {
+          "printed_vtail": 0.0808,
+          "servo_ruddervator_left": 0.014,
+          "servo_ruddervator_right": 0.014
+        },
+        "total_kg": 0.1088,
+        "over_by_kg": -0.0112,
+        "verdict": "within budget"
+      }
+    }
+  },
+  "performance": {
+    "objective_units": "min",
+    "best": {
+      "V_ms": 9.5,
+      "alpha_deg": 6.228889016931476,
+      "deflection_deg": -3.3327398837712727,
+      "CL": 0.8051600973010697,
+      "CD_surfaces": 0.037592790813036334,
+      "CD_bodies": 0.0032881503437149793,
+      "CD_total": 0.04088094115675131,
+      "L_over_D": 19.69524366412736,
+      "drag_n": 1.0484021532885206,
+      "P_elec_w": 20.1741629068653,
+      "rpm": 2611.9926002826105,
+      "J": 0.715958666940765,
+      "J_peak_eta": 0.6816244221105529,
+      "re_75": 43004.83965446884,
+      "re_in_range": true,
+      "thrust_n": 1.0484021532885206,
+      "torque_nm": 0.04738115476905504,
+      "motor_voltage": 3.05885321611981,
+      "motor_current_a": 6.265568632231928,
+      "throttle_frac": 0.2066792713594466,
+      "eta_prop": 0.7685025417368212,
+      "eta_motor": 0.6762185382548872,
+      "eta_chain": 0.4936918821475167,
+      "objective_value": 122.6193158052834
+    },
+    "usable_energy_wh": 47.36000000000001,
+    "watts_per_kg": 9.58462814947009,
+    "wh_per_km_airspeed": 0.677607102539921,
+    "sweep": [
+      {
+        "V_ms": 8.0,
+        "infeasible": "trim failed at V=8.0: The iteration is not making good progress, as measured by the \n improvement from the last ten iterations. / least-squares residual too large",
+        "cause": "trim_not_converged"
+      },
+      {
+        "V_ms": 8.5,
+        "alpha_deg": 10.838660188415899,
+        "deflection_deg": -5.231296494553536,
+        "CL": 1.0057536163521168,
+        "CD_surfaces": 0.0613816461506145,
+        "CD_bodies": 0.003342972530777419,
+        "CD_total": 0.06472461868139191,
+        "L_over_D": 15.538965494767252,
+        "drag_n": 1.3288230721647452,
+        "P_elec_w": 22.21596129395084,
+        "rpm": 2609.165489195231,
+        "J": 0.6412887006921061,
+        "J_peak_eta": 0.6816244221105529,
+        "re_75": 42597.82155370715,
+        "re_in_range": true,
+        "thrust_n": 1.3288230721647452,
+        "torque_nm": 0.05382254649556118,
+        "motor_voltage": 3.0708891532734417,
+        "motor_current_a": 6.872655500038501,
+        "throttle_frac": 0.2074925103563136,
+        "eta_prop": 0.7680537265349676,
+        "eta_motor": 0.6967961939249071,
+        "eta_chain": 0.5084180677104364,
+        "objective_value": 112.69052830762725
+      },
+      {
+        "V_ms": 9.0,
+        "alpha_deg": 7.681865385680671,
+        "deflection_deg": -3.531361444100963,
+        "CL": 0.8971073923635394,
+        "CD_surfaces": 0.04534960889637319,
+        "CD_bodies": 0.0033146473199348134,
+        "CD_total": 0.048664256216308,
+        "L_over_D": 18.434626605120236,
+        "drag_n": 1.120095150790047,
+        "P_elec_w": 20.263651582185776,
+        "rpm": 2573.8036539026793,
+        "J": 0.6883405968519449,
+        "J_peak_eta": 0.6816244221105529,
+        "re_75": 42240.3563897952,
+        "re_in_range": true,
+        "thrust_n": 1.120095150790047,
+        "torque_nm": 0.04855342077712305,
+        "motor_voltage": 3.019183140184692,
+        "motor_current_a": 6.376052100601914,
+        "throttle_frac": 0.20399886082328997,
+        "eta_prop": 0.7703242368690344,
+        "eta_motor": 0.6798021743491015,
+        "eta_chain": 0.4974846866185128,
+        "objective_value": 122.147634044518
+      },
+      {
+        "V_ms": 9.5,
+        "alpha_deg": 6.228889016931476,
+        "deflection_deg": -3.3327398837712727,
+        "CL": 0.8051600973010697,
+        "CD_surfaces": 0.037592790813036334,
+        "CD_bodies": 0.0032881503437149793,
+        "CD_total": 0.04088094115675131,
+        "L_over_D": 19.69524366412736,
+        "drag_n": 1.0484021532885206,
+        "P_elec_w": 20.1741629068653,
+        "rpm": 2611.9926002826105,
+        "J": 0.715958666940765,
+        "J_peak_eta": 0.6816244221105529,
+        "re_75": 43004.83965446884,
+        "re_in_range": true,
+        "thrust_n": 1.0484021532885206,
+        "torque_nm": 0.04738115476905504,
+        "motor_voltage": 3.05885321611981,
+        "motor_current_a": 6.265568632231928,
+        "throttle_frac": 0.2066792713594466,
+        "eta_prop": 0.7685025417368212,
+        "eta_motor": 0.6762185382548872,
+        "eta_chain": 0.4936918821475167,
+        "objective_value": 122.6193158052834
+      },
+      {
+        "V_ms": 10.0,
+        "alpha_deg": 5.158210757444156,
+        "deflection_deg": -3.4549144838827495,
+        "CL": 0.7266569878143269,
+        "CD_surfaces": 0.032045706383940734,
+        "CD_bodies": 0.0032632762710610164,
+        "CD_total": 0.03530898265500175,
+        "L_over_D": 20.579946890975947,
+        "drag_n": 1.003332806270288,
+        "P_elec_w": 20.45440238938693,
+        "rpm": 2666.181525911616,
+        "J": 0.738323297898783,
+        "J_peak_eta": 0.6771128190954775,
+        "re_75": 44014.58611281794,
+        "re_in_range": true,
+        "thrust_n": 1.003332806270288,
+        "torque_nm": 0.047021450721278585,
+        "motor_voltage": 3.118215600789901,
+        "motor_current_a": 6.231667324413098,
+        "throttle_frac": 0.21069024329661493,
+        "eta_prop": 0.76424156823195,
+        "eta_motor": 0.6756222695841808,
+        "eta_chain": 0.49052169169747145,
+        "objective_value": 121.15422737378371
+      },
+      {
+        "V_ms": 10.5,
+        "alpha_deg": 4.303526720396262,
+        "deflection_deg": -3.5495668444741106,
+        "CL": 0.659099308676386,
+        "CD_surfaces": 0.02793069922891298,
+        "CD_bodies": 0.0032398516899128957,
+        "CD_total": 0.031170550918825875,
+        "L_over_D": 21.14493614157824,
+        "drag_n": 0.9765239170646489,
+        "P_elec_w": 21.013263000819446,
+        "rpm": 2731.311107652753,
+        "J": 0.7567534610272043,
+        "J_peak_eta": 0.6771128190954775,
+        "re_75": 45191.55333457508,
+        "re_in_range": true,
+        "thrust_n": 0.9765239170646489,
+        "torque_nm": 0.04727491993772868,
+        "motor_voltage": 3.1911790254957304,
+        "motor_current_a": 6.255556235262421,
+        "throttle_frac": 0.21562020442538718,
+        "eta_prop": 0.7583009371119228,
+        "eta_motor": 0.6773505525951024,
+        "eta_chain": 0.4879537808468376,
+        "objective_value": 118.33460533468657
+      },
+      {
+        "V_ms": 11.0,
+        "alpha_deg": 3.5961175880768184,
+        "deflection_deg": -3.65971257906247,
+        "CL": 0.6005429651358097,
+        "CD_surfaces": 0.02474890850841388,
+        "CD_bodies": 0.003217728895598449,
+        "CD_total": 0.02796663740401233,
+        "L_over_D": 21.473549231544396,
+        "drag_n": 0.9615800184854401,
+        "P_elec_w": 21.776189140178033,
+        "rpm": 2803.574732384105,
+        "J": 0.7723547746727216,
+        "J_peak_eta": 0.672601216080402,
+        "re_75": 46477.46645380226,
+        "re_in_range": true,
+        "thrust_n": 0.9615800184854401,
+        "torque_nm": 0.047963312340402416,
+        "motor_voltage": 3.27309392825017,
+        "motor_current_a": 6.320435690713226,
+        "throttle_frac": 0.22115499515203849,
+        "eta_prop": 0.7511526303516068,
+        "eta_motor": 0.6806822686609438,
+        "eta_chain": 0.48573146271144874,
+        "objective_value": 114.69076151795883
+      },
+      {
+        "V_ms": 11.5,
+        "alpha_deg": 2.992135881307913,
+        "deflection_deg": -3.756348015057061,
+        "CL": 0.5494570796327631,
+        "CD_surfaces": 0.022218040131936692,
+        "CD_bodies": 0.003196781109760958,
+        "CD_total": 0.02541482124169765,
+        "L_over_D": 21.619553189352306,
+        "drag_n": 0.955086152159052,
+        "P_elec_w": 22.705948858670215,
+        "rpm": 2880.86280333284,
+        "J": 0.7857991449436997,
+        "J_peak_eta": 0.672601216080402,
+        "re_75": 47840.0364939469,
+        "re_in_range": true,
+        "thrust_n": 0.955086152159052,
+        "torque_nm": 0.048989857008245964,
+        "motor_voltage": 3.3613883015279624,
+        "motor_current_a": 6.417185246325598,
+        "throttle_frac": 0.22712083118432178,
+        "eta_prop": 0.7431611919681523,
+        "eta_motor": 0.6851633203875956,
+        "eta_chain": 0.48372745037849746,
+        "objective_value": 110.54250576872104
+      },
+      {
+        "V_ms": 12.0,
+        "alpha_deg": 2.463422211527452,
+        "deflection_deg": -3.7472509098014597,
+        "CL": 0.5046229082043923,
+        "CD_surfaces": 0.02016454455151377,
+        "CD_bodies": 0.0031768987536279717,
+        "CD_total": 0.02334144330514174,
+        "L_over_D": 21.619181882091755,
+        "drag_n": 0.9551025556670364,
+        "P_elec_w": 23.783878879949935,
+        "rpm": 2961.925715950139,
+        "J": 0.797523284155589,
+        "J_peak_eta": 0.6680896130653267,
+        "re_75": 49260.1249943891,
+        "re_in_range": true,
+        "thrust_n": 0.9551025556670364,
+        "torque_nm": 0.05029902686208987,
+        "motor_voltage": 3.4545428632324255,
+        "motor_current_a": 6.5405715981797155,
+        "throttle_frac": 0.23341505832651524,
+        "eta_prop": 0.7346303897885385,
+        "eta_motor": 0.6904879013583657,
+        "eta_chain": 0.48189072631320773,
+        "objective_value": 106.09366973083146
+      },
+      {
+        "V_ms": 12.5,
+        "alpha_deg": 1.9929004169036808,
+        "deflection_deg": -3.628654631212618,
+        "CL": 0.4650604722011789,
+        "CD_surfaces": 0.01849320644561299,
+        "CD_bodies": 0.003157986509649844,
+        "CD_total": 0.021651192955262834,
+        "L_over_D": 21.479669649710225,
+        "drag_n": 0.9613060258259316,
+        "P_elec_w": 25.01617094611908,
+        "rpm": 3046.349368346947,
+        "J": 0.807730704438232,
+        "J_peak_eta": 0.6680896130653267,
+        "re_75": 50731.22141215086,
+        "re_in_range": true,
+        "thrust_n": 0.9613060258259316,
+        "torque_nm": 0.05189001608008429,
+        "motor_voltage": 3.5520956014804943,
+        "motor_current_a": 6.690518799355471,
+        "throttle_frac": 0.24000645955949285,
+        "eta_prop": 0.7259045954775026,
+        "eta_motor": 0.6965426126989218,
+        "eta_chain": 0.48034230932885097,
+        "objective_value": 101.42713668705791
+      },
+      {
+        "V_ms": 13.0,
+        "alpha_deg": 1.5697720413576552,
+        "deflection_deg": -3.4506281851383913,
+        "CL": 0.4299745490025616,
+        "CD_surfaces": 0.017132517547472727,
+        "CD_bodies": 0.003139960980414311,
+        "CD_total": 0.020272478527887036,
+        "L_over_D": 21.209767143720686,
+        "drag_n": 0.9735390175242732,
+        "P_elec_w": 26.41138501692465,
+        "rpm": 3133.832721444322,
+        "J": 0.8165895711660124,
+        "J_peak_eta": 0.6635780100502513,
+        "re_75": 52248.57920132616,
+        "re_in_range": true,
+        "thrust_n": 0.9735390175242732,
+        "torque_nm": 0.053764702887413175,
+        "motor_voltage": 3.65371645387051,
+        "motor_current_a": 6.867203868406055,
+        "throttle_frac": 0.24687273336962903,
+        "eta_prop": 0.7172904276950293,
+        "eta_motor": 0.7032130108255624,
+        "eta_chain": 0.47918756323098805,
+        "objective_value": 96.61564725240972
+      },
+      {
+        "V_ms": 13.5,
+        "alpha_deg": 1.1873267142321946,
+        "deflection_deg": -3.239737059356875,
+        "CL": 0.39871439660594143,
+        "CD_surfaces": 0.016013226943797174,
+        "CD_bodies": 0.0031227488055147372,
+        "CD_total": 0.01913597574931191,
+        "L_over_D": 20.835853986712873,
+        "drag_n": 0.9910098179889386,
+        "P_elec_w": 27.965638406450847,
+        "rpm": 3223.8367894974026,
+        "J": 0.8243222248775605,
+        "J_peak_eta": 0.6635780100502513,
+        "re_75": 53803.97376743799,
+        "re_in_range": true,
+        "thrust_n": 0.9910098179889386,
+        "torque_nm": 0.055896768872360794,
+        "motor_voltage": 3.7587445360559477,
+        "motor_current_a": 7.068146353464458,
+        "throttle_frac": 0.25396922540918565,
+        "eta_prop": 0.7089626507478071,
+        "eta_motor": 0.7102970743489929,
+        "eta_chain": 0.47839539181643054,
+        "objective_value": 91.76623335522869
+      },
+      {
+        "V_ms": 14.0,
+        "alpha_deg": 0.8445521697422197,
+        "deflection_deg": -3.0076844591543517,
+        "CL": 0.3707433611298863,
+        "CD_surfaces": 0.015072925300561998,
+        "CD_bodies": 0.003106285133424845,
+        "CD_total": 0.018179210433986844,
+        "L_over_D": 20.393809867383737,
+        "drag_n": 1.0124903586576606,
+        "P_elec_w": 29.664684211782358,
+        "rpm": 3315.694694713343,
+        "J": 0.8311698650075154,
+        "J_peak_eta": 0.6635780100502513,
+        "re_75": 55387.343001326495,
+        "re_in_range": true,
+        "thrust_n": 1.0124903586576606,
+        "torque_nm": 0.05823949358628281,
+        "motor_voltage": 3.866328790247751,
+        "motor_current_a": 7.288942955983678,
+        "throttle_frac": 0.2612384317734967,
+        "eta_prop": 0.7009679957152792,
+        "eta_motor": 0.7175586556234947,
+        "eta_chain": 0.47783637000852375,
+        "objective_value": 86.99303448263606
+      },
+      {
+        "V_ms": 14.5,
+        "alpha_deg": 0.5478474712726288,
+        "deflection_deg": -2.7778196341662125,
+        "CL": 0.3456156898046591,
+        "CD_surfaces": 0.014271432904738672,
+        "CD_bodies": 0.0030905123713695446,
+        "CD_total": 0.017361945276108216,
+        "L_over_D": 19.906507266801555,
+        "drag_n": 1.0372756802722216,
+        "P_elec_w": 31.501978954116,
+        "rpm": 3409.013627095365,
+        "J": 0.8372893220416481,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 56992.74897700805,
+        "re_in_range": true,
+        "thrust_n": 1.0372756802722216,
+        "torque_nm": 0.060764769902507405,
+        "motor_voltage": 3.975966535036944,
+        "motor_current_a": 7.526944641683742,
+        "throttle_frac": 0.2686463875024962,
+        "eta_prop": 0.6933507424451976,
+        "eta_motor": 0.724849378104191,
+        "eta_chain": 0.47744611174600654,
+        "objective_value": 82.36049311197567
+      },
+      {
+        "V_ms": 15.0,
+        "alpha_deg": 0.30266980443751296,
+        "deflection_deg": -2.5834559769877856,
+        "CL": 0.3229586612509702,
+        "CD_surfaces": 0.013592050660173329,
+        "CD_bodies": 0.003075379154927094,
+        "CD_total": 0.016667429815100422,
+        "L_over_D": 19.37663244025632,
+        "drag_n": 1.0656410978890076,
+        "P_elec_w": 33.48956435715053,
+        "rpm": 3503.8228771745344,
+        "J": 0.8427240785335872,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 58620.547189785735,
+        "re_in_range": true,
+        "thrust_n": 1.0656410978890076,
+        "torque_nm": 0.06348266036546624,
+        "motor_voltage": 4.087714024769791,
+        "motor_current_a": 7.783099783034539,
+        "throttle_frac": 0.2761968935655264,
+        "eta_prop": 0.6862404916800307,
+        "eta_motor": 0.7321377106177072,
+        "eta_chain": 0.47730141538619797,
+        "objective_value": 77.8743196873261
+      },
+      {
+        "V_ms": 15.5,
+        "alpha_deg": 0.1028962404329409,
+        "deflection_deg": -2.437560917747567,
+        "CL": 0.3024586837938497,
+        "CD_surfaces": 0.013019279989516668,
+        "CD_bodies": 0.003060839492816346,
+        "CD_total": 0.016080119482333014,
+        "L_over_D": 18.809479875205934,
+        "drag_n": 1.0977728254062953,
+        "P_elec_w": 35.63805988565253,
+        "rpm": 3600.114974236024,
+        "J": 0.8475232386181478,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 60270.55792406797,
+        "re_in_range": true,
+        "thrust_n": 1.0977728254062953,
+        "torque_nm": 0.06639906485906087,
+        "motor_voltage": 4.201576859925981,
+        "motor_current_a": 8.057964430993735,
+        "throttle_frac": 0.2838903283733771,
+        "eta_prop": 0.6797312277231866,
+        "eta_motor": 0.7393827141674132,
+        "eta_chain": 0.4774524440554019,
+        "objective_value": 73.54406531822711
+      },
+      {
+        "V_ms": 16.0,
+        "alpha_deg": -0.06487750255029061,
+        "deflection_deg": -2.3308007434593128,
+        "CL": 0.28385038586498385,
+        "CD_surfaces": 0.012532425358278861,
+        "CD_bodies": 0.0030468520524789045,
+        "CD_total": 0.015579277410757765,
+        "L_over_D": 18.2197401317843,
+        "drag_n": 1.133305728713219,
+        "P_elec_w": 37.946328923755395,
+        "rpm": 3697.676423440722,
+        "J": 0.8517798580877072,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 61939.559353098935,
+        "re_in_range": true,
+        "thrust_n": 1.133305728713219,
+        "torque_nm": 0.06949702511857002,
+        "motor_voltage": 4.317277867047713,
+        "motor_current_a": 8.349940306765346,
+        "throttle_frac": 0.29170796398971033,
+        "eta_prop": 0.6738191196034337,
+        "eta_motor": 0.746500949763003,
+        "eta_chain": 0.4778562821148119,
+        "objective_value": 69.3981627825839
+      },
+      {
+        "V_ms": 16.5,
+        "alpha_deg": -0.2134387930280103,
+        "deflection_deg": -2.2490698459797795,
+        "CL": 0.2669079845048043,
+        "CD_surfaces": 0.012113657493058901,
+        "CD_bodies": 0.003033379559665833,
+        "CD_total": 0.015147037052724733,
+        "L_over_D": 17.621134983411913,
+        "drag_n": 1.1718051014565445,
+        "P_elec_w": 40.41070672273531,
+        "rpm": 3796.2871762049567,
+        "J": 0.8555810836497254,
+        "J_peak_eta": 0.6590664070351759,
+        "re_75": 63624.247756737444,
+        "re_in_range": true,
+        "thrust_n": 1.1718051014565445,
+        "torque_nm": 0.07275620595676491,
+        "motor_voltage": 4.434524634052582,
+        "motor_current_a": 8.657110864105157,
+        "throttle_frac": 0.29963004284139066,
+        "eta_prop": 0.66846951905589,
+        "eta_motor": 0.753420908963443,
+        "eta_chain": 0.47845696702837204,
+        "objective_value": 65.45850585085685
+      }
+    ]
+  },
+  "constraints": {
+    "v_min_ms": 9.5,
+    "v_min_active": true,
+    "v_stall_max_ms": 8.0,
+    "v_stall_ms": 7.822689046085998,
+    "stall_ok": true,
+    "static_margin": 0.05718643924665681,
+    "static_margin_range": [
+      0.08,
+      0.15
+    ],
+    "sm_in_range": false,
+    "trim_deflection_deg": -3.3327398837712727,
+    "sm_sign_consistent": false
+  },
+  "diagnostics": {
+    "design_source": "parametric",
+    "wind_mode": "constraint",
+    "v_min_price": null,
+    "airworthiness_price": null,
+    "candidates_source": "legal",
+    "reported_point_violations": [],
+    "stall_detail": {
+      "v_stall_ms": 7.822689046085998,
+      "stations_y": [
+        0.2123703441451147,
+        0.4247406882902294,
+        0.6371110324365257,
+        0.849481376582822,
+        0.9024820238197362,
+        0.9554826710566503,
+        0.9774362579567412,
+        0.999389844856832
+      ],
+      "ratios_at_stall": [
+        0.999999999999536,
+        0.9839931514241711,
+        0.9686169699061759,
+        0.8681187818757954,
+        0.8237643446171999,
+        0.737544822437376,
+        0.6818853396342148,
+        0.5198083725094981
+      ],
+      "critical_y": 0.2123703441451147,
+      "clmax_ab": [
+        1.0867661240406215,
+        0.01877562808319164
+      ],
+      "cl_max_3d": 1.1761078324173673
+    },
+    "neutral_point_m": 0.51650357936303,
+    "sm_local_slopes": [
+      {
+        "alpha": 4.228889016931476,
+        "sm_local": 0.1979235719013032
+      },
+      {
+        "alpha": 5.228889016931476,
+        "sm_local": 0.0016168798155315445
+      },
+      {
+        "alpha": 6.228889016931476,
+        "sm_local": -0.015346741031520448
+      },
+      {
+        "alpha": 7.228889016931476,
+        "sm_local": 0.03748692894658174
+      }
+    ],
+    "J_vs_peak": {
+      "J_cruise": 0.715958666940765,
+      "J_peak_eta": 0.6816244221105529
+    },
+    "uncalibrated_construction": [
+      "wing",
+      "vtail"
+    ],
+    "sweep_dropped": {
+      "total": 1,
+      "trim_not_converged": [
+        8.0
+      ],
+      "propulsion": []
+    }
+  },
+  "notes": [
+    "Stall via wing-level CLmax knockdown; critical-section method arrives at M2/M3.",
+    "Smooth polars only; tripped-polar dual evaluation arrives at M2.",
+    "Propulsion chain is uncalibrated (no measurement path) \u2014 rankings over absolutes.",
+    "NOT PROVEN INFEASIBLE \u2014 trim did not converge at V = 8.0 m/s (the 2-D root-find ran out of progress from every start it was given). These points are excluded from the sweep because there is no operating point to report, not because none exists; read them as unknown rather than as a limit of the aeroplane.",
+    "STATIC MARGIN CHANGES SIGN INSIDE ITS OWN WINDOW: the reported 0.0572 is a least-squares slope over [-2.0, 0.0, 2.0] deg about trim, but the LOCAL dCm/dCL at alpha = 6.23 deg is -0.0153 \u2014 the aircraft is not positively stable there on this model. Cm(alpha) nonlinearity is the known dominant fidelity limit of this SM estimator (FINDINGS); treat the margin as an average, and do not fly the CG on the strength of it alone."
+  ]
+}

@@ -1,0 +1,49 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 173 iterations; closest miss solve.py:1133 opti.subject_to(aero_run[\"L\"] == weight_n)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 173.0,
+ "violations": [
+  {
+   "row": 98.0,
+   "by": 0.024041283679853365,
+   "value": -0.024041283679853365,
+   "what": "solve.py:1133 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 153.0,
+   "by": 0.01733714842854972,
+   "value": 0.9826628515714503,
+   "what": "equipment.py:371 opti.subject_to((xb - xa) / sep.min_m >= 1.0)"
+  },
+  {
+   "row": 138.0,
+   "by": 0.009615868951647455,
+   "value": 0.9903841310483525,
+   "what": "equipment.py:344 opti.subject_to((xi - x[f\"x_{prev.name}\"]) / (gap or 1.0) >= 1.0)"
+  },
+  {
+   "row": 110.0,
+   "by": 0.0059584289754692765,
+   "value": 0.9940415710245307,
+   "what": "aircraft.py:881 opti.subject_to(1.225 * V * c_wl_mean / 1.81e-5 / 60e3 >= 1.0)"
+  },
+  {
+   "row": 118.0,
+   "by": 0.003829028742808327,
+   "value": 0.9961709712571917,
+   "what": "aircraft.py:971 opti.subject_to(1.225 * V * t_c_mean / 1.81e-5 / 60e3 >= 1.0)"
+  }
+ ],
+ "convergence": {
+  "iterations_recorded": 179.0,
+  "inf_pr_final": 0.024041283679853365,
+  "inf_pr_min": 0.00610483778245241,
+  "inf_du_final": 3657.692969365969,
+  "inf_du_max": 5.131288363516007e+19,
+  "mu_final": 0.010963788027537901,
+  "inf_pr_progress_last_25": 0.20968351821948517,
+  "reading": "dual blow-up: the multipliers diverged while the primal side sat still. Stuck, not slow \u2014 more clock buys nothing (FINDINGS 14.5.7). Run tools/degeneracy.py"
+ },
+ "solve_minutes": 33.68,
+ "peak_rss_gb": 13.964408874511719
+}

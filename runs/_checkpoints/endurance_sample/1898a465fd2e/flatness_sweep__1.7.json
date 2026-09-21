@@ -1,0 +1,39 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 222 iterations; closest miss solve.py:1000 opti = asb.Opti()",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 222.0,
+ "violations": [
+  {
+   "row": 83.0,
+   "by": 0.10498929794456302,
+   "value": 0.10498929794456302,
+   "what": "solve.py:1000 opti = asb.Opti()"
+  },
+  {
+   "row": 85.0,
+   "by": 0.049071384634057136,
+   "value": 0.049071384634057136,
+   "what": "solve.py:1002 # solve fails the artifact can name the constraint it could not satisfy"
+  },
+  {
+   "row": 89.0,
+   "by": 0.0399620481795393,
+   "value": 1.0399620481795393,
+   "what": "solve.py:1037 x_cg = totals[\"x_cg_m\"]"
+  },
+  {
+   "row": 84.0,
+   "by": 0.021455863043853596,
+   "value": -0.021455863043853596,
+   "what": "solve.py:1001 # Record which source line each constraint row comes from, so that if this"
+  },
+  {
+   "row": 143.0,
+   "by": 0.018542651011120515,
+   "value": 0.9814573489888795,
+   "what": "aircraft.py:1040 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)"
+  }
+ ],
+ "solve_minutes": 22.35,
+ "peak_rss_gb": 12.066669464111328
+}

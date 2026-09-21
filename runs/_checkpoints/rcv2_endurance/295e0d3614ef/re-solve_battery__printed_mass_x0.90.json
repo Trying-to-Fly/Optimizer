@@ -1,0 +1,50 @@
+{
+ "failed": "Maximum_WallTime_Exceeded after 102 iterations; closest miss aircraft.py:1150 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)",
+ "return_status": "Maximum_WallTime_Exceeded",
+ "iter_count": 102.0,
+ "violations": [
+  {
+   "row": 142.0,
+   "by": 0.04675672870226888,
+   "value": 0.9532432712977311,
+   "what": "aircraft.py:1150 opti.subject_to(usable_nose / motor[\"length\"] >= 1.0)"
+  },
+  {
+   "row": 82.0,
+   "by": 0.006246921322187404,
+   "value": -0.006246921322187404,
+   "what": "solve.py:2075 opti.subject_to(aero_run[\"L\"] == weight_n)"
+  },
+  {
+   "row": 83.0,
+   "by": 0.0012275136671764213,
+   "value": 0.0012275136671764213,
+   "what": "solve.py:2076 opti.subject_to(aero_run[\"Cm\"] == 0)  # pitch trim"
+  },
+  {
+   "row": 84.0,
+   "by": 0.00042141080566759914,
+   "value": 0.00042141080566759914,
+   "what": "solve.py:2077 opti.subject_to(pr[\"thrust_n\"] == drag)"
+  },
+  {
+   "row": 99.0,
+   "by": 1.1129171393481352e-08,
+   "value": -1.1129171393481352e-08,
+   "what": "aircraft.py:1075 opti.subject_to("
+  }
+ ],
+ "convergence": {
+  "iterations_recorded": 103.0,
+  "inf_pr_final": 0.11148697807750896,
+  "inf_pr_min": 4.48370762740069e-09,
+  "inf_du_final": 0.3238704419929624,
+  "inf_du_max": 26527786811.748528,
+  "mu_final": 0.01880382527873027,
+  "inf_pr_progress_last_25": -0.003471104877261766,
+  "verdict": "starved_corner",
+  "reading": "no dual blow-up, but the primal side stopped moving \u2014 a plateau short of feasible, which is what a starved corner looks like (FINDINGS 14.5.8)"
+ },
+ "solve_minutes": 16.59,
+ "peak_rss_gb": 14.903392791748047
+}

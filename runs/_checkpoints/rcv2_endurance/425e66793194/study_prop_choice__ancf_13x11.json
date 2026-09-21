@@ -1,0 +1,385 @@
+{
+ "dv": {
+  "span": 2.0000000199958348,
+  "c_root": 0.2750000027486785,
+  "taper": 0.5009692503548862,
+  "fullness": 2.183194872900198,
+  "le_shear": 1.00000000994691,
+  "eta_break": 0.7345290197124391,
+  "washout_tip": -5.851786939902637e-11,
+  "tail_arm": 1.0862108316967052,
+  "t_span": 0.47176937324106755,
+  "t_c_root": 0.09184438023844056,
+  "t_taper": 0.9999996348699299,
+  "t_sweep": 8.140181205266316e-06,
+  "cs_frac": 0.40000000377564127,
+  "spar_od_center": 0.016870699978420594,
+  "spar_wall_center": 0.0005999999940160361,
+  "spar_od_outer": 0.004999999951395702,
+  "spar_wall_outer": 0.0004999999951696502,
+  "ballast_kg": 1.302928931776117e-12,
+  "x_battery": 0.320499198136736,
+  "pod_nose": 0.07407452478031674,
+  "pod_bay": 0.345299930011518,
+  "pod_xs": 0.8744087101026364,
+  "pod_bay_end": 0.5937991381466716,
+  "pod_wh": 1.0017441033665189,
+  "dihedral_tip": 4.264051531108295,
+  "d_exp": 4.140329218886055e-10,
+  "pod_tail": 0.12175385950257171,
+  "t_dihedral": 52.2786831920657,
+  "wl_len": 0.0777546606657518,
+  "wl_cant": 87.95987324704157,
+  "wl_cr": 0.6666666638670427,
+  "wl_taper": 1.0000000084958047,
+  "wl_toe": -3.0000000251179486,
+  "x_esc": 0.4254991884399417,
+  "x_flight_controller": 0.5137991681416928,
+  "x_gps_compass": 0.5219991884598154,
+  "x_airspeed_board": 0.5797991481450113,
+  "x_buzzer": 0.5409991860399569,
+  "x_companion_pi": 0.4279991881383861,
+  "x_bec_pi": 0.47364917814003876,
+  "x_receiver_elrs": 0.5547991581433517,
+  "x_telemetry_sik": 0.42199918855019836
+ },
+ "active_bounds": [
+  {
+   "variable": "ballast_kg",
+   "value": 1.302928931776117e-12,
+   "bound": 0.0,
+   "at": "lower",
+   "box": [
+    0.0,
+    0.2
+   ]
+  },
+  {
+   "variable": "c_root",
+   "value": 0.2750000027486785,
+   "bound": 0.275,
+   "at": "upper",
+   "box": [
+    0.16,
+    0.275
+   ]
+  },
+  {
+   "variable": "cs_frac",
+   "value": 0.40000000377564127,
+   "bound": 0.4,
+   "at": "upper",
+   "box": [
+    0.2,
+    0.4
+   ]
+  },
+  {
+   "variable": "d_exp",
+   "value": 4.140329218886055e-10,
+   "bound": 0.0,
+   "at": "lower",
+   "box": [
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "variable": "le_shear",
+   "value": 1.00000000994691,
+   "bound": 1.0,
+   "at": "upper",
+   "box": [
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "variable": "span",
+   "value": 2.0000000199958348,
+   "bound": 2.0,
+   "at": "upper",
+   "box": [
+    1.5,
+    2.0
+   ]
+  },
+  {
+   "variable": "spar_od_outer",
+   "value": 0.004999999951395702,
+   "bound": 0.005,
+   "at": "lower",
+   "box": [
+    0.005,
+    0.02
+   ]
+  },
+  {
+   "variable": "spar_wall_center",
+   "value": 0.0005999999940160361,
+   "bound": 0.0006,
+   "at": "lower",
+   "box": [
+    0.0006,
+    0.002
+   ]
+  },
+  {
+   "variable": "spar_wall_outer",
+   "value": 0.0004999999951696502,
+   "bound": 0.0005,
+   "at": "lower",
+   "box": [
+    0.0005,
+    0.0018
+   ]
+  },
+  {
+   "variable": "t_sweep",
+   "value": 8.140181205266316e-06,
+   "bound": 0.0,
+   "at": "lower",
+   "box": [
+    0.0,
+    25.0
+   ]
+  },
+  {
+   "variable": "t_taper",
+   "value": 0.9999996348699299,
+   "bound": 1.0,
+   "at": "upper",
+   "box": [
+    0.4,
+    1.0
+   ]
+  },
+  {
+   "variable": "washout_tip",
+   "value": -5.851786939902637e-11,
+   "bound": 0.0,
+   "at": "upper",
+   "box": [
+    -4.0,
+    0.0
+   ]
+  },
+  {
+   "variable": "wl_taper",
+   "value": 1.0000000084958047,
+   "bound": 1.0,
+   "at": "upper",
+   "box": [
+    0.5,
+    1.0
+   ]
+  },
+  {
+   "variable": "wl_toe",
+   "value": -3.0000000251179486,
+   "bound": -3.0,
+   "at": "lower",
+   "box": [
+    -3.0,
+    3.0
+   ]
+  }
+ ],
+ "dv_bounds": {
+  "span": [
+   1.5,
+   2.0
+  ],
+  "c_root": [
+   0.16,
+   0.275
+  ],
+  "taper": [
+   0.35,
+   1.0
+  ],
+  "fullness": [
+   1.0,
+   4.0
+  ],
+  "le_shear": [
+   0.0,
+   1.0
+  ],
+  "eta_break": [
+   0.25,
+   0.85
+  ],
+  "washout_tip": [
+   -4.0,
+   0.0
+  ],
+  "tail_arm": [
+   0.4,
+   1.2
+  ],
+  "t_span": [
+   0.25,
+   1.2
+  ],
+  "t_c_root": [
+   0.06,
+   0.22
+  ],
+  "t_taper": [
+   0.4,
+   1.0
+  ],
+  "t_sweep": [
+   0.0,
+   25.0
+  ],
+  "cs_frac": [
+   0.2,
+   0.4
+  ],
+  "spar_od_center": [
+   0.006,
+   0.02
+  ],
+  "spar_wall_center": [
+   0.0006,
+   0.002
+  ],
+  "spar_od_outer": [
+   0.005,
+   0.02
+  ],
+  "spar_wall_outer": [
+   0.0005,
+   0.0018
+  ],
+  "ballast_kg": [
+   0.0,
+   0.2
+  ],
+  "x_battery": [
+   -0.1,
+   0.4
+  ],
+  "pod_nose": [
+   0.03,
+   0.25
+  ],
+  "pod_bay": [
+   0.2,
+   0.55
+  ],
+  "pod_xs": [
+   0.75,
+   1.3
+  ],
+  "pod_bay_end": [
+   0.4,
+   0.62
+  ],
+  "pod_wh": [
+   0.65,
+   1.55
+  ],
+  "dihedral_tip": [
+   0.0,
+   20.0
+  ],
+  "d_exp": [
+   0.0,
+   2.0
+  ],
+  "pod_tail": [
+   0.1,
+   0.45
+  ],
+  "t_dihedral": [
+   20.0,
+   55.0
+  ],
+  "wl_len": [
+   0.05,
+   0.3
+  ],
+  "wl_cant": [
+   55.0,
+   88.0
+  ],
+  "wl_cr": [
+   0.4,
+   0.95
+  ],
+  "wl_taper": [
+   0.5,
+   1.0
+  ],
+  "wl_toe": [
+   -3.0,
+   3.0
+  ],
+  "x_esc": [
+   -0.1,
+   1.6
+  ],
+  "x_flight_controller": [
+   -0.1,
+   1.6
+  ],
+  "x_gps_compass": [
+   -0.1,
+   1.6
+  ],
+  "x_airspeed_board": [
+   -0.1,
+   1.6
+  ],
+  "x_buzzer": [
+   -0.1,
+   1.6
+  ],
+  "x_companion_pi": [
+   -0.1,
+   1.6
+  ],
+  "x_bec_pi": [
+   -0.1,
+   1.6
+  ],
+  "x_receiver_elrs": [
+   -0.1,
+   1.6
+  ],
+  "x_telemetry_sik": [
+   -0.1,
+   1.6
+  ]
+ },
+ "V_ms": 9.652531410574987,
+ "alpha_deg": 5.85858802601816,
+ "deflection_deg": -4.002515261048617,
+ "rpm": 2543.8919584584482,
+ "objective_value": 118.998048562186,
+ "auw_kg": 2.1954332570237005,
+ "x_cg_m": 0.4942595250233031,
+ "static_margin": 0.07999999001532933,
+ "P_elec_w": 20.879383185977517,
+ "motor_voltage": 2.992268813777495,
+ "motor_current_a": 6.628887730724317,
+ "throttle_frac": 0.20218032525523613,
+ "current_cap_a": 40.0,
+ "placard_speed_ms": null,
+ "drag_n": 1.0499947866375758,
+ "J": 0.6894721725884078,
+ "clmax_ab_used": [
+  1.0867661240406215,
+  0.01877562808319164
+ ],
+ "suspended_minutes": 0.0,
+ "return_status": "Solve_Succeeded",
+ "iter_count": 63.0,
+ "converged": true,
+ "warm_started": false,
+ "solve_minutes": 15.71,
+ "peak_rss_gb": 11.028766632080078
+}
